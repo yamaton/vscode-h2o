@@ -1,28 +1,21 @@
 import { Memento } from "vscode";
 import { spawn, spawnSync } from 'child_process';
-
-interface Option {
-  names: string[],
-  argument: string,
-  description: string,
-}
-
-interface Command {
-  name: string,
-  description: string,
-  options: Option[],
-  subcommands?: Command[],
-}
-
+import { Command } from './command';
 
 export function runH2o(name: string): Command | undefined {
+  console.log('spawning h2o: ', name);
   const process = spawnSync('h2o', ['--command', name, '--json']);
   const out = process.stdout;
+  console.log('got output: ', out);
   if (out) {
     const command = JSON.parse(out);
     if (command) {
       return command;
+    } else {
+      console.warn('Failed to parsing H2O result as JSON: ', name);
     }
+  } else {
+    console.warn('Failed to get H2O result: ', name);
   }
 }
 

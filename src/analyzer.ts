@@ -8,4 +8,4 @@ import { SyntaxNode } from 'web-tree-sitter';
 
 // }
 
-function ()
+// function ()

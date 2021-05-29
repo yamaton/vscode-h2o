@@ -4,7 +4,6 @@ import * as vscode from 'vscode';
 import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher, runH2o } from './cacheFetcher';
-import { Analyzer } from './analyzer';
 
 
 // this method is called when your extension is activated
@@ -70,7 +69,8 @@ export async function activate(context: vscode.ExtensionContext) {
       if (cmdName) {
         const command = fetcher.fetch(cmdName);
         if (command) {
-          return new vscode.Hover(new vscode.MarkdownString(command.description));
+          const subname = getSubcommand(tree.rootNode, position, fetcher);
+          return new vscode.Hover(new vscode.MarkdownString(subname));
         }
       }
     }
@@ -79,11 +79,13 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(compprovider);
   context.subscriptions.push(hoverprovider);
 
+  console.log("runH2o('cp') = ", runH2o('cp')?.description);
 }
 
 
 // Borrow from bash-language-server
 async function initializeParser(): Promise<Parser> {
+  await Parser.init();
   const parser = new Parser;
   const path = `${__dirname}/../tree-sitter-bash.wasm`;
   const lang = await Parser.Language.load(path);
@@ -109,14 +111,30 @@ function getCommandName(root: SyntaxNode, position: vscode.Position): string | u
 
 // Get subcommand name if applicable
 // [FIXME] this catches option's argument; use database instead
-function getSubcommandCandidate(root: SyntaxNode, position: vscode.Position): string | undefined {
+function* _getSubcommandCandidates(root: SyntaxNode, position: vscode.Position) {
   let commandNode = _getCommandNode(root, position);
   if (commandNode) {
     let n = commandNode?.firstNamedChild;
     while (n?.nextSibling) {
       n = n?.nextSibling;
       if (!n.text.startsWith('-')) {
-        return n.text;
+        yield n.text;
+      }
+    }
+  }
+}
+
+function getSubcommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher) {
+  let name = getCommandName(root, position);
+  if (name) {
+    let command = fetcher.fetch(name);
+    let subnames = command?.subcommands?.map((x) => x.name);
+    if (subnames) {
+      let gen = _getSubcommandCandidates(root, position);
+      for (let candidate of gen) {
+        if (candidate && subnames.includes(candidate)) {
+          return candidate;
+        }
       }
     }
   }
@@ -146,7 +164,6 @@ function findNode(n: SyntaxNode, position: vscode.Position): SyntaxNode {
   }
   return n;
 }
-
 
 
 export function deactivate() { }
