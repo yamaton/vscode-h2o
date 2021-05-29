@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher, runH2o } from './cacheFetcher';
-
+import { Option, Command } from './command';
 
 // this method is called when your extension is activated
 // your extension is activated the very first time the command is executed
@@ -65,23 +65,69 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const content = document.getText();
       const tree = parser.parse(content);
-      const cmdName = getCommandName(tree.rootNode, position);
-      if (cmdName) {
-        const command = fetcher.fetch(cmdName);
-        if (command) {
-          const subname = getSubcommand(tree.rootNode, position, fetcher);
-          return new vscode.Hover(new vscode.MarkdownString(subname));
-        }
+      const thisName = findNode(tree.rootNode, position).text!;
+      const cmd = getMatchingCommand(tree.rootNode, position, fetcher);
+      const subcmd = getMatchingSubcommand(tree.rootNode, position, fetcher);
+      const opt = getMatchingOption(tree.rootNode, position, fetcher);
+      if (cmd) {
+        return new vscode.Hover(new vscode.MarkdownString(cmd.description!));
+      } else if (subcmd) {
+        const cmdName = getCommandName(tree.rootNode, position)!;
+        const msg = `${cmdName} **${subcmd.name}**: ${subcmd.description}`;
+        return new vscode.Hover(new vscode.MarkdownString(msg));
+      } else if (opt) {
+        const msg = `${thisName}: ${opt.description}`;
+        return new vscode.Hover(new vscode.MarkdownString(msg));
       }
     }
   });
 
   context.subscriptions.push(compprovider);
   context.subscriptions.push(hoverprovider);
-
-  console.log("runH2o('cp') = ", runH2o('cp')?.description);
 }
 
+
+function getMatchingCommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): undefined | Command {
+  const cmdName = getCommandName(root, position);
+  const thisName = findNode(root, position)?.text;
+  console.log('cmdName: ', cmdName);
+  console.log('thisName: ', thisName);
+  if (cmdName === thisName) {
+    const command = fetcher.fetch(cmdName)!;
+    return command;
+  }
+}
+
+function getMatchingSubcommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): undefined | Command {
+  const cmdName = getCommandName(root, position)!;
+  const subName = getSubcommand(root, position, fetcher)!;
+  const thisName = findNode(root, position)?.text;
+  console.log('cmdName: ', cmdName);
+  console.log('subName: ', subName);
+  console.log('thisName: ', thisName);
+  if (subName === thisName) {
+    const command = fetcher.fetch(cmdName)!;
+    const subcmd = command?.subcommands?.find((x) => x.name === subName)!;
+    return subcmd;
+  }
+}
+
+function getMatchingOption(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): undefined | Option {
+  const thisName = findNode(root, position).text!;
+  if (thisName.startsWith('-')) {
+    const cmdName = getCommandName(root, position)!;
+    const command = fetcher.fetch(cmdName)!;
+    const subName = getSubcommand(root, position, fetcher);
+    let options: Option[];
+    if (subName) {
+      options = command?.subcommands?.find((x) => x.name === subName)?.options!;
+    } else {
+      options = command?.options!;
+    }
+    const theOption = options.find((x) => x.names.includes(thisName))!;
+    return theOption;
+  }
+}
 
 // Borrow from bash-language-server
 async function initializeParser(): Promise<Parser> {
@@ -105,14 +151,18 @@ function range(n: SyntaxNode): vscode.Range {
 // Get command name if applicable
 function getCommandName(root: SyntaxNode, position: vscode.Position): string | undefined {
   // if you are at a command, a named node, the currentNode becomes one-layer deeper than other nameless nodes.
-  let commandNode = _getCommandNode(root, position);
-  return commandNode?.firstNamedChild?.text;
+  const commandNode = _getCommandNode(root, position);
+  let name = commandNode?.firstNamedChild?.text!;
+  if (name === 'sudo') {
+    name = commandNode?.firstNamedChild?.nextSibling?.text!;
+  }
+  return name;
 }
 
 // Get subcommand name if applicable
 // [FIXME] this catches option's argument; use database instead
 function* _getSubcommandCandidates(root: SyntaxNode, position: vscode.Position) {
-  let commandNode = _getCommandNode(root, position);
+  let commandNode = _getCommandNode(root, position)!;
   if (commandNode) {
     let n = commandNode?.firstNamedChild;
     while (n?.nextSibling) {
@@ -129,6 +179,7 @@ function getSubcommand(root: SyntaxNode, position: vscode.Position, fetcher: Cac
   if (name) {
     let command = fetcher.fetch(name);
     let subnames = command?.subcommands?.map((x) => x.name);
+    console.log(name, ' subnames: ', subnames);
     if (subnames) {
       let gen = _getSubcommandCandidates(root, position);
       for (let candidate of gen) {
@@ -167,4 +218,3 @@ function findNode(n: SyntaxNode, position: vscode.Position): SyntaxNode {
 
 
 export function deactivate() { }
-
