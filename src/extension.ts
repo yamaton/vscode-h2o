@@ -1,13 +1,9 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher, runH2o } from './cacheFetcher';
 import { Option, Command } from './command';
 
-// this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
 export async function activate(context: vscode.ExtensionContext) {
 
   const parser = await initializeParser();
@@ -28,6 +24,12 @@ export async function activate(context: vscode.ExtensionContext) {
         const snippetCompletion = new vscode.CompletionItem('--option-with-arg');
         snippetCompletion.insertText = new vscode.SnippetString('--option-with-arg ${1:<arg>}');
         snippetCompletion.documentation = new vscode.MarkdownString('An option with argument.');
+
+        const tree = parser.parse(document.getText());
+        const compSubcommands = getCompSubcommands(tree.rootNode, position, fetcher);
+        const cmdNodeEnd = _getCommandNode(tree.rootNode, position)?.endPosition;
+        console.log('position: ', position);
+        console.log('cmdNodeEnd: ', cmdNodeEnd);
 
         //   const result: vscode.CompletionItem[] = [];
 
@@ -50,14 +52,17 @@ export async function activate(context: vscode.ExtensionContext) {
         //   return result;
         // }
 
-        return [
+        const res = [
           simpleCompletion,
           simpleOldTypeCompletion,
           snippetCompletion
         ];
+        const items = getCompSubcommands(tree.rootNode, position, fetcher);
+        res.push(...items);
+        return res;
       }
     },
-    // '-',  // triggerCharacter
+    ' ',  // triggerCharacter
   );
 
   const hoverprovider = vscode.languages.registerHoverProvider('shellscript', {
@@ -66,6 +71,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const content = document.getText();
       const tree = parser.parse(content);
       const thisName = findNode(tree.rootNode, position).text!;
+      console.log("findNode(tree.rootNode, position): ", findNode(tree.rootNode, position));
       const cmd = getMatchingCommand(tree.rootNode, position, fetcher);
       const subcmd = getMatchingSubcommand(tree.rootNode, position, fetcher);
       const opt = getMatchingOption(tree.rootNode, position, fetcher);
@@ -179,7 +185,6 @@ function getSubcommand(root: SyntaxNode, position: vscode.Position, fetcher: Cac
   if (name) {
     let command = fetcher.fetch(name);
     let subnames = command?.subcommands?.map((x) => x.name);
-    console.log(name, ' subnames: ', subnames);
     if (subnames) {
       let gen = _getSubcommandCandidates(root, position);
       for (let candidate of gen) {
@@ -190,6 +195,7 @@ function getSubcommand(root: SyntaxNode, position: vscode.Position, fetcher: Cac
     }
   }
 }
+
 
 function _getCommandNode(root: SyntaxNode, position: vscode.Position): SyntaxNode | undefined {
   let currentNode = findNode(root, position);
@@ -214,6 +220,36 @@ function findNode(n: SyntaxNode, position: vscode.Position): SyntaxNode {
     }
   }
   return n;
+}
+
+
+//
+function _getSubcommands(name: string, fetcher: CachingFetcher): Command[] {
+  const subcommands = fetcher.fetch(name)?.subcommands;
+  if (subcommands) {
+    return subcommands;
+  }
+  return [];
+}
+
+// Get subcommand completions
+function getCompSubcommands(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): vscode.CompletionItem[] {
+  const cmd = getCommandName(root, position);
+  if (cmd) {
+    const subname = getSubcommand(root, position, fetcher);
+    if (subname === undefined) {
+      const subcommands = _getSubcommands(cmd, fetcher);
+      if (subcommands && subcommands.length) {
+        const compitems = subcommands.map((sub) => {
+          const item = new vscode.CompletionItem(sub.name);
+          item.documentation = new vscode.MarkdownString(sub.description);
+          return item;
+        });
+        return compitems;
+      }
+    }
+  }
+  return [];
 }
 
 
