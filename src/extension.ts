@@ -58,10 +58,10 @@ export async function activate(context: vscode.ExtensionContext) {
         return new vscode.Hover(new vscode.MarkdownString(cmd.description!));
       } else if (subcmd) {
         const cmdName = getContextCommandName(tree.rootNode, position)!;
-        const msg = `${cmdName} **${subcmd.name}**: ${subcmd.description}`;
+        const msg = `${cmdName} **${subcmd.name}**\n\n ${subcmd.description}`;
         return new vscode.Hover(new vscode.MarkdownString(msg));
       } else if (opt) {
-        const msg = `${thisName}: ${opt.description}`;
+        const msg = `${thisName}\n\n ${opt.description}`;
         return new vscode.Hover(new vscode.MarkdownString(msg));
       }
     }
