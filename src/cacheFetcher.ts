@@ -43,7 +43,10 @@ export class CachingFetcher {
       } else {
         console.warn('Failed to get command from H2O');
       }
+    } else {
+      console.log('Returning from memento: ', name);
     }
+
     return cached as Command;
   }
 
