@@ -246,7 +246,7 @@ function getCompletionsSubcommands(root: SyntaxNode, position: vscode.Position, 
     if (subcommands && subcommands.length) {
       const compitems = subcommands.map((sub) => {
         const item = new vscode.CompletionItem(sub.name);
-        item.documentation = new vscode.MarkdownString(sub.description);
+        item.detail = sub.description;
         return item;
       });
       return compitems;
@@ -270,7 +270,7 @@ function getCompletionsOptions(root: SyntaxNode, position: vscode.Position, fetc
     options.forEach(opt => {
       opt.names.forEach(name => {
         const item = new vscode.CompletionItem(name);
-        item.documentation = new vscode.MarkdownString(opt.description);
+        item.detail = opt.description;
         if (opt.argument) {
           const snippet = `${name} \$\{1:${opt.argument}\}`;
           item.insertText = new vscode.SnippetString(snippet);
