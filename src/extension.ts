@@ -267,6 +267,22 @@ function getContextCmdSubcmdPair(root: SyntaxNode, position: vscode.Position, fe
 }
 
 
+// Get command arguments as string[]
+function getContextCmdArgs(root: SyntaxNode, position: vscode.Position): string[] {
+  const p = walkbackIfNeeded(root, position);
+  let node = _getContextCommandNode(root, p)?.firstNamedChild;
+  if (node?.text === 'sudo') {
+    node = node.nextSibling;
+  }
+  const res: string[] = [];
+  while (node?.nextSibling) {
+    node = node.nextSibling;
+    res.push(node.text);
+  }
+  return res;
+}
+
+
 // Get command node inferred from the current position
 function _getContextCommandNode(root: SyntaxNode, position: vscode.Position): SyntaxNode | undefined {
   let currentNode = getCurrentNode(root, position);
@@ -300,6 +316,7 @@ function getCompletionsSubcommands(root: SyntaxNode, position: vscode.Position, 
 // Get option completion
 function getCompletionsOptions(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): vscode.CompletionItem[] {
   const [cmd, subcmd] = getContextCmdSubcmdPair(root, position, fetcher);
+  const args = getContextCmdArgs(root, position);
   const compitems: vscode.CompletionItem[] = [];
   if (cmd) {
     let options: Option[];
@@ -309,15 +326,18 @@ function getCompletionsOptions(root: SyntaxNode, position: vscode.Position, fetc
       options = cmd?.options;
     }
     options.forEach(opt => {
-      opt.names.forEach(name => {
-        const item = new vscode.CompletionItem(name);
-        item.detail = opt.description;
-        if (opt.argument) {
-          const snippet = `${name} \$\{1:${opt.argument}\}`;
-          item.insertText = new vscode.SnippetString(snippet);
-        }
-        compitems.push(item);
-      });
+      // suppress already-used options
+      if (opt.names.every(name => !args.includes(name))) {
+        opt.names.forEach(name => {
+          const item = new vscode.CompletionItem(name);
+          item.detail = opt.description;
+          if (opt.argument) {
+            const snippet = `${name} \$\{1:${opt.argument}\}`;
+            item.insertText = new vscode.SnippetString(snippet);
+          }
+          compitems.push(item);
+        });
+      }
     });
   }
   return compitems;
