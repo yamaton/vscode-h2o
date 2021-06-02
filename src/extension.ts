@@ -53,15 +53,15 @@ export async function activate(context: vscode.ExtensionContext) {
       console.log("findNode(tree.rootNode, position): ", getCurrentNode(tree.rootNode, position));
       const cmd = getMachingCommand(tree.rootNode, position, fetcher);
       const subcmd = getMatchingSubcommand(tree.rootNode, position, fetcher);
-      const opt = getMatchingOption(tree.rootNode, position, fetcher);
+      const opts = getMatchingOption(tree.rootNode, position, fetcher);
       if (cmd) {
         return new vscode.Hover(new vscode.MarkdownString(cmd.description!));
       } else if (subcmd) {
         const cmdName = getContextCommandName(tree.rootNode, position)!;
         const msg = `${cmdName} **${subcmd.name}**\n\n ${subcmd.description}`;
         return new vscode.Hover(new vscode.MarkdownString(msg));
-      } else if (opt) {
-        const msg = `${thisName}\n\n ${opt.description}`;
+      } else if (opts) {
+        const msg = optsToMessage(thisName, opts);
         return new vscode.Hover(new vscode.MarkdownString(msg));
       }
     }
@@ -71,6 +71,12 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(hoverprovider);
 }
 
+function optsToMessage(name: string, opts: Option[]): string {
+  const shorts = unstackOption(name);
+  const messages = opts.map((opt, i) => `${shorts[i]}\n\n ${opt.description}`);
+  const joined = messages.join("\n\n");
+  return joined;
+}
 
 // --------------- Helper ----------------------
 
@@ -156,7 +162,7 @@ function getMatchingSubcommand(root: SyntaxNode, position: vscode.Position, fetc
 
 
 // Returns current word as an option if the tree-sitter says so
-function getMatchingOption(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): undefined | Option {
+function getMatchingOption(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Option[] {
   const thisName = getCurrentNode(root, position).text!;
   if (thisName.startsWith('-')) {
     const [cmd, subcmd] = getContextCmdSubcmdPair(root, position, fetcher);
@@ -167,10 +173,36 @@ function getMatchingOption(root: SyntaxNode, position: vscode.Position, fetcher:
       } else {
         options = cmd?.options;
       }
-      const theOption = options.find((x) => x.names.includes(thisName))!;
-      return theOption;
+
+      if (isNotOldStyle(thisName) || options.some(opt => {
+        opt.names.some(isOldStyle);
+      })) {
+        const theOption = options.find((x) => x.names.includes(thisName))!;
+        return [theOption];
+      } else {
+        // deal with a stacked option like `tar -xvf`
+        const shortOptionNames = unstackOption(thisName);
+        const shortOptions = shortOptionNames.map(short => options.find(opt => opt.names.includes(short))!).filter(opt => opt);
+        if (shortOptionNames.length > 0 && shortOptionNames.length === shortOptions.length) {
+          return shortOptions;
+        }
+      }
     }
   }
+  return [];
+}
+
+
+function isNotOldStyle(name: string): boolean {
+  return name.startsWith('--') || name.length === 2;
+}
+
+function isOldStyle(name: string): boolean {
+  return !isNotOldStyle(name);
+}
+
+function unstackOption(name: string): string[] {
+  return name.substring(1).split('').map(c => c.padStart(2, '-'));
 }
 
 
