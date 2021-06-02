@@ -14,7 +14,7 @@ export async function activate(context: vscode.ExtensionContext) {
     {
       provideCompletionItems(document, position, token, context) {
 
-        const simpleOldTypeCompletion = new vscode.CompletionItem('-oldtype');
+        const simpleOldTypeCompletion = new vscode.CompletionItem('hello world');
         simpleOldTypeCompletion.documentation = new vscode.MarkdownString('I hate this old style');
         simpleOldTypeCompletion.detail = 'show me a detail!';
 
@@ -35,9 +35,10 @@ export async function activate(context: vscode.ExtensionContext) {
         const res = [
           simpleCompletion,
           simpleOldTypeCompletion,
-          snippetCompletion
+          snippetCompletion,
+          ...compSubcommands,
+          ...compOptions
         ];
-        res.push(...compSubcommands, ...compOptions);
         return res;
       }
     },
