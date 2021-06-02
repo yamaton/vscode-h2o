@@ -73,10 +73,18 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 function optsToMessage(name: string, opts: Option[]): string {
-  const shorts = unstackOption(name);
-  const messages = opts.map((opt, i) => `${shorts[i]}\n\n ${opt.description}`);
-  const joined = messages.join("\n\n");
-  return joined;
+  if (opts.length === 1) {
+    const opt = opts[0];
+    const msg = `\`${name}\`\n\n ${opt.description}`;
+    return msg;
+
+  } else {
+    // deal with stacked option
+    const shorts = unstackOption(name);
+    const messages = opts.map((opt, i) => `\`${shorts[i]}\`\n\n ${opt.description}`);
+    const joined = messages.join("\n\n");
+    return joined;
+  }
 }
 
 // --------------- Helper ----------------------
