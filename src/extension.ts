@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
-import { CachingFetcher, runH2o } from './cacheFetcher';
+import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -48,10 +48,9 @@ export async function activate(context: vscode.ExtensionContext) {
   const hoverprovider = vscode.languages.registerHoverProvider('shellscript', {
     provideHover(document, position, token) {
 
-      const content = document.getText();
-      const tree = parser.parse(content);
+      const tree = parser.parse(document.getText());
       const thisName = getCurrentNode(tree.rootNode, position).text!;
-      console.log("findNode(tree.rootNode, position): ", getCurrentNode(tree.rootNode, position));
+
       const cmd = getMachingCommand(tree.rootNode, position, fetcher);
       const subcmd = getMatchingSubcommand(tree.rootNode, position, fetcher);
       const opts = getMatchingOption(tree.rootNode, position, fetcher);
@@ -183,13 +182,15 @@ function getMatchingOption(root: SyntaxNode, position: vscode.Position, fetcher:
         options = cmd?.options;
       }
 
+      // If current word is NOT old-style option, or command option database
+      // contains an old-option entry, just return the option with matching name.
       if (isNotOldStyle(thisName) || options.some(opt => {
         opt.names.some(isOldStyle);
       })) {
         const theOption = options.find((x) => x.names.includes(thisName))!;
         return [theOption];
       } else {
-        // deal with a stacked option like `tar -xvf`
+        // Otherwise, deal with a stacked option like `tar -xvf`
         const shortOptionNames = unstackOption(thisName);
         const shortOptions = shortOptionNames.map(short => options.find(opt => opt.names.includes(short))!).filter(opt => opt);
         if (shortOptionNames.length > 0 && shortOptionNames.length === shortOptions.length) {

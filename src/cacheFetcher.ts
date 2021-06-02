@@ -3,19 +3,19 @@ import { spawn, spawnSync } from 'child_process';
 import { Command } from './command';
 
 export function runH2o(name: string): Command | undefined {
-  console.log('spawning h2o: ', name);
+  console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
   const process = spawnSync('h2o', ['--command', name, '--json']);
   const out = process.stdout;
-  console.log('got output: ', out);
+  console.log(`[CacheFetcher.runH2o] got output for ${name}: ${out}`);
   if (out) {
     const command = JSON.parse(out);
     if (command) {
       return command;
     } else {
-      console.warn('Failed to parsing H2O result as JSON: ', name);
+      console.warn('[CacheFetcher.runH2o] Failed to parse H2O result as JSON: ', name);
     }
   } else {
-    console.warn('Failed to get H2O result: ', name);
+    console.warn('[CacheFetcher.runH2o] Failed to get H2O output: ', name);
   }
 }
 
@@ -35,16 +35,16 @@ export class CachingFetcher {
     const key = CachingFetcher.getKey(name);
     let cached = this.memento.get(key);
     if (cached === undefined) {
-      console.log('Fetching from H2O: ', name);
+      console.log('[CacheFetcher.fetch] Fetching from H2O: ', name);
       const command = runH2o(name);
       if (command) {
         this.memento.update(key, command);
         return command;
       } else {
-        console.warn('Failed to get command from H2O');
+        console.warn(`[CacheFetcher.fetch] Failed to fetch command ${name} from H2O`);
       }
     } else {
-      console.log('Returning from memento: ', name);
+      console.log('[CacheFetcher.fetch] Fetching from cache: ', name);
     }
 
     return cached as Command;
@@ -53,7 +53,7 @@ export class CachingFetcher {
   unset(name: string) {
     const key = CachingFetcher.getKey(name);
     this.memento.update(key, undefined).then(() => {
-      console.log('Unset the key for ... ', name);
+      console.log('[CacheFetcher.unset] Unset the key for ... ', name);
     });
   }
 }
