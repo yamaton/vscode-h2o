@@ -63,7 +63,10 @@ export async function activate(context: vscode.ExtensionContext) {
       const subcmd = getMatchingSubcommand(tree.rootNode, position, fetcher);
       const opts = getMatchingOption(tree.rootNode, position, fetcher);
       if (cmd) {
-        return new vscode.Hover(new vscode.MarkdownString(cmd.description!));
+        const clearCacheCommandUri = vscode.Uri.parse(`command:extension.h2o.clearCache`);
+        const msg = new vscode.MarkdownString(cmd.description! + `\n\n[Clear cache](${clearCacheCommandUri})`);
+        msg.isTrusted = true;
+        return new vscode.Hover(msg);
       } else if (subcmd) {
         const cmdName = getContextCommandName(tree.rootNode, position)!;
         const msg = `${cmdName} **${subcmd.name}**\n\n ${subcmd.description}`;
@@ -102,6 +105,14 @@ export async function activate(context: vscode.ExtensionContext) {
     delete trees[document.uri.toString()];
   }
 
+  const clearCache = vscode.commands.registerCommand('extension.h2o.clearCache', (name: string) => {
+    const msg = `[Command] Clearing cache of ${name}`;
+    fetcher.unset(name);
+    console.log(msg);
+    vscode.window.showInformationMessage(msg);
+  });
+
+  context.subscriptions.push(clearCache);
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(edit));
   context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(close));
   context.subscriptions.push(compprovider);
@@ -127,6 +138,9 @@ function optsToMessage(name: string, opts: Option[]): string {
     return joined;
   }
 }
+
+
+
 
 // --------------- Helper ----------------------
 
