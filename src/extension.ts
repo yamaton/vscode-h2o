@@ -4,42 +4,43 @@ import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
 
-export async function activate(context: vscode.ExtensionContext) {
 
+async function initializeParser(): Promise<Parser> {
+  await Parser.init();
+  const parser = new Parser;
+  const path = `${__dirname}/../tree-sitter-bash.wasm`;
+  const lang = await Parser.Language.load(path);
+  parser.setLanguage(lang);
+  return parser;
+}
+
+export async function activate(context: vscode.ExtensionContext) {
   const parser = await initializeParser();
+  const trees: { [uri: string]: Parser.Tree } = {};
   const fetcher = new CachingFetcher(context.globalState);
 
   const compprovider = vscode.languages.registerCompletionItemProvider(
     'shellscript',
     {
       provideCompletionItems(document, position, token, context) {
-
-        const simpleOldTypeCompletion = new vscode.CompletionItem('hello world');
-        simpleOldTypeCompletion.documentation = new vscode.MarkdownString('I hate this old style');
-        simpleOldTypeCompletion.detail = 'show me a detail!';
-
-        const simpleCompletion = new vscode.CompletionItem('--nanachi');
-        simpleCompletion.documentation = new vscode.MarkdownString('here comes nanachi!');
-
-        const snippetCompletion = new vscode.CompletionItem('--option-with-arg');
-        snippetCompletion.insertText = new vscode.SnippetString('--option-with-arg ${1:<arg>}');
-        snippetCompletion.documentation = new vscode.MarkdownString('An option with argument.');
-
-        const tree = parser.parse(document.getText());
+        if (!parser) {
+          console.error("[Completion] Parser is unavailable!");
+          return;
+        }
+        if (!trees[document.uri.toString()]) {
+          console.log("[Completion] Creating tree");
+          trees[document.uri.toString()] = parser.parse(document.getText());
+        }
+        const tree = trees[document.uri.toString()];
 
         // this is a trick to get current Node
         const p = walkbackIfNeeded(tree.rootNode, position);
         const compSubcommands = getCompletionsSubcommands(tree.rootNode, p, fetcher);
         const compOptions = getCompletionsOptions(tree.rootNode, p, fetcher);
-
-        const res = [
-          simpleCompletion,
-          simpleOldTypeCompletion,
-          snippetCompletion,
+        return [
           ...compSubcommands,
           ...compOptions
         ];
-        return res;
       }
     },
     ' ',  // triggerCharacter
@@ -48,8 +49,15 @@ export async function activate(context: vscode.ExtensionContext) {
   const hoverprovider = vscode.languages.registerHoverProvider('shellscript', {
     provideHover(document, position, token) {
 
-      const tree = parser.parse(document.getText());
-      const thisName = getCurrentNode(tree.rootNode, position).text!;
+      if (!parser) {
+        console.error("[Hover] Parser is unavailable!");
+        return;
+      }
+      if (!trees[document.uri.toString()]) {
+        console.log("[Hover] Creating tree");
+        trees[document.uri.toString()] = parser.parse(document.getText());
+      }
+      const tree = trees[document.uri.toString()];
 
       const cmd = getMachingCommand(tree.rootNode, position, fetcher);
       const subcmd = getMatchingSubcommand(tree.rootNode, position, fetcher);
@@ -61,14 +69,48 @@ export async function activate(context: vscode.ExtensionContext) {
         const msg = `${cmdName} **${subcmd.name}**\n\n ${subcmd.description}`;
         return new vscode.Hover(new vscode.MarkdownString(msg));
       } else if (opts) {
+        const thisName = getCurrentNode(tree.rootNode, position).text!;
         const msg = optsToMessage(thisName, opts);
         return new vscode.Hover(new vscode.MarkdownString(msg));
       }
     }
   });
 
+  function updateTree(parser: Parser, edit: vscode.TextDocumentChangeEvent) {
+    if (edit.contentChanges.length === 0) { return; }
+
+    const old = trees[edit.document.uri.toString()];
+    for (const e of edit.contentChanges) {
+      const startIndex = e.rangeOffset;
+      const oldEndIndex = e.rangeOffset + e.rangeLength;
+      const newEndIndex = e.rangeOffset + e.text.length;
+      const indices = [startIndex, oldEndIndex, newEndIndex];
+      const [startPosition, oldEndPosition, newEndPosition] = indices.map(i => asPoint(edit.document.positionAt(i)));
+      const delta = { startIndex, oldEndIndex, newEndIndex, startPosition, oldEndPosition, newEndPosition };
+      old.edit(delta);
+    }
+    const t = parser.parse(edit.document.getText(), old);
+    trees[edit.document.uri.toString()] = t;
+  }
+
+  function edit(edit: vscode.TextDocumentChangeEvent) {
+    updateTree(parser, edit);
+  }
+
+  function close(document: vscode.TextDocument) {
+    console.log("[Close] removing a tree");
+    delete trees[document.uri.toString()];
+  }
+
+  context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(edit));
+  context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(close));
   context.subscriptions.push(compprovider);
   context.subscriptions.push(hoverprovider);
+}
+
+
+function asPoint(p: vscode.Position): Parser.Point {
+  return { row: p.line, column: p.character };
 }
 
 function optsToMessage(name: string, opts: Option[]): string {
@@ -88,15 +130,6 @@ function optsToMessage(name: string, opts: Option[]): string {
 
 // --------------- Helper ----------------------
 
-// Borrow from bash-language-server
-async function initializeParser(): Promise<Parser> {
-  await Parser.init();
-  const parser = new Parser;
-  const path = `${__dirname}/../tree-sitter-bash.wasm`;
-  const lang = await Parser.Language.load(path);
-  parser.setLanguage(lang);
-  return parser;
-}
 
 function range(n: SyntaxNode): vscode.Range {
   return new vscode.Range(
