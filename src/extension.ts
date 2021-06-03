@@ -63,8 +63,9 @@ export async function activate(context: vscode.ExtensionContext) {
       const subcmd = getMatchingSubcommand(tree.rootNode, position, fetcher);
       const opts = getMatchingOption(tree.rootNode, position, fetcher);
       if (cmd) {
-        const clearCacheCommandUri = vscode.Uri.parse(`command:extension.h2o.clearCache`);
-        const msg = new vscode.MarkdownString(cmd.description! + `\n\n[Clear cache](${clearCacheCommandUri})`);
+        const name = cmd.description!;
+        const clearCacheCommandUri = vscode.Uri.parse(`command:extension.h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
+        const msg = new vscode.MarkdownString(name + `\n\n[Clear cache](${clearCacheCommandUri})`);
         msg.isTrusted = true;
         return new vscode.Hover(msg);
       } else if (subcmd) {
@@ -105,25 +106,31 @@ export async function activate(context: vscode.ExtensionContext) {
     delete trees[document.uri.toString()];
   }
 
-  const clearCache = vscode.commands.registerCommand('extension.h2o.clearCache', (name: string) => {
-    const msg = `[Command] Clearing cache of ${name}`;
-    fetcher.unset(name);
-    console.log(msg);
+  const clearCacheDisposable = vscode.commands.registerCommand('extension.h2o.clearCache', async (name: string) => {
+    let cmd = name;
+    if (!name) {
+      cmd = (await vscode.window.showInputBox({ placeHolder: 'which command?' }))!;
+    }
+
+    console.log(`[Command] Clearing cache for ${cmd}`);
+    fetcher.unset(cmd);
+    const msg = `[H2O] Cleared ${cmd}`;
     vscode.window.showInformationMessage(msg);
   });
 
-  context.subscriptions.push(clearCache);
+  context.subscriptions.push(clearCacheDisposable);
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(edit));
   context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(close));
   context.subscriptions.push(compprovider);
   context.subscriptions.push(hoverprovider);
 }
 
-
+// vscode.Position -> Parser.Point
 function asPoint(p: vscode.Position): Parser.Point {
   return { row: p.line, column: p.character };
 }
 
+// Convert option info into UI text
 function optsToMessage(name: string, opts: Option[]): string {
   if (opts.length === 1) {
     const opt = opts[0];
@@ -140,10 +147,7 @@ function optsToMessage(name: string, opts: Option[]): string {
 }
 
 
-
-
 // --------------- Helper ----------------------
-
 
 function range(n: SyntaxNode): vscode.Range {
   return new vscode.Range(
