@@ -199,7 +199,6 @@ function getMachingCommand(root: SyntaxNode, position: vscode.Position, fetcher:
   const cmdName = getContextCommandName(root, position);
   const thisName = getCurrentNode(root, position)?.text;
   console.log('cmdName: ', cmdName);
-  console.log('thisName: ', thisName);
   if (cmdName === thisName) {
     const command = fetcher.fetch(cmdName)!;
     return command;
@@ -213,7 +212,6 @@ function getMatchingSubcommand(root: SyntaxNode, position: vscode.Position, fetc
   const currentNodeText = getCurrentNode(root, position)?.text;
   console.log('cmdName: ', cmd?.name);
   console.log('subName: ', subcmd?.name);
-  console.log('currentNodeText: ', currentNodeText);
   if (cmd && subcmd && subcmd.name === currentNodeText) {
     return subcmd;
   }
