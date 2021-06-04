@@ -17,7 +17,7 @@ It provides completions for command options and subcommands in shell script. H2O
 
 This extension provides following commands:
 
-* `H2O: Clear Cache`: Clears cache for the specified command.
+* `H2O: Reset`: Clears cache for the specified command.
 
 
 ## Internals

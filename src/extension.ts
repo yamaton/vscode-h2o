@@ -64,8 +64,8 @@ export async function activate(context: vscode.ExtensionContext) {
       const opts = getMatchingOption(tree.rootNode, position, fetcher);
       if (cmd) {
         const name = cmd.description!;
-        const clearCacheCommandUri = vscode.Uri.parse(`command:extension.h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
-        const msg = new vscode.MarkdownString(name + `\n\n[Clear cache](${clearCacheCommandUri})`);
+        const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
+        const msg = new vscode.MarkdownString(name + `\n\n[Reset](${clearCacheCommandUri})`);
         msg.isTrusted = true;
         return new vscode.Hover(msg);
       } else if (subcmd) {
@@ -106,7 +106,7 @@ export async function activate(context: vscode.ExtensionContext) {
     delete trees[document.uri.toString()];
   }
 
-  const clearCacheDisposable = vscode.commands.registerCommand('extension.h2o.clearCache', async (name: string) => {
+  const clearCacheDisposable = vscode.commands.registerCommand('h2o.clearCache', async (name: string) => {
     let cmd = name;
     if (!name) {
       cmd = (await vscode.window.showInputBox({ placeHolder: 'which command?' }))!;

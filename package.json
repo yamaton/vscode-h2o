@@ -20,20 +20,20 @@
     ],
     "activationEvents": [
         "onLanguage:shellscript",
-        "onCommand:extension.h2o.clearCache"
+        "onCommand:h2o.clearCache"
     ],
     "main": "./out/extension.js",
     "contributes": {
         "commands": [
             {
-                "command": "extension.h2o.clearCache",
+                "command": "h2o.clearCache",
                 "title": "H2O: Clear Cache"
             }
         ],
         "menus": {
             "commandPalette": [
                 {
-                    "command": "extension.h2o.clearCache",
+                    "command": "h2o.clearCache",
                     "when": "editorLangId == shellscript"
                 }
             ]
