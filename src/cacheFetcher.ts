@@ -4,7 +4,7 @@ import { Command } from './command';
 
 export function runH2o(name: string): Command | undefined {
   console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
-  const process = spawnSync('h2o', ['--command', name, '--json']);
+  const process = spawnSync(`${__dirname}/../bin/h2o`, ['--command', name, '--json']);
   const out = process.stdout;
   console.log(`[CacheFetcher.runH2o] got output for ${name}: ${out}`);
   if (out) {
