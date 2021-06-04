@@ -1,6 +1,6 @@
 {
     "name": "vscode-h2o",
-    "displayName": "vscode-h2o",
+    "displayName": "H2O",
     "description": "Support shell completion",
     "repository": {
         "url": "https://github.com/yamaton/vscode-h2o"
@@ -11,7 +11,7 @@
         "email": "yamato.matsuoka@tetradresearch.com"
     },
     "license": "MIT",
-    "version": "0.0.1",
+    "version": "0.0.2",
     "engines": {
         "vscode": "^1.56.0"
     },
