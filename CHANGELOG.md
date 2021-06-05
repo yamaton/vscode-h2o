@@ -4,6 +4,9 @@ All notable changes to the "vscode-h2o" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [Unreleased]
+## v0.0.3
+- Bundle macos executable, in addition to linux
+- Bump H2O to v0.1.7
+- Make path to H2O configurable (default: "<bundled>")
 
 - Initial release
