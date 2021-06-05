@@ -1,10 +1,15 @@
+import * as vscode from 'vscode';
 import { Memento } from "vscode";
 import { spawn, spawnSync } from 'child_process';
 import { Command } from './command';
 
 export function runH2o(name: string): Command | undefined {
   console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
-  const process = spawnSync(`${__dirname}/../bin/h2o`, ['--command', name, '--json']);
+  let path = vscode.workspace.getConfiguration('h2o').get('h2oPath') as string;
+  if (path === '<bundled>') {
+    path = `${__dirname}/../bin/h2o`;
+  }
+  const process = spawnSync(path, ['--command', name, '--json']);
   const out = process.stdout;
   console.log(`[CacheFetcher.runH2o] got output for ${name}: ${out}`);
   if (out) {

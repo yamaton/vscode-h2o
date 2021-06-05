@@ -38,7 +38,16 @@
                 }
             ]
         },
-        "configuration": {}
+        "configuration": {
+            "title": "h2o",
+            "properties": {
+                "h2o.h2oPath": {
+                    "type": "string",
+                    "default": "<bundled>",
+                    "description": "Path to the H2O executable"
+                }
+            }
+        }
     },
     "scripts": {
         "vscode:prepublish": "npm run compile",
