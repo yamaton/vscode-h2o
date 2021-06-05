@@ -3,14 +3,28 @@ import { Memento } from "vscode";
 import { spawn, spawnSync } from 'child_process';
 import { Command } from './command';
 
+let neverNotifiedError = true;
+
 export function runH2o(name: string): Command | undefined {
-  console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
   let path = vscode.workspace.getConfiguration('h2o').get('h2oPath') as string;
   if (path === '<bundled>') {
-    path = `${__dirname}/../bin/h2o`;
+    if (process.platform === 'linux') {
+      path = `${__dirname}/../bin/h2o-x86_64-unknown-linux`;
+    } else if (process.platform === 'darwin') {
+      path = `${__dirname}/../bin/h2o-x86_64-apple-darwin`;
+    } else {
+      if (neverNotifiedError) {
+        const msg = "Bundled H2O supports only Linux and MacOS. Please set the H2O path in the configuration.";
+        vscode.window.showErrorMessage(msg);
+      }
+      neverNotifiedError = false;
+      return;
+    }
   }
-  const process = spawnSync(path, ['--command', name, '--json']);
-  const out = process.stdout;
+
+  console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
+  const proc = spawnSync(path, ['--command', name, '--json']);
+  const out = proc.stdout;
   console.log(`[CacheFetcher.runH2o] got output for ${name}: ${out}`);
   if (out) {
     const command = JSON.parse(out);
