@@ -11,12 +11,21 @@
         "email": "yamato.matsuoka@tetradresearch.com"
     },
     "license": "MIT",
-    "version": "0.0.3",
+    "version": "0.0.4",
     "engines": {
         "vscode": "^1.56.0"
     },
     "categories": [
+        "Snippets",
         "Other"
+    ],
+    "keywords": [
+        "h2o",
+        "cli",
+        "man",
+        "shell",
+        "bash",
+        "completion"
     ],
     "activationEvents": [
         "onLanguage:shellscript",
