@@ -5,9 +5,15 @@ This extension integrates [H2O](https://github.com/yamaton/h2o) into VS Code.
 **[NOTE]** `h2o` executable is bundled, but it's for Linux and MacOS (x86-64) only.
 
 
-## Features
+## About
 
 It provides completions and hovers for command options and subcommands in shell script. H2O, in the background, extracts CLI information by executing and parsing `<command> --help` or manpages (and `<command> <subcommand> --help` if needed).
+
+## Shell completion
+![shellcomp](./images/vscode-h2o-completion.gif)
+
+## Hover
+![hover](./images/vscode-h2o-hover.gif)
 
 
 ## Extension Commands
