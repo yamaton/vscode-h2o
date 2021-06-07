@@ -73,8 +73,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const msg = `${cmdName} **${subcmd.name}**\n\n ${subcmd.description}`;
         return new vscode.Hover(new vscode.MarkdownString(msg));
       } else if (opts) {
-        const thisName = getCurrentNode(tree.rootNode, position).text!;
-        const msg = optsToMessage(thisName, opts);
+        const msg = optsToMessage(opts);
         return new vscode.Hover(new vscode.MarkdownString(msg));
       }
     }
@@ -131,16 +130,17 @@ function asPoint(p: vscode.Position): Parser.Point {
 }
 
 // Convert option info into UI text
-function optsToMessage(name: string, opts: Option[]): string {
+function optsToMessage(opts: Option[]): string {
   if (opts.length === 1) {
     const opt = opts[0];
-    const msg = `\`${name}\`\n\n ${opt.description}`;
+    const namestr = opt.names.map((s) => `\`${s}\``).join(', ');
+    const msg = `${namestr}\n\n ${opt.description}`;
     return msg;
 
   } else {
     // deal with stacked option
-    const shorts = unstackOption(name);
-    const messages = opts.map((opt, i) => `\`${shorts[i]}\`\n\n ${opt.description}`);
+    const namestrs = opts.map(opt => opt.names.map((s) => `\`${s}\``).join(', '));
+    const messages = opts.map((opt, i) => `${namestrs[i]}\n\n ${opt.description}`);
     const joined = messages.join("\n\n");
     return joined;
   }
