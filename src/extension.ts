@@ -65,7 +65,7 @@ export async function activate(context: vscode.ExtensionContext) {
       if (cmd) {
         const name = cmd.description!;
         const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
-        const msg = new vscode.MarkdownString(name + `\n\n[Reset](${clearCacheCommandUri})`);
+        const msg = new vscode.MarkdownString(`\`${name}\`` + `\n\n[Reset](${clearCacheCommandUri})`);
         msg.isTrusted = true;
         return new vscode.Hover(msg);
       } else if (subcmd) {
