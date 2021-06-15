@@ -22,7 +22,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const compprovider = vscode.languages.registerCompletionItemProvider(
     'shellscript',
     {
-      async provideCompletionItems(document, position, token, context) {
+      provideCompletionItems(document, position, token, context) {
         if (!parser) {
           console.error("[Completion] Parser is unavailable!");
           return;
@@ -35,8 +35,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // this is a trick to get current Node
         const p = walkbackIfNeeded(tree.rootNode, position);
-        const compSubcommands = await getCompletionsSubcommands(tree.rootNode, p, fetcher);
-        const compOptions = await getCompletionsOptions(tree.rootNode, p, fetcher);
+        const compSubcommands = getCompletionsSubcommands(tree.rootNode, p, fetcher);
+        const compOptions = getCompletionsOptions(tree.rootNode, p, fetcher);
         return [
           ...compSubcommands,
           ...compOptions
@@ -47,7 +47,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   const hoverprovider = vscode.languages.registerHoverProvider('shellscript', {
-    async provideHover(document, position, token) {
+    provideHover(document, position, token) {
 
       if (!parser) {
         console.error("[Hover] Parser is unavailable!");
@@ -58,32 +58,23 @@ export async function activate(context: vscode.ExtensionContext) {
         trees[document.uri.toString()] = parser.parse(document.getText());
       }
       const tree = trees[document.uri.toString()];
-      try {
-        const cmd = await getMachingCommand(tree.rootNode, position, fetcher);
+
+      const cmd = getMachingCommand(tree.rootNode, position, fetcher);
+      const subcmd = getMatchingSubcommand(tree.rootNode, position, fetcher);
+      const opts = getMatchingOption(tree.rootNode, position, fetcher);
+      if (cmd) {
         const name = cmd.description!;
         const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
         const msg = new vscode.MarkdownString(`\`${name}\`` + `\n\n[Reset](${clearCacheCommandUri})`);
         msg.isTrusted = true;
         return new vscode.Hover(msg);
-      } catch (err) {
-        console.log("[provideHover] cmd skipped");
-      }
-
-      try {
-        const subcmd = await getMatchingSubcommand(tree.rootNode, position, fetcher);
+      } else if (subcmd) {
         const cmdName = getContextCommandName(tree.rootNode, position)!;
         const msg = `${cmdName} **${subcmd.name}**\n\n ${subcmd.description}`;
         return new vscode.Hover(new vscode.MarkdownString(msg));
-      } catch (err) {
-        console.log("[provideHover] subcmd skipped");
-      }
-
-      try {
-        const opts = await getMatchingOption(tree.rootNode, position, fetcher);
+      } else if (opts) {
         const msg = optsToMessage(opts);
         return new vscode.Hover(new vscode.MarkdownString(msg));
-      } catch (err) {
-        console.log("[provideHover] opts skipped");
       }
     }
   });
@@ -204,45 +195,34 @@ function walkbackIfNeeded(n: SyntaxNode, position: vscode.Position): vscode.Posi
 
 
 // Returns current word as a command if the tree-sitter says it's command
-async function getMachingCommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Command> {
+function getMachingCommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): undefined | Command {
   const cmdName = getContextCommandName(root, position);
   const thisName = getCurrentNode(root, position)?.text;
   console.log('cmdName: ', cmdName);
-  let res: Promise<Command> = Promise.reject();
   if (cmdName === thisName) {
-    res = fetcher.fetchAsync(cmdName);
+    const command = fetcher.fetch(cmdName)!;
+    return command;
   }
-  return res;
 }
 
 
 // Returns current word as a subcommand if the tree-sitter says so
-async function getMatchingSubcommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Command> {
-  let cmd: Command | undefined;
-  let subcmd: Command | undefined;
-  try {
-    [cmd, subcmd] = await getContextCmdSubcmdPair(root, position, fetcher);
-  } catch {
-    console.error("[getMatchingSubcommand] Failed to get cmd-subcmd pair");
-  }
+function getMatchingSubcommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): undefined | Command {
+  const [cmd, subcmd] = getContextCmdSubcmdPair(root, position, fetcher);
   const currentNodeText = getCurrentNode(root, position)?.text;
   console.log('cmdName: ', cmd?.name);
   console.log('subName: ', subcmd?.name);
   if (cmd && subcmd && subcmd.name === currentNodeText) {
     return subcmd;
   }
-  console.log("[getMatchingSubcommand] Failed");
-  return Promise.reject("[getMatchingSubcommand] Failed");
 }
 
 
 // Returns current word as an option if the tree-sitter says so
-async function getMatchingOption(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Option[]> {
+function getMatchingOption(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Option[] {
   const thisName = getCurrentNode(root, position).text!;
   if (thisName.startsWith('-')) {
-    let cmd: Command | undefined;
-    let subcmd: Command | undefined;
-    [cmd, subcmd] = await getContextCmdSubcmdPair(root, position, fetcher);
+    const [cmd, subcmd] = getContextCmdSubcmdPair(root, position, fetcher);
     if (cmd) {
       let options: Option[];
       if (subcmd) {
@@ -315,20 +295,13 @@ function _getSubcommandCandidates(root: SyntaxNode, position: vscode.Position) {
 
 
 // Get command and subcommand inferred from the current position
-async function getContextCmdSubcmdPair(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<[Command | undefined, Command | undefined]> {
+function getContextCmdSubcmdPair(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): [Command | undefined, Command | undefined] {
   let name = getContextCommandName(root, position);
   if (!name) {
     return [undefined, undefined];
   }
 
-  let command: Command | undefined;
-  try {
-    command = await fetcher.fetchAsync(name);
-  } catch (err) {
-    console.log(`[getContextCmdSubcmdPair] Failed to fetch: ${name}`);
-    return [undefined, undefined];
-  }
-
+  let command = fetcher.fetch(name);
   let subcommands = command?.subcommands;
   if (subcommands && subcommands.length) {
     let words = _getSubcommandCandidates(root, position);
@@ -373,8 +346,8 @@ function _getContextCommandNode(root: SyntaxNode, position: vscode.Position): Sy
 
 
 // Get subcommand completions
-async function getCompletionsSubcommands(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<vscode.CompletionItem[]> {
-  const [cmd, subcmd] = await getContextCmdSubcmdPair(root, position, fetcher);
+function getCompletionsSubcommands(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): vscode.CompletionItem[] {
+  const [cmd, subcmd] = getContextCmdSubcmdPair(root, position, fetcher);
   if (cmd && subcmd === undefined) {
     const subcommands = cmd.subcommands;
     if (subcommands && subcommands.length) {
@@ -391,8 +364,8 @@ async function getCompletionsSubcommands(root: SyntaxNode, position: vscode.Posi
 
 
 // Get option completion
-async function getCompletionsOptions(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<vscode.CompletionItem[]> {
-  const [cmd, subcmd] = await getContextCmdSubcmdPair(root, position, fetcher);
+function getCompletionsOptions(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): vscode.CompletionItem[] {
+  const [cmd, subcmd] = getContextCmdSubcmdPair(root, position, fetcher);
   const args = getContextCmdArgs(root, position);
   const compitems: vscode.CompletionItem[] = [];
   if (cmd) {
