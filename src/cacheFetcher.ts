@@ -1,9 +1,42 @@
 import * as vscode from 'vscode';
-import { Memento } from "vscode";
-import { spawn, spawnSync } from 'child_process';
+import { Memento } from 'vscode';
+import { spawnSync } from 'child_process';
 import { Command } from './command';
+import { Response } from 'node-fetch';
+import fetch from 'node-fetch';
 
 let neverNotifiedError = true;
+
+class HTTPResponseError extends Error {
+  response: Response;
+  constructor(res: Response) {
+    super(`HTTP Error Response: ${res.status} ${res.statusText}`);
+    this.response = res;
+  }
+}
+
+export async function fetchCurated(name: string): Promise<Command> {
+  const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/json/${name}.json`;
+  const response = await fetch(url);
+  const checkStatus = (res: Response) => {
+    if (res.ok) {
+      return res;
+    } else {
+      throw new HTTPResponseError(res);
+    }
+  };
+
+  try {
+    checkStatus(response);
+  } catch (error) {
+    console.error(error);
+    const errorBody = await error.response.text();
+    console.error(`Error body: ${errorBody}`);
+  }
+
+  return await response.json();
+}
+
 
 export function runH2o(name: string): Command | undefined {
   let path = vscode.workspace.getConfiguration('h2o').get('h2oPath') as string;
