@@ -102,6 +102,32 @@ export class CachingFetcher {
     return cached as Command;
   }
 
+  async fetchAsync(name: string): Promise<Command> {
+    const key = CachingFetcher.getKey(name);
+    let cached = this.memento.get(key);
+    if (cached !== undefined) {
+      console.log('[CacheFetcher.fetch] Fetching from cache: ', name);
+      return Promise.resolve(cached as Command);
+    }
+
+    console.log('[CacheFetcher.fetch] Getting curated data: ', name);
+    const commandP = fetchCurated(name);
+    try {
+      const command = await commandP;
+      this.memento.update(key, command);
+      return command;
+    } catch (err) {
+      console.log("[CacheFetcher.fetch] Failed to get curated data: ", name);
+      const command = runH2o(name);
+      if (command) {
+        this.memento.update(key, command);
+        return command;
+      } else {
+        return Promise.reject(`[CacheFetcher.fetch] Filed to fetch: ${name}`);
+      }
+    }
+  }
+
   unset(name: string) {
     const key = CachingFetcher.getKey(name);
     this.memento.update(key, undefined).then(() => {
