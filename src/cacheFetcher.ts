@@ -62,17 +62,27 @@ export class CachingFetcher {
     return CachingFetcher.keyPrefix + name;
   }
 
+  private get(name: string): Command | undefined {
+    const key = CachingFetcher.getKey(name);
+    return this.memento.get(key);
+  }
+
+  private update(name: string, command: Command | undefined) {
+    const key = CachingFetcher.getKey(name);
+    return this.memento.update(key, command);
+  }
+
   fetch(name: string): Command | undefined {
     if (name.length < 2) {
       return;
     }
-    const key = CachingFetcher.getKey(name);
-    let cached = this.memento.get(key);
+
+    let cached = this.get(name);
     if (cached === undefined) {
       console.log('[CacheFetcher.fetch] Fetching from H2O: ', name);
       const command = runH2o(name);
       if (command) {
-        this.memento.update(key, command);
+        this.update(name, command);
         return command;
       } else {
         console.warn(`[CacheFetcher.fetch] Failed to fetch command ${name} from H2O`);
@@ -115,17 +125,15 @@ export class CachingFetcher {
 
     for (const cmd of commands) {
       const key = CachingFetcher.getKey(cmd.name);
-      if (this.memento.get(key) === undefined) {
+      if (this.get(cmd.name) === undefined) {
         console.log(`[fetchAllCurated] Loading: ${cmd.name}`);
-        this.memento.update(key, cmd);
+        this.update(cmd.name, cmd);
       }
     }
   }
 
   unset(name: string) {
-    const key = CachingFetcher.getKey(name);
-    this.memento.update(key, undefined).then(() => {
-      console.log('[CacheFetcher.unset] Unset the key for ... ', name);
-    });
+    this.update(name, undefined);
+    console.log('[CacheFetcher.unset] Unset the key for ... ', name);
   }
 }
