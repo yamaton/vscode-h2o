@@ -18,6 +18,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const parser = await initializeParser();
   const trees: { [uri: string]: Parser.Tree } = {};
   const fetcher = new CachingFetcher(context.globalState);
+  await fetcher.fetchAllCurated();
 
   const compprovider = vscode.languages.registerCompletionItemProvider(
     'shellscript',
