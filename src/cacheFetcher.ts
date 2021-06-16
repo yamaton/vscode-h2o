@@ -36,6 +36,11 @@ export function runH2o(name: string): Command | undefined {
 
   console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
   const proc = spawnSync(path, ['--command', name, '--json']);
+  if (proc.status !== 0) {
+    console.log(`[CacheFetcher.runH2o] H2O raises error for ${name}`);
+    return;
+  }
+  console.log(`[CacheFetcher.runH2o] proc.status = ${proc.status}`);
   const out = proc.stdout;
   console.log(`[CacheFetcher.runH2o] got output for ${name}: ${out}`);
   if (out) {
@@ -86,6 +91,7 @@ export class CachingFetcher {
         return command;
       } else {
         console.warn(`[CacheFetcher.fetch] Failed to fetch command ${name} from H2O`);
+        return;
       }
     } else {
       console.log('[CacheFetcher.fetch] Fetching from cache: ', name);
