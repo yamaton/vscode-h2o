@@ -4,6 +4,13 @@ All notable changes to the "vscode-h2o" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.6]
+- Fetch curated data from GitHub at startup
+- Bump H2o to v0.1.9
+    - Use Bubblewrap (sandbox) in Linux if available
+    - Fail fast than producing junk
+- Change message formatting in Hover
+
 ## [0.0.5]
 - Fix link in README
 

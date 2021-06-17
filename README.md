@@ -30,6 +30,10 @@ The is also accessible from the hover on a command.
 * `H2o: Path`: Set path to H2O. Enter `<bundled>`, the default value, if using bundled.
 
 
+## Sandbox for Linux Users
+Please install [bubblewrap](https://wiki.archlinux.org/title/Bubblewrap) if using this extension in Linux or WSL. H2O automatically runs in the sandbox if available such that untrusted commands do no harm.
+
+
 ## Internals
 
 This program depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand shell script as bash.
