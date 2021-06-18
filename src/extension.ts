@@ -34,7 +34,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         const tree = trees[document.uri.toString()];
 
-        // this is a trick to get current Node
+        // this is an ugly hack to get current Node
         const p = walkbackIfNeeded(tree.rootNode, position);
         const compSubcommands = getCompletionsSubcommands(tree.rootNode, p, fetcher);
         const compOptions = getCompletionsOptions(tree.rootNode, p, fetcher);
@@ -125,12 +125,12 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(hoverprovider);
 }
 
-// vscode.Position -> Parser.Point
+// Convert: vscode.Position -> Parser.Point
 function asPoint(p: vscode.Position): Parser.Point {
   return { row: p.line, column: p.character };
 }
 
-// Convert option info into UI text
+// Convert: option -> UI text (string)
 function optsToMessage(opts: Option[]): string {
   if (opts.length === 1) {
     const opt = opts[0];
@@ -180,17 +180,16 @@ function getCurrentNode(n: SyntaxNode, position: vscode.Position): SyntaxNode {
 // Moves the position left by one character IF position is contained only in the root-node range.
 // This is just a workround as you cannot reach command node if you start from
 // the position, say, after 'echo '
-function walkbackIfNeeded(n: SyntaxNode, position: vscode.Position): vscode.Position {
-  for (const child of n.children) {
-    const r = range(child);
-    if (r.contains(position)) {
-      return position;
-    }
-  }
-  // move the position back if you cannot go deeper from the root node
-  if (n.type === 'program' && position.character > 0) {
+// [FIXME] Do not rely on such an ugly hack
+function walkbackIfNeeded(root: SyntaxNode, position: vscode.Position): vscode.Position {
+  const thisNode = getCurrentNode(root, position);
+  console.debug("[walkbackIfNeeded] thisNode.type: ", thisNode.type);
+
+  if (position.character > 0 && (thisNode.type === 'program' || thisNode.type === '\n')) {
+    console.info("[walkbackIfNeeded] stepping back!");
     return position.translate(0, -1);
   }
+
   return position;
 }
 
