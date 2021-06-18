@@ -4,6 +4,11 @@ All notable changes to the "vscode-h2o" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.7]
+- Fix a critical bug not showing completions properly
+- Bump H2o to v0.1.10
+    - Bugfixes
+
 ## [0.0.6]
 - Fetch curated data from GitHub at startup
 - Bump H2o to v0.1.9
