@@ -185,9 +185,9 @@ function walkbackIfNeeded(root: SyntaxNode, position: vscode.Position): vscode.P
   const thisNode = getCurrentNode(root, position);
   console.debug("[walkbackIfNeeded] thisNode.type: ", thisNode.type);
 
-  if (position.character > 0 && (thisNode.type === 'program' || thisNode.type === '\n')) {
+  if (position.character > 0 && thisNode.type !== 'word') {
     console.info("[walkbackIfNeeded] stepping back!");
-    return position.translate(0, -1);
+    return walkbackIfNeeded(root, position.translate(0, -1));
   }
 
   return position;
