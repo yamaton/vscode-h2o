@@ -1,7 +1,7 @@
 {
     "name": "vscode-h2o",
-    "displayName": "H2O",
-    "description": "Support shell completion",
+    "displayName": "Shell Completion",
+    "description": "Enable shell completion in shell script mode",
     "repository": {
         "url": "https://github.com/yamaton/vscode-h2o"
     },
@@ -53,7 +53,7 @@
                 "h2o.h2oPath": {
                     "type": "string",
                     "default": "<bundled>",
-                    "description": "Path to the H2O executable"
+                    "description": "Path to the H2O executable. Enter <bundled> if using the bundled one."
                 }
             }
         }
