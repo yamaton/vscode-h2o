@@ -1,4 +1,4 @@
-# H2O for VS Code
+# Shell Completion -- H2O for VS Code
 
 This extension integrates [H2O](https://github.com/yamaton/h2o) into VS Code.
 
