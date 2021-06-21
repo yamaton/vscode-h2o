@@ -138,8 +138,8 @@ export class CachingFetcher {
     }
   }
 
-  unset(name: string) {
-    this.update(name, undefined);
+  async unset(name: string) {
+    await this.update(name, undefined);
     console.log('[CacheFetcher.unset] Unset the key for ... ', name);
   }
 }

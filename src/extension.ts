@@ -113,7 +113,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
 
     console.log(`[Command] Clearing cache for ${cmd}`);
-    fetcher.unset(cmd);
+    await fetcher.unset(cmd);
     const msg = `[H2O] Cleared ${cmd}`;
     vscode.window.showInformationMessage(msg);
   });
