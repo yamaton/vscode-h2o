@@ -1,19 +1,20 @@
-# Shell Completion -- H2O for VS Code
+# CLI Completion -- H2O for VS Code
 
-This extension integrates [H2O](https://github.com/yamaton/h2o) into VS Code.
-
-**[NOTE]** `h2o` executable is bundled, but it's for Linux and MacOS (x86-64) only.
+This extension enables completion, auto-completing subcommands and options, for CLI programs in Shell Script. It uses [H2O](https://github.com/yamaton/h2o) as the backend; H2O extracts CLI information by executing and parsing `<command> --help` or manpages (and `<command> <subcommand> --help` if needed).
 
 
-## About
+**[NOTE]** `h2o` executable is bundled, but it's for Linux/WSL and MacOS (x86-64) only.
 
-It provides completions and hovers for command options and subcommands in shell script. H2O, in the background, extracts CLI information by executing and parsing `<command> --help` or manpages (and `<command> <subcommand> --help` if needed).
 
-## Shell completion
+## Shell completion demo
 ![shellcomp](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/vscode-h2o-completion.gif)
 
-## Hover
+## Hover demo
 ![hover](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/vscode-h2o-hover.gif)
+
+
+## Sandbox for Linux Users
+Please consider installomg [bubblewrap](https://wiki.archlinux.org/title/Bubblewrap) if using in Linux or WSL. H2O automatically runs in the sandbox if available such that untrusted commands do no harm.
 
 
 ## Extension Commands
@@ -22,25 +23,20 @@ This extension provides following commands:
 
 * `H2O: Reset`: Clears cache for the specified command.
 
-The is also accessible from the hover on a command.
+This command can be also invoked by clicking 'Reset' in a hover window.
 
 
 ## Extension Configuration
 
-* `H2o: Path`: Set path to H2O. Enter `<bundled>`, the default value, if using bundled.
-
-
-## Sandbox for Linux Users
-Please install [bubblewrap](https://wiki.archlinux.org/title/Bubblewrap) if using this extension in Linux or WSL. H2O automatically runs in the sandbox if available such that untrusted commands do no harm.
-
+* `H2o: Path`: Set path to H2O. Enter `<bundled>` to use the bundled.
 
 ## Internals
 
-This program depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand shell script as bash.
+This program depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand shell script.
 
 
 ## Known Issues
 
-* H2O shows completions and hovers only if
-    * The command is available in the system.
-    * H2O successfully extracts the information from help/man.
+* Command hovers and completions work only if
+    * The CLI data is preloaded
+    * Or, H2O successfully extracts the CLI information from your local environment.
