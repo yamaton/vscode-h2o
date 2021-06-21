@@ -42,10 +42,10 @@ export function runH2o(name: string): Command | undefined {
   }
   console.log(`[CacheFetcher.runH2o] proc.status = ${proc.status}`);
   const out = proc.stdout;
-  console.log(`[CacheFetcher.runH2o] got output for ${name}: ${out}`);
   if (out) {
     const command = JSON.parse(out);
     if (command) {
+      console.log(`[CacheFetcher.runH2o] Got command output: ${command.name}`);
       return command;
     } else {
       console.warn('[CacheFetcher.runH2o] Failed to parse H2O result as JSON: ', name);
