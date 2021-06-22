@@ -86,11 +86,11 @@ export class CachingFetcher {
   private async update(name: string, command: Command | undefined) {
     const key = CachingFetcher.getKey(name);
 
-    let set = this.memento.get<Set<string>>(CachingFetcher.commandListKey);
-    if (!set) {
-      console.error("emento is not initialized?");
-      return Promise.reject("Memento is not initialized?");
-    }
+    // let set = this.memento.get<Set<string>>(CachingFetcher.commandListKey);
+    // if (!set) {
+    //   console.error("emento is not initialized?");
+    //   return Promise.reject("Memento is not initialized?");
+    // }
     // console.log(`set = `, set);
     // if (command === undefined) {
     //   console.log(`--------Set.delete ${name}---------`);
@@ -102,11 +102,11 @@ export class CachingFetcher {
     // const updateList = this.memento.update(CachingFetcher.commandListKey, set);
 
     const upcateCommandItem = this.memento.update(key, command);
-    return Promise.all([upcateCommandItem]);
+    return upcateCommandItem;
   }
 
   async fetch(name: string): Promise<Command> {
-    if (name === undefined || name.length < 2) {
+    if (name.length < 2) {
       return Promise.reject("Command name too short.");
     }
 
