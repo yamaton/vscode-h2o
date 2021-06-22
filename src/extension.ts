@@ -3,7 +3,6 @@ import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
-import * as BluePromise from 'bluebird';
 
 
 async function initializeParser(): Promise<Parser> {
@@ -42,20 +41,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // this is an ugly hack to get current Node
         const p = walkbackIfNeeded(tree.rootNode, position);
-        try {
-          const compSubcommands = await getCompletionsSubcommands(tree.rootNode, p, fetcher);
-          try {
-            const compOptions = await getCompletionsOptions(tree.rootNode, p, fetcher);
-            return [
-              ...compSubcommands,
-              ...compOptions
-            ];
-          } catch {
-            return compSubcommands;
-          }
-        } catch {
-          return await getCompletionsOptions(tree.rootNode, p, fetcher);
-        }
+        const res: vscode.CompletionItem[] = [];
+        const compOptionsP = getCompletionsOptions(tree.rootNode, p, fetcher).then((xs) => res.push(...xs));
+        const compSubcommandsP = getCompletionsSubcommands(tree.rootNode, p, fetcher).then((xs) => res.push(...xs));
+        await Promise.allSettled([compOptionsP, compSubcommandsP]).then((results) => {
+          results.forEach((result) => console.log("Promise.allSettled: ", result.status));
+        });
+
+        return res;
       }
     },
     ' ',  // triggerCharacter
@@ -97,7 +90,7 @@ export async function activate(context: vscode.ExtensionContext) {
         return new vscode.Hover(new vscode.MarkdownString(msg));
       });
 
-      return BluePromise.any([p1, p2, p3]);
+      return Promise.any([p1, p2, p3]);
     }
   });
 
@@ -257,11 +250,11 @@ async function getMatchingOption(root: SyntaxNode, position: vscode.Position, fe
     const thisName = getCurrentNode(root, position).text!;
     if (thisName.startsWith('-')) {
       const [cmd, subcmd] = await getContextCmdSubcmdPair(root, position, fetcher);
-      let options: Option[];
+      let options: Option[] = [];
       if (subcmd) {
         options = subcmd.options;
-      } else {
-        options = cmd?.options;
+      } else if (cmd) {
+        options = cmd.options;
       }
 
       // If current word is NOT old-style option, or command option database
@@ -353,8 +346,8 @@ async function getContextCmdSubcmdPair(root: SyntaxNode, position: vscode.Positi
 
   try {
     let command = await fetcher.fetch(name);
-    let subcommands = command?.subcommands;
-    if (subcommands && subcommands.length) {
+    if (command && command.subcommands && command.subcommands.length) {
+      const subcommands = command.subcommands;
       let words = _getSubcommandCandidates(root, position);
       for (let word of words) {
         for (const subcmd of subcommands) {

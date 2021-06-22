@@ -101,8 +101,8 @@ export class CachingFetcher {
     // }
     // const updateList = this.memento.update(CachingFetcher.commandListKey, set);
 
-    const upcateCommandItem = this.memento.update(key, command);
-    return upcateCommandItem;
+    const updateCommandItem = this.memento.update(key, command);
+    return updateCommandItem;
   }
 
   async fetch(name: string): Promise<Command> {
@@ -175,7 +175,7 @@ export class CachingFetcher {
     console.log('[CacheFetcher.unset] Unset the key for ... ', name);
   }
 
-  // getList() {
-  //   return this.memento.get(CachingFetcher.commandListKey);
+  // getBag() {
+  //   return this.memento.get<Set<string>>(CachingFetcher.commandListKey);
   // }
 }
