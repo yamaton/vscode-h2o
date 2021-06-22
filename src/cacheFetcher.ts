@@ -59,19 +59,29 @@ export class CachingFetcher {
   static readonly keyPrefix = 'h2oFetcher.cache.';
   static readonly commandListKey = 'h2oFetcher.registered.all';
   private memento: Memento;
+  private registeredCommands: Set<string>;
 
   constructor(memento: Memento) {
     this.memento = memento;
+    this.registeredCommands = new Set<string>([]);
   }
 
   async init() {
-    if (!this.memento.get(CachingFetcher.commandListKey)) {
-      console.log("---------------------------------------");
-      console.log("              INIT");
-      console.log("---------------------------------------");
-      const s = new Set<string>();
-      await this.memento.update(CachingFetcher.commandListKey, s);
-    }
+    const existing = this.getBag();
+
+    // if (!existing || existing.size === 0) {
+    console.log("---------------------------------------");
+    console.log("              INIT");
+    console.log("---------------------------------------");
+    this.registeredCommands = new Set<string>(["nanachi"]);
+    await this.updateBag();
+    // } else {
+    //   console.log("---------------------------------------");
+    //   console.log("              LOAD");
+    //   console.log(existing.size);
+    //   console.log("---------------------------------------");
+    //   this.registeredCommands = existing;
+    // }
   }
 
   static getKey(name: string): string {
@@ -86,23 +96,25 @@ export class CachingFetcher {
   private async update(name: string, command: Command | undefined) {
     const key = CachingFetcher.getKey(name);
 
-    // let set = this.memento.get<Set<string>>(CachingFetcher.commandListKey);
-    // if (!set) {
-    //   console.error("emento is not initialized?");
-    //   return Promise.reject("Memento is not initialized?");
-    // }
-    // console.log(`set = `, set);
-    // if (command === undefined) {
-    //   console.log(`--------Set.delete ${name}---------`);
-    //   set.delete(name);
-    // } else {
-    //   console.log(`--------Set.add ${name}---------`);
-    //   set = set.add(name);
-    // }
-    // const updateList = this.memento.update(CachingFetcher.commandListKey, set);
+    console.log(`set = `, this.registeredCommands);
+    if (command === undefined) {
+      console.log(`--------newSet.delete ... doing nothing: ${name}---------`);
+      this.registeredCommands.delete(name);
+    } else {
+      console.log(`--------newSet.add ${name}---------`);
+      this.registeredCommands.add(name);
+    }
 
-    const updateCommandItem = this.memento.update(key, command);
-    return updateCommandItem;
+    try {
+      await this.updateBag();
+      console.log("[set update] done update");
+      console.log("[set update] ", this.registeredCommands);
+      console.log("[set update] ", this.getBag());
+    } catch (e) {
+      console.log("Failed to update command set: ", e);
+    }
+
+    await this.memento.update(key, command);
   }
 
   async fetch(name: string): Promise<Command> {
@@ -123,8 +135,13 @@ export class CachingFetcher {
         console.warn(`[CacheFetcher.fetch] Failed to fetch command ${name} from H2O`);
         return Promise.reject(`Failed to fetch command ${name} from H2O`);
       }
-      await this.update(name, command);
+      try {
+        await this.update(name, command);
+      } catch (e) {
+        console.log("Failed to update: ", e);
+      }
       return command;
+
     } catch (e) {
       console.log("[CacheFetcher.fetch] Error: ", e);
       return Promise.reject(`[CacheFetcher.fetch] Failed in CacheFetcher.update() with name = ${name}`);
@@ -175,7 +192,12 @@ export class CachingFetcher {
     console.log('[CacheFetcher.unset] Unset the key for ... ', name);
   }
 
-  // getBag() {
-  //   return this.memento.get<Set<string>>(CachingFetcher.commandListKey);
-  // }
+  getBag() {
+    return this.memento.get<Set<string>>(CachingFetcher.commandListKey);
+  }
+
+  private async updateBag() {
+    this.memento.update(CachingFetcher.commandListKey, this.registeredCommands);
+  }
+
 }

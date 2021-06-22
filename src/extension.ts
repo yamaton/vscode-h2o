@@ -18,12 +18,9 @@ export async function activate(context: vscode.ExtensionContext) {
   const parser = await initializeParser();
   const trees: { [uri: string]: Parser.Tree } = {};
   const fetcher = new CachingFetcher(context.globalState);
-  // await fetcher.init();
+  await fetcher.init();
   await fetcher.fetchAllCurated();
 
-  // console.log("------------------");
-  // console.log("commands: ", fetcher.getList());
-  // console.log("------------------");
 
   const compprovider = vscode.languages.registerCompletionItemProvider(
     'shellscript',
@@ -70,6 +67,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const p1 = getMachingCommand(tree.rootNode, position, fetcher).then(
         (cmd) => {
+          console.log("------------------------------");
+          console.log("commands: ", fetcher.getBag());
+          console.log("------------------------------");
+
           const name = cmd.description!;
           const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
           const msg = new vscode.MarkdownString(`\`${name}\`` + `\n\n[Reset](${clearCacheCommandUri})`);
