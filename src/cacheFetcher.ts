@@ -57,10 +57,21 @@ export function runH2o(name: string): Command | undefined {
 
 export class CachingFetcher {
   static readonly keyPrefix = 'h2oFetcher.cache.';
+  static readonly commandListKey = 'h2oFetcher.registered.all';
   private memento: Memento;
 
   constructor(memento: Memento) {
     this.memento = memento;
+  }
+
+  async init() {
+    if (!this.memento.get(CachingFetcher.commandListKey)) {
+      console.log("---------------------------------------");
+      console.log("              INIT");
+      console.log("---------------------------------------");
+      const s = new Set<string>();
+      await this.memento.update(CachingFetcher.commandListKey, s);
+    }
   }
 
   static getKey(name: string): string {
@@ -72,32 +83,52 @@ export class CachingFetcher {
     return this.memento.get(key);
   }
 
-  private update(name: string, command: Command | undefined) {
+  private async update(name: string, command: Command | undefined) {
     const key = CachingFetcher.getKey(name);
-    return this.memento.update(key, command);
+
+    let set = this.memento.get<Set<string>>(CachingFetcher.commandListKey);
+    if (!set) {
+      console.error("emento is not initialized?");
+      return Promise.reject("Memento is not initialized?");
+    }
+    // console.log(`set = `, set);
+    // if (command === undefined) {
+    //   console.log(`--------Set.delete ${name}---------`);
+    //   set.delete(name);
+    // } else {
+    //   console.log(`--------Set.add ${name}---------`);
+    //   set = set.add(name);
+    // }
+    // const updateList = this.memento.update(CachingFetcher.commandListKey, set);
+
+    const upcateCommandItem = this.memento.update(key, command);
+    return Promise.all([upcateCommandItem]);
   }
 
-  fetch(name: string): Command | undefined {
-    if (name.length < 2) {
-      return;
+  async fetch(name: string): Promise<Command> {
+    if (name === undefined || name.length < 2) {
+      return Promise.reject("Command name too short.");
     }
 
     let cached = this.get(name);
-    if (cached === undefined) {
-      console.log('[CacheFetcher.fetch] Fetching from H2O: ', name);
-      const command = runH2o(name);
-      if (command) {
-        this.update(name, command);
-        return command;
-      } else {
-        console.warn(`[CacheFetcher.fetch] Failed to fetch command ${name} from H2O`);
-        return;
-      }
-    } else {
+    if (cached) {
       console.log('[CacheFetcher.fetch] Fetching from cache: ', name);
+      return cached as Command;
     }
 
-    return cached as Command;
+    console.log('[CacheFetcher.fetch] Fetching from H2O: ', name);
+    try {
+      const command = runH2o(name);
+      if (!command) {
+        console.warn(`[CacheFetcher.fetch] Failed to fetch command ${name} from H2O`);
+        return Promise.reject(`Failed to fetch command ${name} from H2O`);
+      }
+      await this.update(name, command);
+      return command;
+    } catch (e) {
+      console.log("[CacheFetcher.fetch] Error: ", e);
+      return Promise.reject(`[CacheFetcher.fetch] Failed in CacheFetcher.update() with name = ${name}`);
+    }
   }
 
   async fetchAllCurated() {
@@ -117,7 +148,7 @@ export class CachingFetcher {
     } catch (error) {
       const errorBody = await error.response.text();
       console.error(`Error body: ${errorBody}`);
-      return;
+      return Promise.reject("Failed to fetch HTTP response.");
     }
 
     let commands: Command[] = [];
@@ -126,14 +157,15 @@ export class CachingFetcher {
       const decoded = pako.inflate(s, { to: 'string' });
       commands = JSON.parse(decoded) as Command[];
     } catch (err) {
-      console.log("[fetchAllCurated] Error: ", err);
+      console.error("[fetchAllCurated] Error: ", err);
+      return Promise.reject("Failed to inflate and parse the content as JSON.");
     }
 
     for (const cmd of commands) {
       const key = CachingFetcher.getKey(cmd.name);
       if (this.get(cmd.name) === undefined) {
         console.log(`[fetchAllCurated] Loading: ${cmd.name}`);
-        this.update(cmd.name, cmd);
+        await this.update(cmd.name, cmd);
       }
     }
   }
@@ -142,4 +174,8 @@ export class CachingFetcher {
     await this.update(name, undefined);
     console.log('[CacheFetcher.unset] Unset the key for ... ', name);
   }
+
+  // getList() {
+  //   return this.memento.get(CachingFetcher.commandListKey);
+  // }
 }
