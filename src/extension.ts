@@ -52,7 +52,6 @@ export async function activate(context: vscode.ExtensionContext) {
             const compSubcommands = getCompletionsSubcommands(cmd, subcmd);
             const compOptions = getCompletionsOptions(tree.rootNode, p, cmd, subcmd);
             return [
-              ...compCommands,
               ...compSubcommands,
               ...compOptions,
             ];
