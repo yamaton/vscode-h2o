@@ -222,14 +222,10 @@ function getMatchingOption(thisName: string, cmd: Command, subcmd: Command | und
         options = cmd?.options;
       }
 
-      // If current word is NOT old-style option, or command option database
-      // contains an old-option entry, just return the option with matching name.
-      if (isNotOldStyle(thisName) || options.some(opt => {
-        opt.names.some(isOldStyle);
-      })) {
-        const theOption = options.find((x) => x.names.includes(thisName))!;
+      const theOption = options.find((x) => x.names.includes(thisName));
+      if (theOption) {
         return [theOption];
-      } else {
+      } else if (isOldStyle(thisName)) {
         // Otherwise, deal with a stacked option like `tar -xvf`
         const shortOptionNames = unstackOption(thisName);
         const shortOptions = shortOptionNames.map(short => options.find(opt => opt.names.includes(short))!).filter(opt => opt);
