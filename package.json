@@ -30,7 +30,8 @@
     ],
     "activationEvents": [
         "onLanguage:shellscript",
-        "onCommand:h2o.clearCache"
+        "onCommand:h2o.clearCache",
+        "onCommand:h2o.downloadCurated"
     ],
     "main": "./out/extension.js",
     "contributes": {
@@ -38,12 +39,20 @@
             {
                 "command": "h2o.clearCache",
                 "title": "Shell Completion: Clear Cache"
+            },
+            {
+                "command": "h2o.downloadCurated",
+                "title": "Shell Completion: Download and Force Update Local Data"
             }
         ],
         "menus": {
             "commandPalette": [
                 {
                     "command": "h2o.clearCache",
+                    "when": "editorLangId == shellscript"
+                },
+                {
+                    "command": "h2o.downloadCurated",
                     "when": "editorLangId == shellscript"
                 }
             ]

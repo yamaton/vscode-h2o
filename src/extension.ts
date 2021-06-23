@@ -130,7 +130,7 @@ export async function activate(context: vscode.ExtensionContext) {
     delete trees[document.uri.toString()];
   }
 
-  const clearCacheDisposable = vscode.commands.registerCommand('h2o.clearCache', async (name: string) => {
+  const clearCacheCommand = vscode.commands.registerCommand('h2o.clearCache', async (name: string) => {
     let cmd = name;
     if (!name) {
       cmd = (await vscode.window.showInputBox({ placeHolder: 'which command?' }))!;
@@ -138,7 +138,7 @@ export async function activate(context: vscode.ExtensionContext) {
     try {
       console.log(`[Command] Clearing cache for ${cmd}`);
       await fetcher.unset(cmd);
-      const msg = `[H2O] Cleared ${cmd}`;
+      const msg = `[Shell Completion] Cleared ${cmd}`;
       vscode.window.showInformationMessage(msg);
     } catch (e) {
       console.error("Error: ", e);
@@ -147,7 +147,26 @@ export async function activate(context: vscode.ExtensionContext) {
 
   });
 
-  context.subscriptions.push(clearCacheDisposable);
+
+  const invokeDownloadingCommand = vscode.commands.registerCommand('h2o.downloadCurated', async () => {
+    try {
+      console.log('[Command] Download curated data');
+      const msg1 = `[Shell Completion] Downloading and updates...`;
+      vscode.window.showInformationMessage(msg1);
+
+      await fetcher.fetchAllCurated(true);
+    } catch (e) {
+      console.error("[h2o.downloadCurated] Error: ", e);
+      return Promise.reject("[h2o.downloadCurated] Error: ");
+    }
+
+    const msg = `[Shell Completion] Succeeded downloads and updates!`;
+    vscode.window.showInformationMessage(msg);
+  });
+
+
+  context.subscriptions.push(clearCacheCommand);
+  context.subscriptions.push(invokeDownloadingCommand);
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(edit));
   context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(close));
   context.subscriptions.push(compprovider);

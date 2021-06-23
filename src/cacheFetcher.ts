@@ -73,7 +73,7 @@ export class CachingFetcher {
       console.log("---------------------------------------");
       console.log("              INIT");
       console.log("---------------------------------------");
-      this.registeredCommands = ["nanachi"];
+      this.registeredCommands = [];
       await this.updateList();
       console.log("this.getBag() = ", this.getList());
     } else {
@@ -99,10 +99,11 @@ export class CachingFetcher {
 
     console.log(`list = `, this.registeredCommands);
     if (command === undefined) {
-      console.log(`--------newSet.delete ... doing nothing: ${name}---------`);
+      console.log(`--------delete ${name} from the list ---------`);
       this.registeredCommands = this.registeredCommands.filter(x => x !== name);
     } else {
-      console.log(`--------newSet.add ${name}---------`);
+      console.log(`--------add ${name} to the list ---------`);
+      this.registeredCommands = this.registeredCommands.filter(x => x !== name);
       this.registeredCommands.push(name);
     }
 
@@ -185,7 +186,7 @@ export class CachingFetcher {
       console.error("[fetchAllCurated] Error: ", err);
       return Promise.reject("Failed to inflate and parse the content as JSON.");
     }
-    console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Commands: ", commands.map((cmd) => cmd.name));
+    console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Command #: ", commands.length);
 
     for (const cmd of commands) {
       const key = CachingFetcher.getKey(cmd.name);
