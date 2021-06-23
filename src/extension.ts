@@ -65,7 +65,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       const tree = trees[document.uri.toString()];
 
-      const p1 = getMachingCommand(tree.rootNode, position, fetcher).then(
+      const p1 = getMatchingCommand(tree.rootNode, position, fetcher).then(
         (cmd) => {
           const name = cmd.description!;
           const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
@@ -212,14 +212,14 @@ function walkbackIfNeeded(root: SyntaxNode, position: vscode.Position): vscode.P
 
 
 // Returns current word as a command if the tree-sitter says it's command
-async function getMachingCommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Command> {
+async function getMatchingCommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Command> {
   const cmdName = getContextCommandName(root, position);
   const thisName = getCurrentNode(root, position)?.text;
   console.log('cmdName: ', cmdName);
   if (cmdName === thisName) {
     return fetcher.fetch(cmdName);
   }
-  return Promise.reject("[getMachingCommand] Not found");
+  return Promise.reject("[getMatchingCommand] Not found");
 }
 
 
