@@ -71,36 +71,25 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       const tree = trees[document.uri.toString()];
 
-      const p1 = getMatchingCommand(tree.rootNode, position, fetcher).then(
-        (cmd) => {
-          const name = cmd.description!;
+      const currentWord = getCurrentNode(tree.rootNode, position).text;
+      try {
+        const [cmd, subcmd] = await getContextCmdSubcmdPair(tree.rootNode, position, fetcher);
+        if (cmd && cmd.name === currentWord) {
+          const name = cmd.name;
           const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
           const msg = new vscode.MarkdownString(`\`${name}\`` + `\n\n[Reset](${clearCacheCommandUri})`);
           msg.isTrusted = true;
           return new vscode.Hover(msg);
-        }
-      );
-
-      const p2 = getMatchingSubcommand(tree.rootNode, position, fetcher).then((subcmd) => {
-        const cmdName = getContextCommandName(tree.rootNode, position)!;
-        const msg = `${cmdName} **${subcmd.name}**\n\n ${subcmd.description}`;
-        return new vscode.Hover(new vscode.MarkdownString(msg));
-      }
-      );
-
-      const p3 = getMatchingOption(tree.rootNode, position, fetcher).then((opts) => {
-        const msg = optsToMessage(opts);
-        return new vscode.Hover(new vscode.MarkdownString(msg));
-      });
-
-      try {
-        const hover = await BluePromise.any([p1, p2, p3]);
-        if (hover) {
-          console.log("hover!");
-          return hover;
+        } else if (cmd && subcmd && subcmd.name === currentWord) {
+          const msg = `${cmd.name} **${subcmd.name}**\n\n ${subcmd.description}`;
+          return new vscode.Hover(new vscode.MarkdownString(msg));
+        } else if (cmd) {
+          const opts = getMatchingOption(currentWord, cmd, subcmd);
+          const msg = optsToMessage(opts);
+          return new vscode.Hover(new vscode.MarkdownString(msg));
         }
       } catch (e) {
-        console.log("Error: Promise.any() ", e);
+        console.log("[Hover] Error: ", e);
       }
     }
   });
@@ -222,50 +211,15 @@ function walkbackIfNeeded(root: SyntaxNode, position: vscode.Position): vscode.P
 
   return position;
 }
-
-
-// Returns current word as a command if the tree-sitter says it's command
-async function getMatchingCommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Command> {
-  const cmdName = getContextCommandName(root, position);
-  const thisName = getCurrentNode(root, position)?.text;
-  console.log('cmdName: ', cmdName);
-  if (cmdName === thisName) {
-    return fetcher.fetch(cmdName);
-  }
-  return Promise.reject("[getMatchingCommand] Not found");
-}
-
-
-// Returns current word as a subcommand if the tree-sitter says so
-async function getMatchingSubcommand(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Command> {
-  try {
-    const [cmd, subcmd] = await getContextCmdSubcmdPair(root, position, fetcher);
-    const currentNodeText = getCurrentNode(root, position)?.text;
-    console.log('cmdName: ', cmd?.name);
-    console.log('subName: ', subcmd?.name);
-    if (subcmd && subcmd.name === currentNodeText) {
-      return subcmd;
-    } else {
-      return Promise.reject("[getMatchingSubcommand] Subcommand not found (2).");
-    }
-  } catch (e) {
-    console.error("[getMatchingSubcommand] Error: ", e);
-    return Promise.reject("[getMatchingSubcommand] Subcommand not found.");
-  }
-}
-
-
 // Returns current word as an option if the tree-sitter says so
-async function getMatchingOption(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Option[]> {
-  try {
-    const thisName = getCurrentNode(root, position).text!;
-    if (thisName.startsWith('-')) {
-      const [cmd, subcmd] = await getContextCmdSubcmdPair(root, position, fetcher);
-      let options: Option[] = [];
+function getMatchingOption(thisName: string, cmd: Command, subcmd: Command | undefined): Option[] {
+  if (thisName.startsWith('-')) {
+    if (cmd) {
+      let options: Option[];
       if (subcmd) {
         options = subcmd.options;
-      } else if (cmd) {
-        options = cmd.options;
+      } else {
+        options = cmd?.options;
       }
 
       // If current word is NOT old-style option, or command option database
@@ -282,19 +236,11 @@ async function getMatchingOption(root: SyntaxNode, position: vscode.Position, fe
         if (shortOptionNames.length > 0 && shortOptionNames.length === shortOptions.length) {
           return shortOptions;
         }
-        else {
-          return Promise.reject("[getMatchingOption] Not found (3).");
-        }
       }
-    } else {
-      return Promise.reject("[getMatchingOption] Not found (2).");
     }
-  } catch (e) {
-    console.error("[getMatchingOption] erorr: ", e);
-    return Promise.reject("[getMatchingOption] Not found.");
   }
+  return [];
 }
-
 
 function isNotOldStyle(name: string): boolean {
   return name.startsWith('--') || name.length === 2;
