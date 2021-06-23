@@ -38,5 +38,5 @@ This program depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/
 ## Known Issues
 
 * Command hovers and completions work only if
-    * The CLI data is preloaded
+    * The command is available in [the preprocessed CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/json), which is loaded automatically
     * Or, H2O successfully extracts the CLI information from your local environment.
