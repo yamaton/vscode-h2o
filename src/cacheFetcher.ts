@@ -59,29 +59,29 @@ export class CachingFetcher {
   static readonly keyPrefix = 'h2oFetcher.cache.';
   static readonly commandListKey = 'h2oFetcher.registered.all';
   private memento: Memento;
-  private registeredCommands: Set<string>;
+  private registeredCommands: string[];
 
   constructor(memento: Memento) {
     this.memento = memento;
-    this.registeredCommands = new Set<string>([]);
+    this.registeredCommands = [];
   }
 
   async init() {
-    const existing = this.getBag();
+    const existing = this.getList();
 
-    if (!existing || !existing.size || existing.size === 0) {
+    if (!existing || !existing.length || existing.length === 0) {
       console.log("---------------------------------------");
       console.log("              INIT");
       console.log("---------------------------------------");
-      this.registeredCommands = new Set<string>(["nanachi"]);
-      await this.updateBag();
-      console.log("this.getBag() = ", this.getBag());
+      this.registeredCommands = ["nanachi"];
+      await this.updateList();
+      console.log("this.getBag() = ", this.getList());
     } else {
       console.log("---------------------------------------");
       console.log("              LOAD");
       console.log("---------------------------------------");
       this.registeredCommands = existing;
-      console.log("this.getBag() = ", this.getBag());
+      console.log("this.getBag() = ", this.getList());
     }
   }
 
@@ -97,20 +97,20 @@ export class CachingFetcher {
   private async update(name: string, command: Command | undefined) {
     const key = CachingFetcher.getKey(name);
 
-    console.log(`set = `, this.registeredCommands);
+    console.log(`list = `, this.registeredCommands);
     if (command === undefined) {
       console.log(`--------newSet.delete ... doing nothing: ${name}---------`);
-      this.registeredCommands.delete(name);
+      this.registeredCommands = this.registeredCommands.filter(x => x !== name);
     } else {
       console.log(`--------newSet.add ${name}---------`);
-      this.registeredCommands.add(name);
+      this.registeredCommands.push(name);
     }
 
     try {
-      await this.updateBag();
-      console.log("[set update] done update");
-      console.log("[set update] ", this.registeredCommands);
-      console.log("[set update] ", this.getBag());
+      await this.updateList();
+      console.log("[list update] done update");
+      console.log("[list update] ", this.registeredCommands);
+      console.log("[list update] ", this.getList());
     } catch (e) {
       console.log("Failed to update command set: ", e);
     }
@@ -193,12 +193,12 @@ export class CachingFetcher {
     console.log('[CacheFetcher.unset] Unset the key for ... ', name);
   }
 
-  getBag() {
-    return this.memento.get<Set<string>>(CachingFetcher.commandListKey);
+  getList() {
+    return this.memento.get<string[]>(CachingFetcher.commandListKey);
   }
 
-  private async updateBag() {
-    this.memento.update(CachingFetcher.commandListKey, new Set([...this.registeredCommands.values()]));
+  private async updateList() {
+    this.memento.update(CachingFetcher.commandListKey, this.registeredCommands);
   }
 
 }
