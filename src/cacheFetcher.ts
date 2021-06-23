@@ -149,10 +149,9 @@ export class CachingFetcher {
     }
   }
 
-  async fetchAllCurated() {
+  async fetchAllCurated(isForcing = false) {
     console.log("[CacheFetcher.fetchAllCurated] Started running...");
     const url = 'https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/all.json.gz';
-    const response = await fetch(url);
     const checkStatus = (res: Response) => {
       if (res.ok) {
         return res;
@@ -161,13 +160,21 @@ export class CachingFetcher {
       }
     };
 
+    let response: Response;
     try {
+      response = await fetch(url);
       checkStatus(response);
     } catch (error) {
-      const errorBody = await error.response.text();
-      console.error(`Error body: ${errorBody}`);
-      return Promise.reject("Failed to fetch HTTP response.");
+      try {
+        const errorBody = await error.response.text();
+        console.error(`Error body: ${errorBody}`);
+        return Promise.reject("Failed to fetch HTTP response.");
+      } catch (e) {
+        console.error('Error ... even failed to fetch error body: ', e);
+        return Promise.reject("Failed to fetch over HTTP");
+      }
     }
+    console.log("[CacheFetcher.fetchAllCurated] received HTTP response");
 
     let commands: Command[] = [];
     try {
@@ -178,10 +185,11 @@ export class CachingFetcher {
       console.error("[fetchAllCurated] Error: ", err);
       return Promise.reject("Failed to inflate and parse the content as JSON.");
     }
+    console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Commands: ", commands.map((cmd) => cmd.name));
 
     for (const cmd of commands) {
       const key = CachingFetcher.getKey(cmd.name);
-      if (this.get(cmd.name) === undefined) {
+      if (isForcing || this.get(cmd.name) === undefined) {
         console.log(`[fetchAllCurated] Loading: ${cmd.name}`);
         await this.update(cmd.name, cmd);
       }
