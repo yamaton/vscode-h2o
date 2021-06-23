@@ -39,14 +39,19 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // this is an ugly hack to get current Node
         const p = walkbackIfNeeded(tree.rootNode, position);
-        const res: vscode.CompletionItem[] = [];
-        const compOptionsP = getCompletionsOptions(tree.rootNode, p, fetcher).then((xs) => res.push(...xs));
-        const compSubcommandsP = getCompletionsSubcommands(tree.rootNode, p, fetcher).then((xs) => res.push(...xs));
-        await Promise.allSettled([compOptionsP, compSubcommandsP]).then((results) => {
-          results.forEach((result) => console.log("Promise.allSettled: ", result.status));
-        });
-
-        return res;
+        try {
+          const [cmd, subcmd] = await getContextCmdSubcmdPair(tree.rootNode, p, fetcher);
+          if (cmd) {
+            const compSubcommands = getCompletionsSubcommands(tree.rootNode, p, cmd, subcmd);
+            const compOptions = getCompletionsOptions(tree.rootNode, p, cmd, subcmd);
+            return [
+              ...compSubcommands,
+              ...compOptions
+            ];
+          }
+        } catch (e) {
+          console.log("[Completion] Error ", e);
+        }
       }
     },
     ' ',  // triggerCharacter
@@ -388,39 +393,26 @@ function getContextCmdArgs(root: SyntaxNode, position: vscode.Position): string[
 
 
 // Get subcommand completions
-async function getCompletionsSubcommands(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<vscode.CompletionItem[]> {
-
-  try {
-    const [cmd, subcmd] = await getContextCmdSubcmdPair(root, position, fetcher);
-    if (subcmd === undefined) {
-      const subcommands = cmd.subcommands;
-      if (subcommands && subcommands.length) {
-        const compitems = subcommands.map((sub) => {
-          const item = new vscode.CompletionItem(sub.name);
-          item.detail = sub.description;
-          return item;
-        });
-        return compitems;
-      }
-      else {
-        return Promise.reject("[getCompletionsSubcommands] Not found (2).");
-      }
-    } else {
-      return Promise.reject("[getCompletionsSubcommands] Not found (3).");
+function getCompletionsSubcommands(root: SyntaxNode, position: vscode.Position, cmd: Command, subcmd: Command | undefined): vscode.CompletionItem[] {
+  if (subcmd === undefined) {
+    const subcommands = cmd.subcommands;
+    if (subcommands && subcommands.length) {
+      const compitems = subcommands.map((sub) => {
+        const item = new vscode.CompletionItem(sub.name);
+        item.detail = sub.description;
+        return item;
+      });
+      return compitems;
     }
-  } catch (e) {
-    console.error("[getCompletionsSubcommands] Error: ", e);
-    return Promise.reject("[getCompletionsSubcommands] Not found.");
   }
+  return [];
 }
 
 // Get option completion
-async function getCompletionsOptions(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<vscode.CompletionItem[]> {
-
-  try {
-    const compitems: vscode.CompletionItem[] = [];
-    const [cmd, subcmd] = await getContextCmdSubcmdPair(root, position, fetcher);
-    const args = getContextCmdArgs(root, position);
+function getCompletionsOptions(root: SyntaxNode, position: vscode.Position, cmd: Command, subcmd: Command | undefined): vscode.CompletionItem[] {
+  const args = getContextCmdArgs(root, position);
+  const compitems: vscode.CompletionItem[] = [];
+  if (cmd) {
     let options: Option[];
     if (subcmd) {
       options = subcmd.options;
@@ -441,11 +433,8 @@ async function getCompletionsOptions(root: SyntaxNode, position: vscode.Position
         });
       }
     });
-    return compitems;
-  } catch (e) {
-    console.error("[getCompletionsOptions] Error: ", e);
-    return Promise.reject("[getCompletionsOptions] compitems not found.");
   }
+  return compitems;
 }
 
 
