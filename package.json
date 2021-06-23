@@ -37,7 +37,7 @@
         "commands": [
             {
                 "command": "h2o.clearCache",
-                "title": "H2O: Clear Cache"
+                "title": "Shell Completion: Clear Cache"
             }
         ],
         "menus": {
@@ -49,7 +49,7 @@
             ]
         },
         "configuration": {
-            "title": "h2o",
+            "title": "Shell Completion",
             "properties": {
                 "h2o.h2oPath": {
                     "type": "string",
