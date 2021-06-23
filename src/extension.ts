@@ -34,6 +34,11 @@ export async function activate(context: vscode.ExtensionContext) {
           trees[document.uri.toString()] = parser.parse(document.getText());
         }
         const tree = trees[document.uri.toString()];
+        const commandList = fetcher.getList();
+        let compCommands: vscode.CompletionItem[] = [];
+        if (commandList) {
+          compCommands = commandList.map((s) => new vscode.CompletionItem(s));
+        }
 
         // this is an ugly hack to get current Node
         const p = walkbackIfNeeded(tree.rootNode, position);
@@ -44,7 +49,8 @@ export async function activate(context: vscode.ExtensionContext) {
             const compOptions = getCompletionsOptions(tree.rootNode, p, cmd, subcmd);
             return [
               ...compSubcommands,
-              ...compOptions
+              ...compOptions,
+              ...compCommands,
             ];
           }
         } catch (e) {
