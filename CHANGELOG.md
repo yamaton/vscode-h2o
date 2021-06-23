@@ -4,6 +4,10 @@ All notable changes to the "vscode-h2o" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.9]
+- Add command completion
+- Code refactoring
+
 ## [0.0.8]
 - Change the display name to "Shell Completion"
 - Fix the bug not showing completions in some cases.
