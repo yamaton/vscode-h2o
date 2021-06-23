@@ -42,7 +42,7 @@
             },
             {
                 "command": "h2o.downloadCurated",
-                "title": "Shell Completion: Download and Force Update Local Data"
+                "title": "Shell Completion: Download and Force Update Local CLI Data"
             }
         ],
         "menus": {
