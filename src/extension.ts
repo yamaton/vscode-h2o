@@ -40,7 +40,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const tree = trees[document.uri.toString()];
         const commandList = fetcher.getList();
         let compCommands: vscode.CompletionItem[] = [];
-        if (commandList) {
+        if (!!commandList) {
           compCommands = commandList.map((s) => new vscode.CompletionItem(s));
         }
 
@@ -48,7 +48,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const p = walkbackIfNeeded(tree.rootNode, position);
         try {
           const [cmd, subcmd] = await getContextCmdSubcmdPair(tree.rootNode, p, fetcher);
-          if (cmd) {
+          if (!!cmd) {
             const compSubcommands = getCompletionsSubcommands(cmd, subcmd);
             const compOptions = getCompletionsOptions(tree.rootNode, p, cmd, subcmd);
             return [
@@ -56,10 +56,13 @@ export async function activate(context: vscode.ExtensionContext) {
               ...compOptions,
               ...compCommands,
             ];
+          } else {
+            console.warn("[Completion] No completion item is available (2)");
+            return Promise.reject("No completion item is available");
           }
         } catch (e) {
-          console.log("[Completion] Error ", e);
-          return Promise.reject("No completion item is available");
+          console.warn("[Completion] No completion item is available (1)", e);
+          return Promise.reject("Error: No completion item is available");
         }
       }
     },
@@ -83,19 +86,21 @@ export async function activate(context: vscode.ExtensionContext) {
       const currentWord = getCurrentNode(tree.rootNode, position).text;
       try {
         const [cmd, subcmd] = await getContextCmdSubcmdPair(tree.rootNode, position, fetcher);
-        if (cmd && cmd.name === currentWord) {
+        if (!!cmd && cmd.name === currentWord) {
           const name = cmd.name;
           const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
           const msg = new vscode.MarkdownString(`\`${name}\`` + `\n\n[Reset](${clearCacheCommandUri})`);
           msg.isTrusted = true;
           return new vscode.Hover(msg);
-        } else if (cmd && subcmd && subcmd.name === currentWord) {
+        } else if (!!cmd && subcmd && subcmd.name === currentWord) {
           const msg = `${cmd.name} **${subcmd.name}**\n\n ${subcmd.description}`;
           return new vscode.Hover(new vscode.MarkdownString(msg));
-        } else if (cmd) {
+        } else if (!!cmd) {
           const opts = getMatchingOption(currentWord, cmd, subcmd);
           const msg = optsToMessage(opts);
           return new vscode.Hover(new vscode.MarkdownString(msg));
+        } else {
+          return Promise.reject(`No hover is available for ${currentWord}`);
         }
       } catch (e) {
         console.log("[Hover] Error: ", e);

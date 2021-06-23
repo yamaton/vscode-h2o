@@ -121,7 +121,7 @@ export class CachingFetcher {
 
   async fetch(name: string): Promise<Command> {
     if (name.length < 2) {
-      return Promise.reject("Command name too short.");
+      return Promise.reject(`Command name too short: ${name}`);
     }
 
     let cached = this.get(name);
