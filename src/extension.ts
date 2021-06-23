@@ -49,6 +49,7 @@ export async function activate(context: vscode.ExtensionContext) {
           }
         } catch (e) {
           console.log("[Completion] Error ", e);
+          return Promise.reject("No completion item is available");
         }
       }
     },
@@ -88,6 +89,7 @@ export async function activate(context: vscode.ExtensionContext) {
         }
       } catch (e) {
         console.log("[Hover] Error: ", e);
+        return Promise.reject("No hover is available");
       }
     }
   });
@@ -315,7 +317,7 @@ async function getContextCmdSubcmdPair(root: SyntaxNode, position: vscode.Positi
     return [command, undefined];
   } catch (e) {
     console.error("[getContextCmdSubcmdPair] Error: ", e);
-    return Promise.reject("[getContextCmdSubcmdPair] even cmd not found.");
+    return Promise.reject("[getContextCmdSubcmdPair] unknown command!");
   }
 }
 
