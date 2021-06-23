@@ -69,19 +69,20 @@ export class CachingFetcher {
   async init() {
     const existing = this.getBag();
 
-    // if (!existing || existing.size === 0) {
-    console.log("---------------------------------------");
-    console.log("              INIT");
-    console.log("---------------------------------------");
-    this.registeredCommands = new Set<string>(["nanachi"]);
-    await this.updateBag();
-    // } else {
-    //   console.log("---------------------------------------");
-    //   console.log("              LOAD");
-    //   console.log(existing.size);
-    //   console.log("---------------------------------------");
-    //   this.registeredCommands = existing;
-    // }
+    if (!existing || !existing.size || existing.size === 0) {
+      console.log("---------------------------------------");
+      console.log("              INIT");
+      console.log("---------------------------------------");
+      this.registeredCommands = new Set<string>(["nanachi"]);
+      await this.updateBag();
+      console.log("this.getBag() = ", this.getBag());
+    } else {
+      console.log("---------------------------------------");
+      console.log("              LOAD");
+      console.log("---------------------------------------");
+      this.registeredCommands = existing;
+      console.log("this.getBag() = ", this.getBag());
+    }
   }
 
   static getKey(name: string): string {
@@ -197,7 +198,7 @@ export class CachingFetcher {
   }
 
   private async updateBag() {
-    this.memento.update(CachingFetcher.commandListKey, this.registeredCommands);
+    this.memento.update(CachingFetcher.commandListKey, new Set([...this.registeredCommands.values()]));
   }
 
 }
