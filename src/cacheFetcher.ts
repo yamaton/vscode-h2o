@@ -150,9 +150,9 @@ export class CachingFetcher {
     }
   }
 
-  async fetchAllCurated(isForcing = false) {
+  async fetchAllCurated(kind = 'general', isForcing = false) {
     console.log("[CacheFetcher.fetchAllCurated] Started running...");
-    const url = 'https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/all.json.gz';
+    const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}.json.gz`;
     const checkStatus = (res: Response) => {
       if (res.ok) {
         return res;
@@ -195,6 +195,46 @@ export class CachingFetcher {
         await this.update(cmd.name, cmd);
       }
     }
+  }
+
+  async fetchList(kind = 'bio'): Promise<string[]> {
+    console.log("[CacheFetcher.fetchList] Started running...");
+    const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}.txt`;
+    const checkStatus = (res: Response) => {
+      if (res.ok) {
+        return res;
+      } else {
+        throw new HTTPResponseError(res);
+      }
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(url);
+      checkStatus(response);
+    } catch (error) {
+      try {
+        const errorBody = await error.response.text();
+        console.error(`Error body: ${errorBody}`);
+        return Promise.reject("Failed to fetch HTTP response.");
+      } catch (e) {
+        console.error('Error ... even failed to fetch error body: ', e);
+        return Promise.reject("Failed to fetch over HTTP");
+      }
+    }
+    console.log("[CacheFetcher.fetchList] received HTTP response");
+
+    let names: string[] = [];
+    try {
+      const content = await response.text();
+      names = content.split(/\r?\n/).map((str) => str.trim()).filter(s => !!s && s.length > 0);
+    } catch (err) {
+      const msg = `[CacheFetcher.fetchList] Error: ${err}`;
+      console.error(msg);
+      return Promise.reject(msg);
+    }
+    names.forEach((name) => console.log("    Received ", name));
+    return names;
   }
 
   async unset(name: string) {

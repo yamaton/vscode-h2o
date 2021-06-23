@@ -13,7 +13,7 @@
     "license": "MIT",
     "version": "0.0.12",
     "engines": {
-        "vscode": "^1.57.0"
+        "vscode": "^1.22.0"
     },
     "categories": [
         "Snippets",
@@ -31,7 +31,9 @@
     "activationEvents": [
         "onLanguage:shellscript",
         "onCommand:h2o.clearCache",
-        "onCommand:h2o.downloadCurated"
+        "onCommand:h2o.loadGeneral",
+        "onCommand:h2o.loadBio",
+        "onCommand:h2o.removeBio"
     ],
     "main": "./out/extension.js",
     "contributes": {
@@ -41,8 +43,16 @@
                 "title": "Shell Completion: Clear Cache"
             },
             {
-                "command": "h2o.downloadCurated",
-                "title": "Shell Completion: Download and Force Update Local CLI Data"
+                "command": "h2o.loadGeneral",
+                "title": "Shell Completion: Load General-Purpose CLI Data"
+            },
+            {
+                "command": "h2o.loadBio",
+                "title": "Shell Completion: Load Bioinformatics CLI Data"
+            },
+            {
+                "command": "h2o.removeBio",
+                "title": "Shell Completion: Remove Bioinformatics CLI Data"
             }
         ],
         "menus": {
@@ -52,7 +62,15 @@
                     "when": "editorLangId == shellscript"
                 },
                 {
-                    "command": "h2o.downloadCurated",
+                    "command": "h2o.loadGeneral",
+                    "when": "editorLangId == shellscript"
+                },
+                {
+                    "command": "h2o.loadBio",
+                    "when": "editorLangId == shellscript"
+                },
+                {
+                    "command": "h2o.removeBio",
                     "when": "editorLangId == shellscript"
                 }
             ]

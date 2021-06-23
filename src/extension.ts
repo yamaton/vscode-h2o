@@ -19,7 +19,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const fetcher = new CachingFetcher(context.globalState);
   await fetcher.init();
   try {
-    await fetcher.fetchAllCurated();
+    await fetcher.fetchAllCurated("general");
   } catch {
     console.warn("Failed in fetch.fetchAllCurated().");
   }
@@ -155,30 +155,68 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
 
-  const invokeDownloadingCommand = vscode.commands.registerCommand('h2o.downloadCurated', async () => {
+  const invokeDownloadingGeneral = vscode.commands.registerCommand('h2o.loadGeneral', async () => {
     try {
-      console.log('[Command] Download curated data');
-      const msg1 = `[Shell Completion] Downloading and updates...`;
+      console.log('[h2o.loadGeneral] Load general-purpose CLI data');
+      const msg1 = `[Shell Completion] Loading general-purpose CLI data...`;
       vscode.window.showInformationMessage(msg1);
 
-      await fetcher.fetchAllCurated(true);
+      await fetcher.fetchAllCurated('general', true);
     } catch (e) {
-      console.error("[h2o.downloadCurated] Error: ", e);
-      return Promise.reject("[h2o.downloadCurated] Error: ");
+      console.error("[h2o.loadGeneral] Error: ", e);
+      const msg = `[Shell Completion] Error: Failed to load general CLI info`;
+      vscode.window.showInformationMessage(msg);
+      return Promise.reject("[h2o.loadGeneral] Error: ");
     }
 
-    const msg = `[Shell Completion] Succeeded downloads and updates!`;
+    const msg = `[Shell Completion] Succssfully loaded general-purpose CLI info`;
     vscode.window.showInformationMessage(msg);
   });
 
 
+  const invokeDownloadingBio = vscode.commands.registerCommand('h2o.loadBio', async () => {
+    try {
+      console.log('[h2o.loadBio] Load Bioinformatics CLI data');
+      const msg1 = `[Shell Completion] Loading bioinformatics CLI info...`;
+      vscode.window.showInformationMessage(msg1);
+
+      await fetcher.fetchAllCurated('bio', true);
+    } catch (e) {
+      console.error("[h2o.loadBio] Error: ", e);
+      return Promise.reject("[h2o.loadBio] Error: ");
+    }
+
+    const msg = `[Shell Completion] Succssfully loaded bioinformatics CLI info!`;
+    vscode.window.showInformationMessage(msg);
+  });
+
+  const removeBio = vscode.commands.registerCommand('h2o.removeBio', async () => {
+    try {
+      console.log('[h2o.removeBio] Remove Bioinformatics CLI data');
+      const msg1 = `[Shell Completion] Removing bioinformatics CLI info...`;
+      vscode.window.showInformationMessage(msg1);
+
+      const names = await fetcher.fetchList('bio');
+      names.forEach(async (name) => await fetcher.unset(name));
+    } catch (e) {
+      console.error("[h2o.removeBio] Error: ", e);
+      return Promise.reject("[h2o.removeBio] Fetch Error: ");
+    }
+
+    const msg = `[Shell Completion] Succssfully removed bioinformatics CLI info!`;
+    vscode.window.showInformationMessage(msg);
+  });
+
   context.subscriptions.push(clearCacheCommand);
-  context.subscriptions.push(invokeDownloadingCommand);
+  context.subscriptions.push(invokeDownloadingGeneral);
+  context.subscriptions.push(invokeDownloadingBio);
+  context.subscriptions.push(removeBio);
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(edit));
   context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(close));
   context.subscriptions.push(compprovider);
   context.subscriptions.push(hoverprovider);
 }
+
 
 // Convert: vscode.Position -> Parser.Point
 function asPoint(p: vscode.Position): Parser.Point {
