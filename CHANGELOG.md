@@ -4,6 +4,12 @@ All notable changes to the "vscode-h2o" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.13] In Progress
+- Remove command "Download and Force Update Local CLI Data"
+- Add command "Load General-Purpose CLI Data"
+- Add command "Load Bioinformatics CLI Data"
+- Add command "Remove Bioinformatics CLI Data"
+
 ## [0.0.12]
 - Suppress command completion when other completions are available
 
