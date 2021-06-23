@@ -67,10 +67,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const p1 = getMachingCommand(tree.rootNode, position, fetcher).then(
         (cmd) => {
-          console.log("------------------------------");
-          console.log("commands: ", fetcher.getBag());
-          console.log("------------------------------");
-
           const name = cmd.description!;
           const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
           const msg = new vscode.MarkdownString(`\`${name}\`` + `\n\n[Reset](${clearCacheCommandUri})`);
@@ -91,7 +87,8 @@ export async function activate(context: vscode.ExtensionContext) {
         return new vscode.Hover(new vscode.MarkdownString(msg));
       });
 
-      return Promise.any([p1, p2, p3]);
+      const hover = await Promise.any([p1, p2, p3]);
+      return hover;
     }
   });
 
