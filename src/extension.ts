@@ -3,6 +3,7 @@ import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
+import * as BluePromise from 'bluebird';
 
 
 async function initializeParser(): Promise<Parser> {
@@ -87,8 +88,15 @@ export async function activate(context: vscode.ExtensionContext) {
         return new vscode.Hover(new vscode.MarkdownString(msg));
       });
 
-      const hover = await Promise.any([p1, p2, p3]);
-      return hover;
+      try {
+        const hover = await BluePromise.any([p1, p2, p3]);
+        if (hover) {
+          console.log("hover!");
+          return hover;
+        }
+      } catch (e) {
+        console.log("Error: Promise.any() ", e);
+      }
     }
   });
 
