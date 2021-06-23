@@ -52,15 +52,18 @@ export async function activate(context: vscode.ExtensionContext) {
             const compSubcommands = getCompletionsSubcommands(cmd, subcmd);
             const compOptions = getCompletionsOptions(tree.rootNode, p, cmd, subcmd);
             return [
+              ...compCommands,
               ...compSubcommands,
               ...compOptions,
-              ...compCommands,
             ];
           } else {
-            console.warn("[Completion] No completion item is available (2)");
-            return Promise.reject("No completion item is available");
+            throw new Error("unknown command");
           }
         } catch (e) {
+          if (!!compCommands) {
+            console.info("[Completion] Only command completion is available (2)");
+            return compCommands;
+          }
           console.warn("[Completion] No completion item is available (1)", e);
           return Promise.reject("Error: No completion item is available");
         }
