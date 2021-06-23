@@ -4,6 +4,14 @@ All notable changes to the "vscode-h2o" extension will be documented in this fil
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.11]
+- Reintroduce command completion
+- Add command "Download and Force Update Local CLI Data"
+- Bugfixes including crash when disconnected
+
+## [0.0.10]
+- Revert to 0.0.8+
+
 ## [0.0.9]
 - Add command completion
 - Code refactoring
