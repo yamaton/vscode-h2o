@@ -40,7 +40,7 @@ export async function activate(context: vscode.ExtensionContext) {
         try {
           const [cmd, subcmd] = await getContextCmdSubcmdPair(tree.rootNode, p, fetcher);
           if (cmd) {
-            const compSubcommands = getCompletionsSubcommands(tree.rootNode, p, cmd, subcmd);
+            const compSubcommands = getCompletionsSubcommands(cmd, subcmd);
             const compOptions = getCompletionsOptions(tree.rootNode, p, cmd, subcmd);
             return [
               ...compSubcommands,
@@ -339,7 +339,7 @@ function getContextCmdArgs(root: SyntaxNode, position: vscode.Position): string[
 
 
 // Get subcommand completions
-function getCompletionsSubcommands(root: SyntaxNode, position: vscode.Position, cmd: Command, subcmd: Command | undefined): vscode.CompletionItem[] {
+function getCompletionsSubcommands(cmd: Command, subcmd: Command | undefined): vscode.CompletionItem[] {
   if (subcmd === undefined) {
     const subcommands = cmd.subcommands;
     if (subcommands && subcommands.length) {
