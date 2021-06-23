@@ -3,8 +3,6 @@ import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
-import * as BluePromise from 'bluebird';
-
 
 async function initializeParser(): Promise<Parser> {
   await Parser.init();
