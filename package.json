@@ -13,7 +13,7 @@
     "license": "MIT",
     "version": "0.0.13",
     "engines": {
-        "vscode": "^1.22.0"
+        "vscode": "^1.57.0"
     },
     "categories": [
         "Snippets",
@@ -26,6 +26,7 @@
         "bash",
         "completion",
         "intellisense",
+        "bioinformatics",
         "h2o"
     ],
     "activationEvents": [
@@ -81,7 +82,7 @@
                 "h2o.h2oPath": {
                     "type": "string",
                     "default": "<bundled>",
-                    "description": "Path to the H2O executable. Enter <bundled> if using the bundled one."
+                    "description": "Path to the H2O executable. Enter <bundled> if using the bundled."
                 }
             }
         }
