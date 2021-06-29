@@ -413,9 +413,10 @@ function getCompletionsSubcommands(cmd: Command, subcmd: Command | undefined): v
   if (subcmd === undefined) {
     const subcommands = cmd.subcommands;
     if (subcommands && subcommands.length) {
-      const compitems = subcommands.map((sub) => {
+      const compitems = subcommands.map((sub, idx) => {
         const item = new vscode.CompletionItem(sub.name);
         item.detail = sub.description;
+        item.sortText = `33-${idx.toString().padStart(4)}`;
         return item;
       });
       return compitems;
@@ -435,12 +436,13 @@ function getCompletionsOptions(root: SyntaxNode, position: vscode.Position, cmd:
     } else {
       options = cmd?.options;
     }
-    options.forEach(opt => {
+    options.forEach((opt, idx) => {
       // suppress already-used options
       if (opt.names.every(name => !args.includes(name))) {
         opt.names.forEach(name => {
           const item = new vscode.CompletionItem(name);
           item.detail = opt.description;
+          item.sortText = `55-${idx.toString().padStart(4)}`;
           if (opt.argument) {
             const snippet = `${name} \$\{1:${opt.argument}\}`;
             item.insertText = new vscode.SnippetString(snippet);

@@ -1,10 +1,13 @@
 # Change Log
 
-All notable changes to the "vscode-h2o" extension will be documented in this file.
+## [0.0.14]
+- Bump H2O to v0.1.11
+    - Bugfixes
+- Introduce non-alphabetical ordering of completion items
+    - Subcommands comes earlier than options
+    - Each ordering respects the source
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
-
-## [0.0.13] In Progress
+## [0.0.13]
 - Remove command "Download and Force Update Local CLI Data"
 - Add command "Load General-Purpose CLI Data"
 - Add command "Load Bioinformatics CLI Data"
