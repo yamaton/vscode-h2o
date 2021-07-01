@@ -1,11 +1,11 @@
 # Change Log
 
 ## [0.0.14]
-- Bump H2O to v0.1.11
-    - Bugfixes
+- Bump H2O to v0.1.12
+    - Bugfixes and performance improvements
 - Introduce non-alphabetical ordering of completion items
-    - Subcommands comes earlier than options
-    - Each ordering respects the source
+    - Subcommands appear before options
+    - Ordering respects the source
 
 ## [0.0.13]
 - Remove command "Download and Force Update Local CLI Data"
