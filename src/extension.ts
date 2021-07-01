@@ -286,7 +286,8 @@ function walkbackIfNeeded(root: SyntaxNode, position: vscode.Position): vscode.P
   return position;
 }
 // Returns current word as an option if the tree-sitter says so
-function getMatchingOption(thisName: string, cmd: Command, subcmd: Command | undefined): Option[] {
+function getMatchingOption(currentWord: string, cmd: Command, subcmd: Command | undefined): Option[] {
+  const thisName = currentWord.split('=', 2)[0];
   if (thisName.startsWith('-')) {
     if (cmd) {
       let options: Option[];
