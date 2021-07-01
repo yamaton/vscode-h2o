@@ -45,12 +45,12 @@ export async function activate(context: vscode.ExtensionContext) {
         }
 
         // this is an ugly hack to get current Node
-        const p = walkbackIfNeeded(tree.rootNode, position);
+        const p = walkbackIfNeeded(document, tree.rootNode, position);
         try {
           const [cmd, subcmd] = await getContextCmdSubcmdPair(tree.rootNode, p, fetcher);
           if (!!cmd) {
             const compSubcommands = getCompletionsSubcommands(cmd, subcmd);
-            const compOptions = getCompletionsOptions(tree.rootNode, p, cmd, subcmd);
+            const compOptions = getCompletionsOptions(document, tree.rootNode, p, cmd, subcmd);
             return [
               ...compSubcommands,
               ...compOptions,
@@ -274,17 +274,24 @@ function getCurrentNode(n: SyntaxNode, position: vscode.Position): SyntaxNode {
 // This is just a workround as you cannot reach command node if you start from
 // the position, say, after 'echo '
 // [FIXME] Do not rely on such an ugly hack
-function walkbackIfNeeded(root: SyntaxNode, position: vscode.Position): vscode.Position {
+function walkbackIfNeeded(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position): vscode.Position {
   const thisNode = getCurrentNode(root, position);
   console.debug("[walkbackIfNeeded] thisNode.type: ", thisNode.type);
-
   if (position.character > 0 && thisNode.type !== 'word') {
     console.info("[walkbackIfNeeded] stepping back!");
-    return walkbackIfNeeded(root, position.translate(0, -1));
+    return walkbackIfNeeded(document, root, position.translate(0, -1));
+  } else if (thisNode.type !== 'word' && position.character === 0 && position.line > 0) {
+    const prevLineIndex = position.line - 1;
+    const prevLine = document.lineAt(prevLineIndex);
+    if (prevLine.text.trimRight().endsWith('\\')) {
+      const charIndex = prevLine.text.trimRight().length - 1;
+      return walkbackIfNeeded(document, root, new vscode.Position(prevLineIndex, charIndex));
+    }
   }
-
   return position;
 }
+
+
 // Returns current word as an option if the tree-sitter says so
 function getMatchingOption(currentWord: string, cmd: Command, subcmd: Command | undefined): Option[] {
   const thisName = currentWord.split('=', 2)[0];
@@ -398,8 +405,8 @@ async function getContextCmdSubcmdPair(root: SyntaxNode, position: vscode.Positi
 
 
 // Get command arguments as string[]
-function getContextCmdArgs(root: SyntaxNode, position: vscode.Position): string[] {
-  const p = walkbackIfNeeded(root, position);
+function getContextCmdArgs(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position): string[] {
+  const p = walkbackIfNeeded(document, root, position);
   let node = _getContextCommandNode(root, p)?.firstNamedChild;
   if (node?.text === 'sudo') {
     node = node.nextSibling;
@@ -436,8 +443,8 @@ function getCompletionsSubcommands(cmd: Command, subcmd: Command | undefined): v
 }
 
 // Get option completion
-function getCompletionsOptions(root: SyntaxNode, position: vscode.Position, cmd: Command, subcmd: Command | undefined): vscode.CompletionItem[] {
-  const args = getContextCmdArgs(root, position);
+function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position, cmd: Command, subcmd: Command | undefined): vscode.CompletionItem[] {
+  const args = getContextCmdArgs(document, root, position);
   const compitems: vscode.CompletionItem[] = [];
   if (cmd) {
     let options: Option[];
