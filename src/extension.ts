@@ -403,7 +403,12 @@ function getContextCmdArgs(root: SyntaxNode, position: vscode.Position): string[
   const res: string[] = [];
   while (node?.nextSibling) {
     node = node.nextSibling;
-    res.push(node.text);
+    let text = node.text;
+    // --option=arg
+    if (text.startsWith('--') && text.includes('=')) {
+      text = text.split('=', 2)[0];
+    }
+    res.push(text);
   }
   return res;
 }
