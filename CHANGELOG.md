@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.0.15]
+- Support the multi-lined command where continued line ends with `\`
+- Fix hover not working on `--option=arg`
+- Fix hover not working on a short option immediately followed by an argument `-oArgument`
+- Fix completion candidates not ignoring properly after `--option=arg`
+
 ## [0.0.14]
 - Bump H2O to v0.1.12
     - Bugfixes and performance improvements

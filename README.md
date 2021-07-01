@@ -63,3 +63,5 @@ This program depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/
     * The command is available in [the preprocessed general-purpose CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json), which is loaded automatically if not already created locally.
         * Optionally, one can load [preprocessed bioinformatics CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/bio/json) with the command.
     * Or, H2O successfully extracts the CLI information from your local environment.
+
+* Completions candidates are not supressed properly after stacked notation (i.e. `--xvf`) and a short option immediately followed by an argument (i.e. `-oArgument`).
