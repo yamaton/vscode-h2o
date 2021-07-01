@@ -301,11 +301,14 @@ function getMatchingOption(currentWord: string, cmd: Command, subcmd: Command | 
       if (theOption) {
         return [theOption];
       } else if (isOldStyle(thisName)) {
-        // Otherwise, deal with a stacked option like `tar -xvf`
+        // deal with a stacked options like `-xvf`
+        // or, a short option immediately followed by an argument, i.e. '-oArgument'
         const shortOptionNames = unstackOption(thisName);
         const shortOptions = shortOptionNames.map(short => options.find(opt => opt.names.includes(short))!).filter(opt => opt);
         if (shortOptionNames.length > 0 && shortOptionNames.length === shortOptions.length) {
-          return shortOptions;
+          return shortOptions;        // i.e. -xvf
+        } else if (shortOptions.length > 0) {
+          return [shortOptions[0]];   // i.e. -oArgument
         }
       }
     }
@@ -322,7 +325,8 @@ function isOldStyle(name: string): boolean {
 }
 
 function unstackOption(name: string): string[] {
-  return name.substring(1).split('').map(c => c.padStart(2, '-'));
+  const xs = name.substring(1).split('').map(c => c.padStart(2, '-'));
+  return [...new Set(xs)];
 }
 
 // Get command node inferred from the current position
