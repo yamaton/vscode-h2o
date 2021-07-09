@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.0.16]
+- Bump H2O to v0.1.14
+    - Much better macos support
+    - Improved parsing
+
 ## [0.0.15]
 - Support the multi-lined command where continued line ends with `\`
 - Fix hover not working on `--option=arg`
