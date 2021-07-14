@@ -4,6 +4,7 @@ import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
 
+
 async function initializeParser(): Promise<Parser> {
   await Parser.init();
   const parser = new Parser;
@@ -431,8 +432,7 @@ function getCompletionsSubcommands(cmd: Command, subcmd: Command | undefined): v
     const subcommands = cmd.subcommands;
     if (subcommands && subcommands.length) {
       const compitems = subcommands.map((sub, idx) => {
-        const item = new vscode.CompletionItem(sub.name);
-        item.detail = sub.description;
+        const item = createCompletionItem(sub.name, sub.description);
         item.sortText = `33-${idx.toString().padStart(4)}`;
         return item;
       });
@@ -457,8 +457,7 @@ function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, 
       // suppress already-used options
       if (opt.names.every(name => !args.includes(name))) {
         opt.names.forEach(name => {
-          const item = new vscode.CompletionItem(name);
-          item.detail = opt.description;
+          const item = createCompletionItem(name, opt.description);
           item.sortText = `55-${idx.toString().padStart(4)}`;
           if (opt.argument) {
             const snippet = `${name} \$\{1:${opt.argument}\}`;
@@ -473,5 +472,8 @@ function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, 
 }
 
 
+function createCompletionItem(label: string, desc: string): vscode.CompletionItem {
+  return new vscode.CompletionItem({ label: label, description: desc });
+}
 
 export function deactivate() { }
