@@ -1,7 +1,7 @@
 {
     "name": "vscode-h2o",
     "displayName": "Shell Completion",
-    "description": "Enable shell completion in shell script mode",
+    "description": "Add CLI autocomplete functionalities to Shell Script",
     "repository": {
         "url": "https://github.com/yamaton/vscode-h2o"
     },
