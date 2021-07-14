@@ -4,6 +4,7 @@
 - Show description in all lines of subcommand and option/flag completions
 - Bump H2O to v0.1.15
     - Bugfixes
+
 ## [0.0.16]
 - Bump H2O to v0.1.14
     - Much better macos support
