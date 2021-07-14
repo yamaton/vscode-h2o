@@ -1,24 +1,62 @@
-# CLI Completion -- H2O for VS Code
+# Shell Completion
 
-This extension enables completion, auto-completing subcommands and options, for CLI programs in Shell Script. It uses [H2O](https://github.com/yamaton/h2o) as the backend; H2O extracts CLI information by executing and parsing `<command> --help` or manpages (and `<command> <subcommand> --help` if needed).
+This extension adds shell-completion-like autocomplete functionality to the **Shell Script mode**. 
 
-
-**[NOTE]** `h2o` executable is bundled, but it's for Linux/WSL and MacOS (x86-64) only.
-
-
-## Shell completion demo
-![shellcomp](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/vscode-h2o-completion.gif)
-
-## Hover demo
-![hover](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/vscode-h2o-hover.gif)
+* Option argument / flag completion
+* Subcommand completion
+* Mouse-over introspection for subcommands and options
+* Command name completion
+* **No configuration needed**
 
 
 
-## Sandbox for Linux Users
-Please consider installing [bubblewrap](https://wiki.archlinux.org/title/Bubblewrap) if using the extension on Linux or WSL. H2O runs commands in the sandbox, if available, such that untrusted commands do no harm.
+
+## Demo: Autocomplete in Shell Script
+![shellcomp](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/demo-autocomplete.gif)
 
 
-## Extension Commands
+
+## Demo: Mouse-over introspection
+
+![hover](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/demo-mouseover.gif)
+
+
+
+## Preloaded commands
+
+[Here](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the list of preloaded CLI data though this extension can dynamically extract autocomplete data from man and help pages in your local environment. The list includes,
+
+* git
+* npm
+* docker
+* terraform
+* brew
+* apt
+* conda
+* cargo
+* go
+* ... and many more!
+
+Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you feel some tools are missing.
+
+
+
+## Extra For Bioinformaticians
+
+[Here](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) is the list of preprocessed CLI data for bioinformatics tools. To load this bioinformatics-specific data, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` . 
+
+* BLAST
+* GATK
+* seqkit
+* samtools
+* Quast
+* ... and many more!
+
+Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you feel some tools are missing.
+
+
+
+## Extension-specific Commands
 
 This extension provides following commands:
 
@@ -28,40 +66,50 @@ This extension provides following commands:
 * `Shell Completion: Remove Bioinformatics CLI Data`: Remove bioinformatics CLI info from the local cache.
 
 
+
 ## Extension Configuration
 
-* `Shell Completion: Path`: Set path to H2O. Enter `<bundled>` to use the bundled.
+* `Shell Completion: Path`: Set path to H2O, a manpage/help parser. Leave it `<bundled>` to use the bundled executable.
+
+
+
+## Sandbox for Linux Users
+
+Please consider installing [bubblewrap](https://wiki.archlinux.org/title/Bubblewrap) if you're on Linux or WSL. H2O runs in the sandbox, if available, such that untrusted commands do no harm to your system.
 
 
 
 ## Trouble Shooting
 
-#### Not showing command-name completion for certain commands?
-This glitch occurs due to the transition to v0.0.11 and later. We may be able to solve this by reloading the command:
+#### Autocomplete not working in some commands?
 
-1. Type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS), choose `Shell Completion: Clear Cache`, and specify the name to remove the command from the cache.
-2. Type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) again and choose `Shell Completion: Load General-Purpose CLI Data` or `Shell Completion: Load Bioinformatics CLI Data`.
-
-
-#### Annoyed by completions of unwanted program names?
-To remove the bioinformatics CLI info, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Data`. You can also remove the CLI information one by one by invoking `Shell Completion: Clear Cache` command.
-
-
-#### Need bioinformatics tools?
-[Here](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) is the list of currently preprocessed CLI data for bioinformatics tools. Type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to load them. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you feel some tools missing.
+* If the command is in [this list (general)](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load General-Purpose CLI Data` to reload the preprocessed data.
+* If the command is in [this list (bio)](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to reload the preprocessed data.
+* Otherwise, it's likely that H2O failed to parse the command info, and the junk data is in the way.  Type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS), choose `Shell Completion: Clear Cache`, and enter the name of the command to remove the data from the cache. Then H2O will try recreating the CLI data.
 
 
 
-## Internals
 
-This program depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand shell script.
+#### Annoyed by unwanted programs?
+To remove all autocomplete info, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Data`. You can also remove any CLI data one by one by invoking `Shell Completion: Clear Cache` command from `Ctrl`+`Shift`+`P` ( `⌘`+`⇧`+`P` ).
+
+
+
+## How the extension works
+
+* This extension uses [preprocessed data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) to show command data if available.
+* Otherwise, this extension runs [H2O](https://github.com/yamaton/h2o) and extracts CLI information by parsing `man <command>`  or  `<command> --help`.
+  * **[NOTE]** Bundled `h2o` runs on Linux/WSL and macOS only.
+* This program depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand shell script structure.
+
+
 
 
 ## Known Issues
 
-* Command hovers and completions work only if
-    * The command is available in [the preprocessed general-purpose CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json), which is loaded automatically if not already created locally.
-        * Optionally, one can load [preprocessed bioinformatics CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/bio/json) with the command.
-    * Or, H2O successfully extracts the CLI information from your local environment.
+* Autocomplete and mouse-over introspection work only if
+  * The command is available in [the preprocessed CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) loaded at the startup.
+  * Or, H2O successfully extracts the CLI information from your local environment.
 
-* Completions candidates are not supressed properly after stacked notation (i.e. `--xvf`) and a short option immediately followed by an argument (i.e. `-oArgument`).
+
+
