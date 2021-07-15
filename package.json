@@ -16,17 +16,18 @@
         "vscode": "^1.58.0"
     },
     "categories": [
-        "Snippets",
-        "Other"
+        "Snippets"
     ],
     "keywords": [
+        "shellscript",
+        "completion",
+        "autocomplete",
+        "intellisense",
         "cli",
+        "bioinformatics",
         "man",
         "shell",
         "bash",
-        "completion",
-        "intellisense",
-        "bioinformatics",
         "h2o"
     ],
     "activationEvents": [
