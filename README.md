@@ -1,10 +1,10 @@
 # Shell Completion
 
-This extension adds shell-completion-like autocomplete functionality to the **Shell Script mode**. 
+This extension adds shell-completion-like autocomplete and introspection to the **Shell Script mode**.
 
 * Option argument / flag completion
 * Subcommand completion
-* Mouse-over introspection for subcommands and options
+* Pop-up introspection for subcommands and options
 * Command name completion
 * **No configuration needed**
 
@@ -16,15 +16,15 @@ This extension adds shell-completion-like autocomplete functionality to the **Sh
 
 
 
-## Demo: Mouse-over introspection
+## Demo: Pop-up introspection
 
 ![hover](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/demo-mouseover.gif)
 
 
 
-## Preloaded commands
+## Preloaded data
 
-[Here](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the list of preloaded CLI data though this extension can dynamically extract autocomplete data from man and help pages in your local environment. The list includes,
+This extension comes with some CLI data though this extension can dynamically extract autocompletion data from man and help pages in your local environment. The preprocessed data support
 
 * git
 * npm
@@ -37,13 +37,11 @@ This extension adds shell-completion-like autocomplete functionality to the **Sh
 * go
 * ... and many more!
 
-Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you feel some tools are missing.
+[Here](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the complete list. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you want more tools added.
 
+## Autocompletion data for bioinformatics tools
 
-
-## Extra For Bioinformaticians
-
-[Here](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) is the list of preprocessed CLI data for bioinformatics tools. To load this bioinformatics-specific data, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` . 
+Autocompletion data for some bioinformatics tools is available. Type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to load the data.
 
 * BLAST
 * GATK
@@ -52,11 +50,11 @@ Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you 
 * Quast
 * ... and many more!
 
-Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you feel some tools are missing.
+[Here](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the list of bioinformatics tools supported by the extra data. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you find some missing.
 
 
 
-## Extension-specific Commands
+## Extension Commands
 
 This extension provides following commands:
 
@@ -75,8 +73,7 @@ This extension provides following commands:
 
 ## Sandbox for Linux Users
 
-Please consider installing [bubblewrap](https://wiki.archlinux.org/title/Bubblewrap) if you're on Linux or WSL. H2O runs in the sandbox, if available, such that untrusted commands do no harm to your system.
-
+Please consider installing [bubblewrap](https://wiki.archlinux.org/title/Bubblewrap), a sandboxing program, if you're on Linux or WSL. H2O automatically runs in the sandbox if available such that untrusted commands do no harm to your system.
 
 
 ## Trouble Shooting
@@ -103,13 +100,10 @@ To remove all autocomplete info, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on 
 * This program depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand shell script structure.
 
 
-
-
 ## Known Issues
 
 * Autocomplete and mouse-over introspection work only if
   * The command is available in [the preprocessed CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) loaded at the startup.
   * Or, H2O successfully extracts the CLI information from your local environment.
-
 
 
