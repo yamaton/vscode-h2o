@@ -2,13 +2,11 @@
 
 This extension adds shell-completion-like autocomplete and introspection to the **Shell Script mode**.
 
-* Option argument / flag completion
+* Command-line option/flag completion
 * Subcommand completion
-* Pop-up introspection for subcommands and options
+* Pop-up introspection for subcommands and options/flags
 * Command name completion
 * **No configuration needed**
-
-
 
 
 ## Demo: Autocomplete in Shell Script
@@ -78,16 +76,16 @@ Please consider installing [bubblewrap](https://wiki.archlinux.org/title/Bubblew
 
 ## Trouble Shooting
 
-#### Autocomplete not working in some commands?
+### Not working for some commands?
 
-* If the command is in [this list (general)](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load General-Purpose CLI Data` to reload the preprocessed data.
-* If the command is in [this list (bio)](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to reload the preprocessed data.
+* If the command is in [this list](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load General-Purpose CLI Data` to reload the preprocessed data.
+* If the command is in [this (bio) list](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to reload the preprocessed data.
 * Otherwise, it's likely that H2O failed to parse the command info, and the junk data is in the way.  Type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS), choose `Shell Completion: Clear Cache`, and enter the name of the command to remove the data from the cache. Then H2O will try recreating the CLI data.
 
 
 
 
-#### Annoyed by unwanted programs?
+### Annoyed by unwanted programs?
 To remove all autocomplete info, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Data`. You can also remove any CLI data one by one by invoking `Shell Completion: Clear Cache` command from `Ctrl`+`Shift`+`P` ( `⌘`+`⇧`+`P` ).
 
 
