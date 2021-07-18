@@ -18,6 +18,7 @@
     "categories": [
         "Snippets"
     ],
+    "icon": "images/animal_chara_computer_penguin.png",
     "keywords": [
         "shellscript",
         "completion",
