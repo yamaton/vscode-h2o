@@ -1,5 +1,8 @@
 # Change Log
 
+## [0.0.19] (2021-07-18)
+- Fix icon
+
 ## [0.0.18] (2021-07-18)
 - Bump H2O to v0.1.17
     - Fix a bug in checking manpage availability
