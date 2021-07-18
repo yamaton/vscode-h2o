@@ -1,5 +1,13 @@
 # Change Log
 
+## [0.0.18] (2021-07-18)
+- Bump H2O to v0.1.17
+    - Fix a bug in checking manpage availability
+    - Add more help query scanning
+    - Minior fixes
+    - **[WARNING]** temporary disable sandboxing for performance
+- Add icon (Credit: https://www.irasutoya.com/)
+
 ## [0.0.17] (2021-07-14)
 - Show description in all lines of subcommand and option/flag completions
 - Bump H2O to v0.1.15
