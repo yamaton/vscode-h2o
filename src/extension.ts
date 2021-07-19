@@ -156,21 +156,21 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
 
-  const invokeDownloadingGeneral = vscode.commands.registerCommand('h2o.loadGeneral', async () => {
+  const invokeDownloadingCommon = vscode.commands.registerCommand('h2o.loadCommon', async () => {
     try {
-      console.log('[h2o.loadGeneral] Load general-purpose CLI data');
-      const msg1 = `[Shell Completion] Loading general-purpose CLI data...`;
+      console.log('[h2o.loadCommon] Load common CLI data');
+      const msg1 = `[Shell Completion] Loading common CLI data...`;
       vscode.window.showInformationMessage(msg1);
 
       await fetcher.fetchAllCurated('general', true);
     } catch (e) {
-      console.error("[h2o.loadGeneral] Error: ", e);
+      console.error("[h2o.loadCommon] Error: ", e);
       const msg = `[Shell Completion] Error: Failed to load general CLI info`;
       vscode.window.showInformationMessage(msg);
-      return Promise.reject("[h2o.loadGeneral] Error: ");
+      return Promise.reject("[h2o.loadCommon] Error: ");
     }
 
-    const msg = `[Shell Completion] Succssfully loaded general-purpose CLI info`;
+    const msg = `[Shell Completion] Succssfully loaded common CLI info`;
     vscode.window.showInformationMessage(msg);
   });
 
@@ -209,7 +209,7 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
   context.subscriptions.push(clearCacheCommand);
-  context.subscriptions.push(invokeDownloadingGeneral);
+  context.subscriptions.push(invokeDownloadingCommon);
   context.subscriptions.push(invokeDownloadingBio);
   context.subscriptions.push(removeBio);
   context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(edit));

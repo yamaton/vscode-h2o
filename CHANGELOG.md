@@ -1,5 +1,8 @@
 # Change Log
 
+## [0.0.20]
+- Rename command "Load General-Purpose CLI Data" to "Load Common CLI Data"
+
 ## [0.0.19] (2021-07-18)
 - Fix icon
 

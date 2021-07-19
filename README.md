@@ -57,7 +57,7 @@ Autocompletion data for some bioinformatics tools is available. Type `Ctrl`+`Shi
 This extension provides following commands:
 
 * `Shell Completion: Clear Cache`: Clears cache for the specified command. May be invoked from `Reset` button on a hover window over a command.
-* `Shell Completion: Load General-Purpose CLI Data`: Download curated general-purpose CLI data from [here](https://github.com/yamaton/h2o-curated-data/tree/main/general/json), and force update the local cache.
+* `Shell Completion: Load Common CLI Data`: Download curated CLI data from [here](https://github.com/yamaton/h2o-curated-data/tree/main/general/json), and force update the local cache.
 * `Shell Completion: Load Bioinformatics CLI Data`: Download curated bioinformatics CLI data from [here](https://github.com/yamaton/h2o-curated-data/tree/main/bio/json), and force update the local cache.
 * `Shell Completion: Remove Bioinformatics CLI Data`: Remove bioinformatics CLI info from the local cache.
 
@@ -78,7 +78,7 @@ Please consider installing [bubblewrap](https://wiki.archlinux.org/title/Bubblew
 
 ### Not working for some commands?
 
-* If the command is in [this list](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load General-Purpose CLI Data` to reload the preprocessed data.
+* If the command is in [this list](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Common CLI Data` to reload the preprocessed data.
 * If the command is in [this (bio) list](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to reload the preprocessed data.
 * Otherwise, it's likely that H2O failed to parse the command info, and the junk data is in the way.  Type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS), choose `Shell Completion: Clear Cache`, and enter the name of the command to remove the data from the cache. Then H2O will try recreating the CLI data.
 

@@ -34,7 +34,7 @@
     "activationEvents": [
         "onLanguage:shellscript",
         "onCommand:h2o.clearCache",
-        "onCommand:h2o.loadGeneral",
+        "onCommand:h2o.loadCommon",
         "onCommand:h2o.loadBio",
         "onCommand:h2o.removeBio"
     ],
@@ -43,11 +43,11 @@
         "commands": [
             {
                 "command": "h2o.clearCache",
-                "title": "Shell Completion: Clear Cache"
+                "title": "Shell Completion: Clear Cache Of..."
             },
             {
-                "command": "h2o.loadGeneral",
-                "title": "Shell Completion: Load General-Purpose CLI Data"
+                "command": "h2o.loadCommon",
+                "title": "Shell Completion: Load Common CLI Data"
             },
             {
                 "command": "h2o.loadBio",
@@ -65,7 +65,7 @@
                     "when": "editorLangId == shellscript"
                 },
                 {
-                    "command": "h2o.loadGeneral",
+                    "command": "h2o.loadCommon",
                     "when": "editorLangId == shellscript"
                 },
                 {
