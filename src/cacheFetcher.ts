@@ -18,12 +18,12 @@ class HTTPResponseError extends Error {
 }
 
 export function runH2o(name: string): Command | undefined {
-  let path = vscode.workspace.getConfiguration('h2o').get('h2oPath') as string;
-  if (path === '<bundled>') {
+  let h2opath = vscode.workspace.getConfiguration('h2o').get('h2oPath') as string;
+  if (h2opath === '<bundled>') {
     if (process.platform === 'linux') {
-      path = `${__dirname}/../bin/h2o-x86_64-unknown-linux`;
+      h2opath = `${__dirname}/../bin/h2o-x86_64-unknown-linux`;
     } else if (process.platform === 'darwin') {
-      path = `${__dirname}/../bin/h2o-x86_64-apple-darwin`;
+      h2opath = `${__dirname}/../bin/h2o-x86_64-apple-darwin`;
     } else {
       if (neverNotifiedError) {
         const msg = "Bundled H2O supports only Linux and MacOS. Please set the H2O path in the configuration.";
@@ -34,8 +34,9 @@ export function runH2o(name: string): Command | undefined {
     }
   }
 
+  const wrapperPath = `${__dirname}/../bin/wrap-h2o`;
   console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
-  const proc = spawnSync(path, ['--command', name, '--json']);
+  const proc = spawnSync(wrapperPath, [h2opath, name]);
   if (proc.status !== 0) {
     console.log(`[CacheFetcher.runH2o] H2O raises error for ${name}`);
     return;

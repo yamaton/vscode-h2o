@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+# Execute H2O executable within bubblewrap if available.
+
+readonly h2opath="$1"
+readonly cmd="$2"
+
+if [[ -x "$(command -v $h2opath)" ]] && [[ -x "$(command -v $cmd)" ]]; then
+    if [[ -x "$(command -v bwrap)" ]]; then
+        bwrap --ro-bind / / --dev /dev --tmpfs /tmp --unshare-all -- "$h2opath" --command "$cmd" --format json
+    else
+        "$h2opath" --command "$cmd" --format json
+    fi
+else
+    exit 127
+fi
