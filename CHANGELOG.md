@@ -1,7 +1,11 @@
 # Change Log
 
-## [0.0.20]
+## [0.0.20] (2021-07-22)
 - Rename command "Load General-Purpose CLI Data" to "Load Common CLI Data"
+- Suppress command-name completion after typing space
+- Bump H2O to v0.1.18
+    - Use sandboxing on macOS with `sandbox-exec`
+    - Filter duplicate options with hand-engineered score
 
 ## [0.0.19] (2021-07-18)
 - Fix icon
