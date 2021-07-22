@@ -22,7 +22,7 @@ This extension adds shell-completion-like autocomplete and introspection to the 
 
 ## Preloaded data
 
-This extension comes with some CLI data though this extension can dynamically extract autocompletion data from man and help pages in your local environment. The preprocessed data support
+This extension comes with some CLI data though it also can dynamically create autocompletion data from man and help pages in your local environment. The preprocessed data include:
 
 * git
 * npm
@@ -39,7 +39,7 @@ This extension comes with some CLI data though this extension can dynamically ex
 
 ## Autocompletion data for bioinformatics tools
 
-Autocompletion data for some bioinformatics tools is available. Type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to load the data.
+Autocompletion data for some bioinformatics tools is available. Type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to load them all.
 
 * BLAST
 * GATK
@@ -48,8 +48,7 @@ Autocompletion data for some bioinformatics tools is available. Type `Ctrl`+`Shi
 * Quast
 * ... and many more!
 
-[Here](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the list of bioinformatics tools supported by the extra data. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you find some missing.
-
+[Here](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) is the list of bioinformatics tools supported by the extra data. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you find some missing.
 
 
 ## Extension Commands
@@ -65,13 +64,16 @@ This extension provides following commands:
 
 ## Extension Configuration
 
-* `Shell Completion: Path`: Set path to H2O, a manpage/help parser. Leave it `<bundled>` to use the bundled executable.
+* `Shell Completion: Path`: Set path to H2O, a manpage/help parser used to extract CLI information. Leave it `<bundled>` to use the bundled executable.
 
 
 
-## Sandbox for Linux Users
+## Security and Sandboxing
 
-Please consider installing [bubblewrap](https://wiki.archlinux.org/title/Bubblewrap), a sandboxing program, if you're on Linux or WSL. H2O automatically runs in the sandbox if available such that untrusted commands do no harm to your system.
+When this extension sees an unregistered command, it runs the command with options `--help`, `-help`, `help`, `-h` to get the command information. This may trigger harm in a bare environment if there are untrusted programs. To keep your system safe, this extension executes a command in a sandbox environment if available; i.e. a malicious program cannot access your network or filesystems in the sandbox.
+
+* If you are on macOS, you're just fine; this extension uses the built-in program.
+* If you are on **Linux or WSL** (Windows Subsystem for Linux), please install **[bubblewrap](https://wiki.archlinux.org/title/Bubblewrap)**. This extension uses it automatically if installed.
 
 
 ## Trouble Shooting
@@ -84,10 +86,8 @@ Please consider installing [bubblewrap](https://wiki.archlinux.org/title/Bubblew
 
 
 
-
 ### Annoyed by unwanted programs?
 To remove all autocomplete info, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Data`. You can also remove any CLI data one by one by invoking `Shell Completion: Clear Cache` command from `Ctrl`+`Shift`+`P` ( `⌘`+`⇧`+`P` ).
-
 
 
 ## How the extension works
@@ -103,5 +103,4 @@ To remove all autocomplete info, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on 
 * Autocomplete and mouse-over introspection work only if
   * The command is available in [the preprocessed CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) loaded at the startup.
   * Or, H2O successfully extracts the CLI information from your local environment.
-
 
