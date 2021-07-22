@@ -60,7 +60,9 @@ export async function activate(context: vscode.ExtensionContext) {
             throw new Error("unknown command");
           }
         } catch (e) {
-          if (!!compCommands) {
+          const currentWord = getCurrentNode(tree.rootNode, position).text;
+          console.info(`[Completion] currentWord = ${currentWord}`);
+          if (!!compCommands && p === position && currentWord.length >= 3) {
             console.info("[Completion] Only command completion is available (2)");
             return compCommands;
           }
