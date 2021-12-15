@@ -168,7 +168,8 @@ export class CachingFetcher {
       checkStatus(response);
     } catch (error) {
       try {
-        const errorBody = await error.response.text();
+        const err = error as HTTPResponseError;
+        const errorBody = await err.response.text();
         console.error(`Error body: ${errorBody}`);
         return Promise.reject("Failed to fetch HTTP response.");
       } catch (e) {
@@ -215,7 +216,8 @@ export class CachingFetcher {
       checkStatus(response);
     } catch (error) {
       try {
-        const errorBody = await error.response.text();
+        const err = error as HTTPResponseError;
+        const errorBody = await err.response.text();
         console.error(`Error body: ${errorBody}`);
         return Promise.reject("Failed to fetch HTTP response.");
       } catch (e) {
