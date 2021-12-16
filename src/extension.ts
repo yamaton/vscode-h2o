@@ -49,8 +49,9 @@ export async function activate(context: vscode.ExtensionContext) {
         const p = walkbackIfNeeded(document, tree.rootNode, position);
 
         try {
-          const [name, deepestCmd] = await getContextNameAndDeepestCmd(tree.rootNode, p, fetcher);
-          if (!!name) {
+          const cmdSeq = await getContextCmdSeq(tree.rootNode, p, fetcher);
+          if (!!cmdSeq && cmdSeq.length) {
+            const deepestCmd = cmdSeq[cmdSeq.length -1];
             const compSubcommands = getCompletionsSubcommands(deepestCmd);
             const compOptions = getCompletionsOptions(document, tree.rootNode, p, deepestCmd);
             return [
@@ -91,21 +92,35 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const currentWord = getCurrentNode(tree.rootNode, position).text;
       try {
-        const [name, deepestCmd] = await getContextNameAndDeepestCmd(tree.rootNode, position, fetcher);
-        if (name === currentWord) {
-          const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
-          const msg = new vscode.MarkdownString(`\`${name}\`` + `\n\n[Reset](${clearCacheCommandUri})`);
-          msg.isTrusted = true;
-          return new vscode.Hover(msg);
-        } else if (!!name && !!deepestCmd && deepestCmd.name === currentWord) {
-          const msg = `${name} **${deepestCmd.name}**\n\n ${deepestCmd.description}`;
-          return new vscode.Hover(new vscode.MarkdownString(msg));
-        } else if (!!name && !!deepestCmd) {
-          const opts = getMatchingOption(currentWord, name, deepestCmd);
-          const msg = optsToMessage(opts);
-          return new vscode.Hover(new vscode.MarkdownString(msg));
-        } else {
-          return Promise.reject(`No hover is available for ${currentWord}`);
+        const cmdSeq = await getContextCmdSeq(tree.rootNode, position, fetcher);
+        if (!!cmdSeq && cmdSeq.length) {
+          const name = cmdSeq[0].name;
+          if (currentWord === name) {
+            const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
+            const msg = new vscode.MarkdownString(`\`${name}\`` + `\n\n[Reset](${clearCacheCommandUri})`);
+            msg.isTrusted = true;
+            return new vscode.Hover(msg);
+          } else if (cmdSeq.length > 1 && cmdSeq.some((cmd) => cmd.name === currentWord)) {
+            const thatCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
+            const nameSeq: string[] = [];
+            for (const cmd of cmdSeq) {
+              if (cmd.name !== currentWord) {
+                nameSeq.push(cmd.name);
+              } else {
+                break;
+              }
+            }
+            const cmdPrefixName = nameSeq.join(" ");
+            const msg = `${cmdPrefixName} **${thatCmd.name}**\n\n ${thatCmd.description}`;
+            return new vscode.Hover(new vscode.MarkdownString(msg));
+          } else if (cmdSeq.length) {
+            const deepestCmd = cmdSeq[cmdSeq.length - 1];
+            const opts = getMatchingOption(currentWord, name, deepestCmd);
+            const msg = optsToMessage(opts);
+            return new vscode.Hover(new vscode.MarkdownString(msg));
+          } else {
+            return Promise.reject(`No hover is available for ${currentWord}`);
+          }
         }
       } catch (e) {
         console.log("[Hover] Error: ", e);
@@ -372,7 +387,7 @@ function _getSubcommandCandidates(root: SyntaxNode, position: vscode.Position): 
 
 
 // Get command and subcommand inferred from the current position
-async function getContextNameAndDeepestCmd(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<[string, Command]> {
+async function getContextCmdSeq(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Command[]> {
   let name = getContextCommandName(root, position);
   if (!name) {
     return Promise.reject("[getContextCmdSubcmdPair] Command name not found.");
@@ -380,6 +395,7 @@ async function getContextNameAndDeepestCmd(root: SyntaxNode, position: vscode.Po
 
   try {
     let command = await fetcher.fetch(name);
+    const seq: Command[] = [command];
     if (!!command) {
       const words = _getSubcommandCandidates(root, position);
       let found = true;
@@ -390,13 +406,14 @@ async function getContextNameAndDeepestCmd(root: SyntaxNode, position: vscode.Po
           for (const subcmd of subcommands) {
             if (subcmd.name === word) {
               command = subcmd;
+              seq.push(command);
               found = true;
             }
           }
         }
       }
     }
-    return [name, command];
+    return seq;
   } catch (e) {
     console.error("[getContextCmdSubcmdPair] Error: ", e);
     return Promise.reject("[getContextCmdSubcmdPair] unknown command!");
