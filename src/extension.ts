@@ -47,11 +47,12 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // this is an ugly hack to get current Node
         const p = walkbackIfNeeded(document, tree.rootNode, position);
+
         try {
-          const [cmd, subcmd] = await getContextCmdSubcmdPair(tree.rootNode, p, fetcher);
-          if (!!cmd) {
-            const compSubcommands = getCompletionsSubcommands(cmd, subcmd);
-            const compOptions = getCompletionsOptions(document, tree.rootNode, p, cmd, subcmd);
+          const [name, deepestCmd] = await getContextNameAndDeepestCmd(tree.rootNode, p, fetcher);
+          if (!!name) {
+            const compSubcommands = getCompletionsSubcommands(deepestCmd);
+            const compOptions = getCompletionsOptions(document, tree.rootNode, p, deepestCmd);
             return [
               ...compSubcommands,
               ...compOptions,
@@ -90,18 +91,17 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const currentWord = getCurrentNode(tree.rootNode, position).text;
       try {
-        const [cmd, subcmd] = await getContextCmdSubcmdPair(tree.rootNode, position, fetcher);
-        if (!!cmd && cmd.name === currentWord) {
-          const name = cmd.name;
+        const [name, deepestCmd] = await getContextNameAndDeepestCmd(tree.rootNode, position, fetcher);
+        if (name === currentWord) {
           const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
           const msg = new vscode.MarkdownString(`\`${name}\`` + `\n\n[Reset](${clearCacheCommandUri})`);
           msg.isTrusted = true;
           return new vscode.Hover(msg);
-        } else if (!!cmd && subcmd && subcmd.name === currentWord) {
-          const msg = `${cmd.name} **${subcmd.name}**\n\n ${subcmd.description}`;
+        } else if (!!name && !!deepestCmd && deepestCmd.name === currentWord) {
+          const msg = `${name} **${deepestCmd.name}**\n\n ${deepestCmd.description}`;
           return new vscode.Hover(new vscode.MarkdownString(msg));
-        } else if (!!cmd) {
-          const opts = getMatchingOption(currentWord, cmd, subcmd);
+        } else if (!!name && !!deepestCmd) {
+          const opts = getMatchingOption(currentWord, name, deepestCmd);
           const msg = optsToMessage(opts);
           return new vscode.Hover(new vscode.MarkdownString(msg));
         } else {
@@ -114,7 +114,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   });
 
-  function updateTree(parser: Parser, edit: vscode.TextDocumentChangeEvent) {
+  function updateTree(p: Parser, edit: vscode.TextDocumentChangeEvent) {
     if (edit.contentChanges.length === 0) { return; }
 
     const old = trees[edit.document.uri.toString()];
@@ -127,7 +127,7 @@ export async function activate(context: vscode.ExtensionContext) {
       const delta = { startIndex, oldEndIndex, newEndIndex, startPosition, oldEndPosition, newEndPosition };
       old.edit(delta);
     }
-    const t = parser.parse(edit.document.getText(), old);
+    const t = p.parse(edit.document.getText(), old);
     trees[edit.document.uri.toString()] = t;
   }
 
@@ -296,30 +296,22 @@ function walkbackIfNeeded(document: vscode.TextDocument, root: SyntaxNode, posit
 
 
 // Returns current word as an option if the tree-sitter says so
-function getMatchingOption(currentWord: string, cmd: Command, subcmd: Command | undefined): Option[] {
+function getMatchingOption(currentWord: string, name: string, deepestCmd: Command): Option[] {
   const thisName = currentWord.split('=', 2)[0];
   if (thisName.startsWith('-')) {
-    if (cmd) {
-      let options: Option[];
-      if (subcmd) {
-        options = subcmd.options;
-      } else {
-        options = cmd?.options;
-      }
-
-      const theOption = options.find((x) => x.names.includes(thisName));
-      if (theOption) {
-        return [theOption];
-      } else if (isOldStyle(thisName)) {
-        // deal with a stacked options like `-xvf`
-        // or, a short option immediately followed by an argument, i.e. '-oArgument'
-        const shortOptionNames = unstackOption(thisName);
-        const shortOptions = shortOptionNames.map(short => options.find(opt => opt.names.includes(short))!).filter(opt => opt);
-        if (shortOptionNames.length > 0 && shortOptionNames.length === shortOptions.length) {
-          return shortOptions;        // i.e. -xvf
-        } else if (shortOptions.length > 0) {
-          return [shortOptions[0]];   // i.e. -oArgument
-        }
+    let options: Option[] = deepestCmd.options;
+    const theOption = options.find((x) => x.names.includes(thisName));
+    if (theOption) {
+      return [theOption];
+    } else if (isOldStyle(thisName)) {
+      // deal with a stacked options like `-xvf`
+      // or, a short option immediately followed by an argument, i.e. '-oArgument'
+      const shortOptionNames = unstackOption(thisName);
+      const shortOptions = shortOptionNames.map(short => options.find(opt => opt.names.includes(short))!).filter(opt => opt);
+      if (shortOptionNames.length > 0 && shortOptionNames.length === shortOptions.length) {
+        return shortOptions;        // i.e. -xvf
+      } else if (shortOptions.length > 0) {
+        return [shortOptions[0]];   // i.e. -oArgument
       }
     }
   }
@@ -361,9 +353,9 @@ function getContextCommandName(root: SyntaxNode, position: vscode.Position): str
   return name;
 }
 
-// Get subcommand name if applicable
+// Get subcommand names NOT starting with `-`
 // [FIXME] this catches option's argument; use database instead
-function _getSubcommandCandidates(root: SyntaxNode, position: vscode.Position) {
+function _getSubcommandCandidates(root: SyntaxNode, position: vscode.Position): string[] {
   const candidates: string[] = [];
   let commandNode = _getContextCommandNode(root, position)!;
   if (commandNode) {
@@ -380,7 +372,7 @@ function _getSubcommandCandidates(root: SyntaxNode, position: vscode.Position) {
 
 
 // Get command and subcommand inferred from the current position
-async function getContextCmdSubcmdPair(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<[Command, undefined] | [Command, Command]> {
+async function getContextNameAndDeepestCmd(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<[string, Command]> {
   let name = getContextCommandName(root, position);
   if (!name) {
     return Promise.reject("[getContextCmdSubcmdPair] Command name not found.");
@@ -388,18 +380,23 @@ async function getContextCmdSubcmdPair(root: SyntaxNode, position: vscode.Positi
 
   try {
     let command = await fetcher.fetch(name);
-    if (command && command.subcommands && command.subcommands.length) {
-      const subcommands = command.subcommands;
-      let words = _getSubcommandCandidates(root, position);
-      for (let word of words) {
-        for (const subcmd of subcommands) {
-          if (subcmd.name === word) {
-            return [command, subcmd];
+    if (!!command) {
+      const words = _getSubcommandCandidates(root, position);
+      let found = true;
+      while (found && !!command.subcommands && command.subcommands.length) {
+        found = false;
+        const subcommands = command.subcommands;
+        for (let word of words) {
+          for (const subcmd of subcommands) {
+            if (subcmd.name === word) {
+              command = subcmd;
+              found = true;
+            }
           }
         }
       }
     }
-    return [command, undefined];
+    return [name, command];
   } catch (e) {
     console.error("[getContextCmdSubcmdPair] Error: ", e);
     return Promise.reject("[getContextCmdSubcmdPair] unknown command!");
@@ -429,32 +426,25 @@ function getContextCmdArgs(document: vscode.TextDocument, root: SyntaxNode, posi
 
 
 // Get subcommand completions
-function getCompletionsSubcommands(cmd: Command, subcmd: Command | undefined): vscode.CompletionItem[] {
-  if (subcmd === undefined) {
-    const subcommands = cmd.subcommands;
-    if (subcommands && subcommands.length) {
-      const compitems = subcommands.map((sub, idx) => {
-        const item = createCompletionItem(sub.name, sub.description);
-        item.sortText = `33-${idx.toString().padStart(4)}`;
-        return item;
-      });
-      return compitems;
-    }
+function getCompletionsSubcommands(deepestCmd: Command): vscode.CompletionItem[] {
+  const subcommands = deepestCmd.subcommands;
+  if (subcommands && subcommands.length) {
+    const compitems = subcommands.map((sub, idx) => {
+      const item = createCompletionItem(sub.name, sub.description);
+      item.sortText = `33-${idx.toString().padStart(4)}`;
+      return item;
+    });
+    return compitems;
   }
   return [];
 }
 
 // Get option completion
-function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position, cmd: Command, subcmd: Command | undefined): vscode.CompletionItem[] {
+function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position, deepestCmd: Command): vscode.CompletionItem[] {
   const args = getContextCmdArgs(document, root, position);
   const compitems: vscode.CompletionItem[] = [];
-  if (cmd) {
     let options: Option[];
-    if (subcmd) {
-      options = subcmd.options;
-    } else {
-      options = cmd?.options;
-    }
+    options = deepestCmd.options;
     options.forEach((opt, idx) => {
       // suppress already-used options
       if (opt.names.every(name => !args.includes(name))) {
@@ -469,7 +459,6 @@ function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, 
         });
       }
     });
-  }
   return compitems;
 }
 
