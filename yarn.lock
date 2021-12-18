@@ -98,10 +98,10 @@
   "resolved" "https://registry.npmjs.org/@types/pako/-/pako-1.0.2.tgz"
   "version" "1.0.2"
 
-"@types/vscode@^1.63.1":
-  "integrity" "sha512-Z+ZqjRcnGfHP86dvx/BtSwWyZPKQ/LBdmAVImY82TphyjOw2KgTKcp7Nx92oNwCTsHzlshwexAG/WiY2JuUm3g=="
-  "resolved" "https://registry.npmjs.org/@types/vscode/-/vscode-1.63.1.tgz"
-  "version" "1.63.1"
+"@types/vscode@^1.58.1":
+  "integrity" "sha512-sa76rDXiSif09he8KoaWWUQxsuBr2+uND0xn1GUbEODkuEjp2p7Rqd3t5qlvklfmAedLFdL7MdnsPa57uzwcOw=="
+  "resolved" "https://registry.npmjs.org/@types/vscode/-/vscode-1.58.1.tgz"
+  "version" "1.58.1"
 
 "@typescript-eslint/eslint-plugin@^5.7.0":
   "integrity" "sha512-8RTGBpNn5a9M628wBPrCbJ+v3YTEOE2qeZb7TDkGKTDXSj36KGRg92SpFFaR/0S3rSXQxM0Og/kV9EyadsYSBg=="
