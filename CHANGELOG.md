@@ -1,5 +1,10 @@
 # Change Log
 
+## [0.1.0] (2021-12-18)
+- Support multi-level subcommands
+- Rename package to "Shell Script command completion"
+- Bump H2O to v0.2.0
+
 ## [0.0.20] (2021-07-22)
 - Rename command "Load General-Purpose CLI Data" to "Load Common CLI Data"
 - Suppress command-name completion after typing space
