@@ -11,9 +11,9 @@
         "email": "yamato.matsuoka@tetradresearch.com"
     },
     "license": "MIT",
-    "version": "0.1.0",
+    "version": "1.22.15",
     "engines": {
-        "vscode": "^1.58.1"
+        "vscode": "^1.63.0"
     },
     "categories": [
         "Snippets"
@@ -103,7 +103,7 @@
         "@types/node": "^16.11.13",
         "@types/node-fetch": "^2.5.12",
         "@types/pako": "^1.0.2",
-        "@types/vscode": "^1.58.1",
+        "@types/vscode": "^1.63.0",
         "@typescript-eslint/eslint-plugin": "^5.7.0",
         "@typescript-eslint/parser": "^5.7.0",
         "eslint": "^8.4.1",
