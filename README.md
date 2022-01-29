@@ -28,6 +28,7 @@ This extension comes with some CLI data though it also can dynamically create au
 * npm
 * docker
 * terraform
+* kubectl
 * brew
 * apt
 * conda
