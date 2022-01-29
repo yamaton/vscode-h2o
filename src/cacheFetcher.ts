@@ -26,7 +26,7 @@ export function runH2o(name: string): Command | undefined {
       h2opath = `${__dirname}/../bin/h2o-x86_64-apple-darwin`;
     } else {
       if (neverNotifiedError) {
-        const msg = "Bundled H2O supports only Linux and MacOS. Please set the H2O path in the configuration.";
+        const msg = "Bundled help scanner (H2O) supports Linux and MacOS. Please set the H2O path.";
         vscode.window.showErrorMessage(msg);
       }
       neverNotifiedError = false;
