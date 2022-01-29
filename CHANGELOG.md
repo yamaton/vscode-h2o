@@ -1,5 +1,8 @@
 # Change Log
 
+## [0.1.1] (2022-01-28)
+- Remove unused dev dependencies
+
 ## [0.1.0] (2021-12-18)
 - Support multi-level subcommands
 - Rename package to "Shell Script command completion"
