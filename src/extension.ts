@@ -172,7 +172,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   });
 
-
+  // Download the package bundle "common"
   const invokeDownloadingCommon = vscode.commands.registerCommand('h2o.loadCommon', async () => {
     try {
       console.log('[h2o.loadCommon] Load common CLI data');
@@ -192,6 +192,7 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
 
+  // Download the command bundle "bio"
   const invokeDownloadingBio = vscode.commands.registerCommand('h2o.loadBio', async () => {
     try {
       console.log('[h2o.loadBio] Load Bioinformatics CLI data');
@@ -208,6 +209,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.window.showInformationMessage(msg);
   });
 
+
+  // Remove the command bundle "bio"
   const removeBio = vscode.commands.registerCommand('h2o.removeBio', async () => {
     try {
       console.log('[h2o.removeBio] Remove Bioinformatics CLI data');
@@ -224,6 +227,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const msg = `[Shell Completion] Succssfully removed bioinformatics CLI info!`;
     vscode.window.showInformationMessage(msg);
   });
+
 
   context.subscriptions.push(clearCacheCommand);
   context.subscriptions.push(invokeDownloadingCommon);

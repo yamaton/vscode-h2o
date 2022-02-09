@@ -17,6 +17,7 @@ class HTTPResponseError extends Error {
   }
 }
 
+// Call H2O executable and get command information from the local environment
 export function runH2o(name: string): Command | undefined {
   let h2opath = vscode.workspace.getConfiguration('h2o').get('h2oPath') as string;
   if (h2opath === '<bundled>') {
@@ -56,6 +57,9 @@ export function runH2o(name: string): Command | undefined {
   }
 }
 
+
+// CachingFetcher manages the local cache using Memento.
+// It also pulls command data from the remote repository.
 export class CachingFetcher {
   static readonly keyPrefix = 'h2oFetcher.cache.';
   static readonly commandListKey = 'h2oFetcher.registered.all';
@@ -86,15 +90,19 @@ export class CachingFetcher {
     }
   }
 
+  // Get Memento key of the command `name`
   static getKey(name: string): string {
     return CachingFetcher.keyPrefix + name;
   }
 
+  // Get Memento data of the command `name`
   private get(name: string): Command | undefined {
     const key = CachingFetcher.getKey(name);
     return this.memento.get(key);
   }
 
+  // Update Memento record and the name list
+  // Pass undefined to remove the value.
   private async update(name: string, command: Command | undefined) {
     const key = CachingFetcher.getKey(name);
 
@@ -120,6 +128,7 @@ export class CachingFetcher {
     await this.memento.update(key, command);
   }
 
+  // Get command data from cache first, then run H2O if fails.
   async fetch(name: string): Promise<Command> {
     if (name.length < 2) {
       return Promise.reject(`Command name too short: ${name}`);
@@ -151,6 +160,8 @@ export class CachingFetcher {
     }
   }
 
+
+  // Download the package bundle `kind` and load them to cache
   async fetchAllCurated(kind = 'general', isForcing = false) {
     console.log("[CacheFetcher.fetchAllCurated] Started running...");
     const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}.json.gz`;
@@ -199,6 +210,8 @@ export class CachingFetcher {
     }
   }
 
+  // Get a list of the command bundle `kind`.
+  // This is used for removal of bundled commands.
   async fetchList(kind = 'bio'): Promise<string[]> {
     console.log("[CacheFetcher.fetchList] Started running...");
     const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}.txt`;
@@ -240,15 +253,18 @@ export class CachingFetcher {
     return names;
   }
 
+  // Unset cache data of command `name` by assigning undefined
   async unset(name: string) {
     await this.update(name, undefined);
     console.log('[CacheFetcher.unset] Unset the key for ... ', name);
   }
 
+  // Load a list of registered commands from Memento
   getList() {
     return this.memento.get<string[]>(CachingFetcher.commandListKey);
   }
 
+  // Update memento of the list of registered commands
   private async updateList() {
     this.memento.update(CachingFetcher.commandListKey, this.registeredCommands);
   }
