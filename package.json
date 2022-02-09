@@ -56,6 +56,10 @@
             {
                 "command": "h2o.removeBio",
                 "title": "Shell Completion: Remove Bioinformatics CLI Data"
+            },
+            {
+                "command": "h2o.loadCommand",
+                "title": "Shell Completion: Load Command... (experimental)"
             }
         ],
         "menus": {

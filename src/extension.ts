@@ -51,7 +51,7 @@ export async function activate(context: vscode.ExtensionContext) {
         try {
           const cmdSeq = await getContextCmdSeq(tree.rootNode, p, fetcher);
           if (!!cmdSeq && cmdSeq.length) {
-            const deepestCmd = cmdSeq[cmdSeq.length -1];
+            const deepestCmd = cmdSeq[cmdSeq.length - 1];
             const compSubcommands = getCompletionsSubcommands(deepestCmd);
             const compOptions = getCompletionsOptions(document, tree.rootNode, p, deepestCmd);
             return [
@@ -155,6 +155,27 @@ export async function activate(context: vscode.ExtensionContext) {
     delete trees[document.uri.toString()];
   }
 
+
+  // Download the command `name`
+  const loadCommand = vscode.commands.registerCommand('h2o.loadCommand', async (name: string) => {
+    let cmd = name;
+    if (!name) {
+      cmd = (await vscode.window.showInputBox({ placeHolder: 'which command?' }))!;
+    }
+    try {
+      console.log(`[Command] Downloading ${cmd} data...`);
+      await fetcher.downloadCommandToCache(cmd);
+      const msg = `[Shell Completion] Added ${cmd}.`;
+      vscode.window.showInformationMessage(msg);
+    } catch (e) {
+      console.error("Error: ", e);
+      return Promise.reject("[h2o.loadCommand] Error: ");
+    }
+
+  });
+
+
+  // Clear cache of the command `name`
   const clearCacheCommand = vscode.commands.registerCommand('h2o.clearCache', async (name: string) => {
     let cmd = name;
     if (!name) {
@@ -230,6 +251,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 
   context.subscriptions.push(clearCacheCommand);
+  context.subscriptions.push(loadCommand);
   context.subscriptions.push(invokeDownloadingCommon);
   context.subscriptions.push(invokeDownloadingBio);
   context.subscriptions.push(removeBio);
@@ -464,22 +486,22 @@ function getCompletionsSubcommands(deepestCmd: Command): vscode.CompletionItem[]
 function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position, deepestCmd: Command): vscode.CompletionItem[] {
   const args = getContextCmdArgs(document, root, position);
   const compitems: vscode.CompletionItem[] = [];
-    let options: Option[];
-    options = deepestCmd.options;
-    options.forEach((opt, idx) => {
-      // suppress already-used options
-      if (opt.names.every(name => !args.includes(name))) {
-        opt.names.forEach(name => {
-          const item = createCompletionItem(name, opt.description);
-          item.sortText = `55-${idx.toString().padStart(4)}`;
-          if (opt.argument) {
-            const snippet = `${name} \$\{1:${opt.argument}\}`;
-            item.insertText = new vscode.SnippetString(snippet);
-          }
-          compitems.push(item);
-        });
-      }
-    });
+  let options: Option[];
+  options = deepestCmd.options;
+  options.forEach((opt, idx) => {
+    // suppress already-used options
+    if (opt.names.every(name => !args.includes(name))) {
+      opt.names.forEach(name => {
+        const item = createCompletionItem(name, opt.description);
+        item.sortText = `55-${idx.toString().padStart(4)}`;
+        if (opt.argument) {
+          const snippet = `${name} \$\{1:${opt.argument}\}`;
+          item.insertText = new vscode.SnippetString(snippet);
+        }
+        compitems.push(item);
+      });
+    }
+  });
   return compitems;
 }
 

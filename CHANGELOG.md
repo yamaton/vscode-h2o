@@ -1,5 +1,8 @@
 # Change Log
 
+## [0.1.x] (2022-02-09)
+- Add loading individual command spec from 'experimental'
+
 ## [0.1.1] (2022-01-28)
 - Remove unused dev dependencies
 

@@ -210,6 +210,51 @@ export class CachingFetcher {
     }
   }
 
+
+  // Download the command `name` from the remote repository
+  async downloadCommandToCache(name: string, kind = 'experimental') {
+    console.log(`[CacheFetcher.downloadCommand] Started getting ${name} in ${kind}...`);
+    const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}/json/${name}.json`;
+    const checkStatus = (res: Response) => {
+      if (res.ok) {
+        return res;
+      } else {
+        throw new HTTPResponseError(res);
+      }
+    };
+
+    let response: Response;
+    try {
+      response = await fetch(url);
+      checkStatus(response);
+    } catch (error) {
+      try {
+        const err = error as HTTPResponseError;
+        const errorBody = await err.response.text();
+        console.error(`Error body: ${errorBody}`);
+        return Promise.reject("Failed to fetch HTTP response.");
+      } catch (e) {
+        console.error('Error ... even failed to fetch error body: ', e);
+        return Promise.reject("Failed to fetch over HTTP");
+      }
+    }
+    console.log("[CacheFetcher.downloadCommand] received HTTP response");
+
+    let cmd: Command;
+    try {
+      const content = await response.text();
+      cmd = JSON.parse(content) as Command;
+    } catch (err) {
+      const msg = `[CacheFetcher.downloadCommand] Error: ${err}`;
+      console.error(msg);
+      return Promise.reject(msg);
+    }
+
+    console.log(`[CacheFetcher.downloadCommand] Loading: ${cmd.name}`);
+      await this.update(cmd.name, cmd);
+  }
+
+
   // Get a list of the command bundle `kind`.
   // This is used for removal of bundled commands.
   async fetchList(kind = 'bio'): Promise<string[]> {
