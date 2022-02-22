@@ -1,0 +1,2 @@
+bin/h2o-x86_64-apple-darwin filter=lfs diff=lfs merge=lfs -text
+bin/h2o-x86_64-unknown-linux filter=lfs diff=lfs merge=lfs -text
