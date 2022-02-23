@@ -59,7 +59,7 @@
             },
             {
                 "command": "h2o.loadCommand",
-                "title": "Shell Completion: Load Command... (experimental)"
+                "title": "Shell Completion: Load Command... [experimental]"
             }
         ],
         "menus": {

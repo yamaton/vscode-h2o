@@ -1,5 +1,8 @@
 # Shell script command completion
 
+⚠️As of 2022-02-23, we are experiencing performance issues.⚠️ We're working on it so please come back in a few days.
+
+
 This extension adds autocomplete and introspection of commands to the **Shell Script mode**.
 
 * Command-line option/flag completion
@@ -58,7 +61,7 @@ This extension provides following commands:
 * `Shell Completion: Load Common CLI Data`: Download curated CLI data from [here](https://github.com/yamaton/h2o-curated-data/tree/main/general/json), and force update the local cache.
 * `Shell Completion: Load Bioinformatics CLI Data`: Download curated bioinformatics CLI data from [here](https://github.com/yamaton/h2o-curated-data/tree/main/bio/json), and force update the local cache.
 * `Shell Completion: Remove Bioinformatics CLI Data`: Remove the bioinformatics package.
-
+* `Shell Completion: Load Command... [experimental]`: Load individual command spec from [experimental directory](https://github.com/yamaton/h2o-curated-data/tree/main/experimental/json).
 
 
 ## Extension Configuration
@@ -85,7 +88,7 @@ When this extension sees an unregistered command, it runs the command in the bac
 
 
 ### Annoyed by unwanted programs?
-You can also remove any command individually by invoking `Shell Completion: Clear Cache` command after pressing `Ctrl`+`Shift`+`P` ( `⌘`+`⇧`+`P` ). To remove all bioinformatics commands, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Data`. 
+You can also remove any command individually by invoking `Shell Completion: Clear Cache` command after pressing `Ctrl`+`Shift`+`P` ( `⌘`+`⇧`+`P` ). To remove all bioinformatics commands, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Data`.
 
 
 
