@@ -64,11 +64,9 @@ export class CachingFetcher {
   static readonly keyPrefix = 'h2oFetcher.cache.';
   static readonly commandListKey = 'h2oFetcher.registered.all';
   private memento: Memento;
-  private registeredCommands: string[];
 
   constructor(memento: Memento) {
     this.memento = memento;
-    this.registeredCommands = [];
   }
 
   async init() {
@@ -76,17 +74,13 @@ export class CachingFetcher {
 
     if (!existing || !existing.length || existing.length === 0) {
       console.log("---------------------------------------");
-      console.log("              INIT");
+      console.log("          Clean state");
       console.log("---------------------------------------");
-      this.registeredCommands = [];
-      await this.updateList();
-      console.log("this.getBag() = ", this.getList());
     } else {
       console.log("---------------------------------------");
-      console.log("              LOAD");
+      console.log("   Memento entries already exist");
       console.log("---------------------------------------");
-      this.registeredCommands = existing;
-      console.log("this.getBag() = ", this.getList());
+      console.log("this.getList() = ", this.getList());
     }
   }
 
@@ -104,29 +98,14 @@ export class CachingFetcher {
   // Update Memento record and the name list
   // Pass undefined to remove the value.
   private async update(name: string, command: Command | undefined) {
+    const t0 = new Date();
     const key = CachingFetcher.getKey(name);
-
-    console.log(`list = `, this.registeredCommands);
-    if (command === undefined) {
-      console.log(`--------delete ${name} from the list ---------`);
-      this.registeredCommands = this.registeredCommands.filter(x => x !== name);
-    } else {
-      console.log(`--------add ${name} to the list ---------`);
-      this.registeredCommands = this.registeredCommands.filter(x => x !== name);
-      this.registeredCommands.push(name);
-    }
-
-    try {
-      await this.updateList();
-      console.log("[list update] done update");
-      console.log("[list update] ", this.registeredCommands);
-      console.log("[list update] ", this.getList());
-    } catch (e) {
-      console.log("Failed to update command set: ", e);
-    }
-
     await this.memento.update(key, command);
+    const t1 = new Date();
+    const diff = t1.getTime() - t0.getTime();
+    console.log(`[CacheFetcher.update] ${name}: Memento update took ${diff} ms.`);
   }
+
 
   // Get command data from cache first, then run H2O if fails.
   async fetch(name: string): Promise<Command> {
@@ -301,17 +280,17 @@ export class CachingFetcher {
   // Unset cache data of command `name` by assigning undefined
   async unset(name: string) {
     await this.update(name, undefined);
-    console.log('[CacheFetcher.unset] Unset the key for ... ', name);
+    console.log(`[CacheFetcher.unset] Unset ${name}`);
   }
 
   // Load a list of registered commands from Memento
   getList() {
-    return this.memento.get<string[]>(CachingFetcher.commandListKey);
-  }
-
-  // Update memento of the list of registered commands
-  private async updateList() {
-    this.memento.update(CachingFetcher.commandListKey, this.registeredCommands);
+    const keys = this.memento.keys();
+    const prefix = CachingFetcher.keyPrefix;
+    const cmdKeys =
+      keys.filter(x => x.startsWith(prefix))
+          .map(x => x.substring(prefix.length));
+    return cmdKeys;
   }
 
 }
