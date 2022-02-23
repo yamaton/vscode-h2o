@@ -1,7 +1,9 @@
 # Change Log
 
-## [0.1.x] (2022-02-09)
+## [0.1.2] (2022-02-23)
 - Add loading individual command spec from 'experimental'
+- Fix broken links in downloading CLI packages (general and bio)
+- Bump H2O to v0.3.2
 
 ## [0.1.1] (2022-01-28)
 - Remove unused dev dependencies
