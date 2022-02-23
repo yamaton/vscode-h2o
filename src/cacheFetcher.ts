@@ -164,7 +164,7 @@ export class CachingFetcher {
   // Download the package bundle `kind` and load them to cache
   async fetchAllCurated(kind = 'general', isForcing = false) {
     console.log("[CacheFetcher.fetchAllCurated] Started running...");
-    const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}.json.gz`;
+    const url = `https://github.com/yamaton/h2o-curated-data/raw/main/${kind}.json.gz`;
     const checkStatus = (res: Response) => {
       if (res.ok) {
         return res;
