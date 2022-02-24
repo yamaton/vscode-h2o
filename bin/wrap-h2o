@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
 # Execute H2O executable within bubblewrap if available.
+#
+# Usage: wrap-h2o <path-to-executable> <command-name>
+#
+# Example:
+# $ wrap-h2o ./h2o-x86_64-unknown-linux ls
+#
 
 readonly h2opath="$1"
 readonly cmd="$2"
@@ -8,15 +14,15 @@ readonly cmd="$2"
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 readonly BASEDIR
 
-if [[ -x "$(command -v $h2opath)" ]] && [[ -x "$(command -v $cmd)" ]]; then
+if [[ -x "$(command -v "$h2opath")" ]] && [[ "$(command -v "$cmd")" ]]; then
     if [[ "$(uname -s)" == "Linux" ]] && [[ -x "$(command -v bwrap)" ]]; then
-	echo "[info] bwrap!" 1>&2
+        echo "[info] bwrap!" 1>&2
         bwrap --ro-bind / / --dev /dev --tmpfs /tmp --unshare-all -- "$h2opath" --command "$cmd" --format json
     elif [[ "$(uname -s)" == "Darwin" ]] && [[ -x "$(command -v sandbox-exec)" ]]; then
-	echo "[info] sandbox-exec!" 1>&2
+        echo "[info] sandbox-exec!" 1>&2
         sandbox-exec -f "$BASEDIR"/profile.sb -- "$h2opath" --command "$cmd" --format json
     else
-	echo "[warn] no sandbox running!" 1>&2
+        echo "[warn] no sandbox running!" 1>&2
         "$h2opath" --command "$cmd" --format json
     fi
 else
