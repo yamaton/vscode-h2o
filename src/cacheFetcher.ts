@@ -129,7 +129,7 @@ export class CachingFetcher {
         return Promise.reject(`Failed to fetch command ${name} from H2O`);
       }
       try {
-        await this.updateCache(name, command);
+        this.updateCache(name, command);
       } catch (e) {
         console.log("Failed to update: ", e);
       }
@@ -186,7 +186,7 @@ export class CachingFetcher {
       const key = CachingFetcher.getKey(cmd.name);
       if (isForcing || this.getCache(cmd.name) === undefined) {
         console.log(`[fetchAllCurated] Loading: ${cmd.name}`);
-        await this.updateCache(cmd.name, cmd);
+        this.updateCache(cmd.name, cmd);
       }
     }
   }
@@ -232,7 +232,7 @@ export class CachingFetcher {
     }
 
     console.log(`[CacheFetcher.downloadCommand] Loading: ${cmd.name}`);
-      await this.updateCache(cmd.name, cmd);
+    this.updateCache(cmd.name, cmd);
   }
 
 
