@@ -1,8 +1,5 @@
 # Shell script command completion
 
-⚠️As of 2022-02-23, we are experiencing performance issues.⚠️ We're working on it so please come back in a few days.
-
-
 This extension adds autocomplete and introspection of commands to the **Shell Script mode**.
 
 * Command-line option/flag completion

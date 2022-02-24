@@ -1,5 +1,9 @@
 # Change Log
 
+## [0.1.3] (2022-02-23)
+- Fix ridiculously long loading of CLI packages
+- Remove redundant operations
+
 ## [0.1.2] (2022-02-23)
 - Add loading individual command spec from 'experimental'
 - Fix broken links in downloading CLI packages (general and bio)
