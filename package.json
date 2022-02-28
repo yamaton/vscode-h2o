@@ -79,6 +79,10 @@
                 {
                     "command": "h2o.removeBio",
                     "when": "editorLangId == shellscript"
+                },
+                {
+                    "command": "h2o.loadCommand",
+                    "when": "editorLangId == shellscript"
                 }
             ]
         },
