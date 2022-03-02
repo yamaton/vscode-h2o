@@ -61,9 +61,11 @@ This extension provides following commands:
 * `Shell Completion: Load Command... [experimental]`: Load individual command spec from [experimental directory](https://github.com/yamaton/h2o-curated-data/tree/main/experimental/json).
 
 
-## Extension Configuration
+## Managing shell commands
 
-* `Shell Completion: Path`: Set path to H2O, a manpage/help parser used to extract CLI information. Leave it `<bundled>` to use the bundled executable.
+"Shell Commands" Explorer in the Side Bar shows which command spces are installed. The extension can synthesize new ones on demand, though.
+
+![](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/vscode-shell-command-explorer.png)
 
 
 
