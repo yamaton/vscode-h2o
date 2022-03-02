@@ -64,11 +64,13 @@
             },
             {
                 "command": "registeredCommands.refreshEntry",
-                "title": "Refresh"
+                "title": "Refresh",
+                "icon": "$(refresh)"
             },
             {
                 "command": "registeredCommands.removeEntry",
-                "title": "Remove"
+                "title": "Remove",
+                "icon": "$(trash)"
             }
         ],
         "menus": {
