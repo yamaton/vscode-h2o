@@ -50,6 +50,15 @@ Autocompletion data for some bioinformatics tools is available. Just type `Ctrl`
 
 [Here](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) is the list of bioinformatics tools supported by the extra data. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you find some missing.
 
+
+## Managing shell commands
+
+"Shell Commands" Explorer in the Side Bar shows which command spces are installed. The extension can synthesize new ones on demand, though.
+
+![](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/vscode-shell-command-explorer.png)
+
+
+
 ## Extension Commands
 
 This extension provides following commands:
@@ -59,13 +68,6 @@ This extension provides following commands:
 * `Shell Completion: Load Bioinformatics CLI Data`: Download curated bioinformatics CLI data from [here](https://github.com/yamaton/h2o-curated-data/tree/main/bio/json), and force update the local cache.
 * `Shell Completion: Remove Bioinformatics CLI Data`: Remove the bioinformatics package.
 * `Shell Completion: Load Command... [experimental]`: Load individual command spec from [experimental directory](https://github.com/yamaton/h2o-curated-data/tree/main/experimental/json).
-
-
-## Managing shell commands
-
-"Shell Commands" Explorer in the Side Bar shows which command spces are installed. The extension can synthesize new ones on demand, though.
-
-![](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/vscode-shell-command-explorer.png)
 
 
 
