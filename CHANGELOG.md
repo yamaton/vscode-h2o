@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.2.0] (2022-03-02)
+- Add "Shell Commands" Explorer view
+- Fix to work with built-in commands like echo and hash
+- Fix case in the title to "Shell script command completion"
+- Update publisher name / email address
+
 ## [0.1.3] (2022-02-23)
 - Fix ridiculously long loading of CLI packages
 - Remove redundant operations
