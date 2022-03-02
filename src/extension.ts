@@ -3,7 +3,7 @@ import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
-
+import { CommandListProvider } from './commandExplorer';
 
 async function initializeParser(): Promise<Parser> {
   await Parser.init();
@@ -156,7 +156,7 @@ export async function activate(context: vscode.ExtensionContext) {
   }
 
 
-  // Download the command `name`
+  // h2o.loadCommand: Download the command `name`
   const loadCommand = vscode.commands.registerCommand('h2o.loadCommand', async (name: string) => {
     let cmd = name;
     if (!name) {
@@ -175,7 +175,7 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
 
-  // Clear cache of the command `name`
+  // h2o.clearCache: Clear cache of the command `name`
   const clearCacheCommand = vscode.commands.registerCommand('h2o.clearCache', async (name: string) => {
     let cmd = name;
     if (!name) {
@@ -193,7 +193,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   });
 
-  // Download the package bundle "common"
+  // h2o.loadCommon: Download the package bundle "common"
   const invokeDownloadingCommon = vscode.commands.registerCommand('h2o.loadCommon', async () => {
     try {
       console.log('[h2o.loadCommon] Load common CLI data');
@@ -213,7 +213,7 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
 
-  // Download the command bundle "bio"
+  // h2o.loadBio: Download the command bundle "bio"
   const invokeDownloadingBio = vscode.commands.registerCommand('h2o.loadBio', async () => {
     try {
       console.log('[h2o.loadBio] Load Bioinformatics CLI data');
@@ -231,7 +231,7 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
 
-  // Remove the command bundle "bio"
+  // h2o.removeBio: Remove the command bundle "bio"
   const removeBio = vscode.commands.registerCommand('h2o.removeBio', async () => {
     try {
       console.log('[h2o.removeBio] Remove Bioinformatics CLI data');
@@ -250,6 +250,23 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
 
+  // Command Explorer
+  const commandListProvider = new CommandListProvider(fetcher);
+  vscode.window.registerTreeDataProvider('registeredCommands', commandListProvider);
+  vscode.commands.registerCommand('registeredCommands.refreshEntry', () =>
+    commandListProvider.refresh()
+  );
+
+  vscode.commands.registerCommand('registeredCommands.removeEntry', async (item: vscode.TreeItem) => {
+    if (!!item && !!item.label) {
+      const name = item.label as string;
+      console.log(`[registeredCommands.removeEntry] Remove ${name}`);
+      await fetcher.unset(name);
+      commandListProvider.refresh();
+    }
+  });
+
+
   context.subscriptions.push(clearCacheCommand);
   context.subscriptions.push(loadCommand);
   context.subscriptions.push(invokeDownloadingCommon);
@@ -259,6 +276,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(close));
   context.subscriptions.push(compprovider);
   context.subscriptions.push(hoverprovider);
+
 }
 
 

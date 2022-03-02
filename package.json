@@ -36,7 +36,8 @@
         "onCommand:h2o.clearCache",
         "onCommand:h2o.loadCommon",
         "onCommand:h2o.loadBio",
-        "onCommand:h2o.removeBio"
+        "onCommand:h2o.removeBio",
+        "onView:registeredCommands"
     ],
     "main": "./out/extension.js",
     "contributes": {
@@ -60,6 +61,14 @@
             {
                 "command": "h2o.loadCommand",
                 "title": "Shell Completion: Load Command... [experimental]"
+            },
+            {
+                "command": "registeredCommands.refreshEntry",
+                "title": "Refresh"
+            },
+            {
+                "command": "registeredCommands.removeEntry",
+                "title": "Remove"
             }
         ],
         "menus": {
@@ -84,6 +93,24 @@
                     "command": "h2o.loadCommand",
                     "when": "editorLangId == shellscript"
                 }
+            ],
+            "view/title": [
+                {
+                    "command": "registeredCommands.refreshEntry",
+                    "when": "view == registeredCommands",
+                    "group": "navigation"
+                }
+            ],
+            "view/item/context": [
+                {
+                    "command": "registeredCommands.removeEntry",
+                    "when": "view == registeredCommands",
+                    "group": "inline"
+                },
+                {
+                    "command": "registeredCommands.removeEntry",
+                    "when": "view == registeredCommands"
+                }
             ]
         },
         "configuration": {
@@ -95,6 +122,14 @@
                     "description": "Path to the H2O executable. Enter <bundled> if using the bundled."
                 }
             }
+        },
+        "views": {
+            "explorer": [
+                {
+                    "id": "registeredCommands",
+                    "name": "Shell Commands"
+                }
+            ]
         }
     },
     "scripts": {
