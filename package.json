@@ -129,7 +129,8 @@
             "explorer": [
                 {
                     "id": "registeredCommands",
-                    "name": "Shell Commands"
+                    "name": "Shell Commands",
+                    "visibility": "collapsed"
                 }
             ]
         }
