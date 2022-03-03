@@ -345,8 +345,8 @@ function walkbackIfNeeded(document: vscode.TextDocument, root: SyntaxNode, posit
   } else if (thisNode.type !== 'word' && position.character === 0 && position.line > 0) {
     const prevLineIndex = position.line - 1;
     const prevLine = document.lineAt(prevLineIndex);
-    if (prevLine.text.trimRight().endsWith('\\')) {
-      const charIndex = prevLine.text.trimRight().length - 1;
+    if (prevLine.text.trimEnd().endsWith('\\')) {
+      const charIndex = prevLine.text.trimEnd().length - 1;
       return walkbackIfNeeded(document, root, new vscode.Position(prevLineIndex, charIndex));
     }
   }
