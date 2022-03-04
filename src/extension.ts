@@ -53,7 +53,7 @@ export async function activate(context: vscode.ExtensionContext) {
           if (!!cmdSeq && cmdSeq.length) {
             const deepestCmd = cmdSeq[cmdSeq.length - 1];
             const compSubcommands = getCompletionsSubcommands(deepestCmd);
-            const compOptions = getCompletionsOptions(document, tree.rootNode, p, deepestCmd);
+            const compOptions = getCompletionsOptions(document, tree.rootNode, p, cmdSeq);
             return [
               ...compSubcommands,
               ...compOptions,
@@ -114,8 +114,7 @@ export async function activate(context: vscode.ExtensionContext) {
             const msg = `${cmdPrefixName} **${thatCmd.name}**\n\n ${thatCmd.description}`;
             return new vscode.Hover(new vscode.MarkdownString(msg));
           } else if (cmdSeq.length) {
-            const deepestCmd = cmdSeq[cmdSeq.length - 1];
-            const opts = getMatchingOption(currentWord, name, deepestCmd);
+            const opts = getMatchingOption(currentWord, name, cmdSeq);
             const msg = optsToMessage(opts);
             return new vscode.Hover(new vscode.MarkdownString(msg));
           } else {
@@ -355,10 +354,10 @@ function walkbackIfNeeded(document: vscode.TextDocument, root: SyntaxNode, posit
 
 
 // Returns current word as an option if the tree-sitter says so
-function getMatchingOption(currentWord: string, name: string, deepestCmd: Command): Option[] {
+function getMatchingOption(currentWord: string, name: string, cmdSeq: Command[]): Option[] {
   const thisName = currentWord.split('=', 2)[0];
   if (thisName.startsWith('-')) {
-    let options: Option[] = deepestCmd.options;
+    const options = getOptions(cmdSeq);
     const theOption = options.find((x) => x.names.includes(thisName));
     if (theOption) {
       return [theOption];
@@ -434,7 +433,7 @@ function _getSubcommandCandidates(root: SyntaxNode, position: vscode.Position): 
 async function getContextCmdSeq(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Command[]> {
   let name = getContextCommandName(root, position);
   if (!name) {
-    return Promise.reject("[getContextCmdSubcmdPair] Command name not found.");
+    return Promise.reject("[getContextCmdSeq] Command name not found.");
   }
 
   try {
@@ -459,8 +458,8 @@ async function getContextCmdSeq(root: SyntaxNode, position: vscode.Position, fet
     }
     return seq;
   } catch (e) {
-    console.error("[getContextCmdSubcmdPair] Error: ", e);
-    return Promise.reject("[getContextCmdSubcmdPair] unknown command!");
+    console.error("[getContextCmdSeq] Error: ", e);
+    return Promise.reject("[getContextCmdSeq] unknown command!");
   }
 }
 
@@ -501,11 +500,10 @@ function getCompletionsSubcommands(deepestCmd: Command): vscode.CompletionItem[]
 }
 
 // Get option completion
-function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position, deepestCmd: Command): vscode.CompletionItem[] {
+function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position, cmdSeq: Command[]): vscode.CompletionItem[] {
   const args = getContextCmdArgs(document, root, position);
   const compitems: vscode.CompletionItem[] = [];
-  let options: Option[];
-  options = deepestCmd.options;
+  const options = getOptions(cmdSeq);
   options.forEach((opt, idx) => {
     // suppress already-used options
     if (opt.names.every(name => !args.includes(name))) {
@@ -527,5 +525,14 @@ function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, 
 function createCompletionItem(label: string, desc: string): vscode.CompletionItem {
   return new vscode.CompletionItem({ label: label, description: desc });
 }
+
+
+function getOptions(cmdSeq: Command[]): Option[] {
+  const inheritedOptionsArray = cmdSeq.map(x => (!!x.inheritedOptions) ? x.inheritedOptions : []);
+  const deepestCmd = cmdSeq[cmdSeq.length - 1];
+  const options = deepestCmd.options.concat(...inheritedOptionsArray);
+  return options;
+}
+
 
 export function deactivate() { }

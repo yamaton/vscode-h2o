@@ -9,5 +9,6 @@ export interface Command {
   description: string,
   options: Option[],
   subcommands?: Command[],
+  inheritedOptions?: Option[],
 }
 
