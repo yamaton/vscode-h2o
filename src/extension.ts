@@ -444,8 +444,8 @@ async function getContextCmdSeq(root: SyntaxNode, position: vscode.Position, fet
       let found = true;
       while (found && !!command.subcommands && command.subcommands.length) {
         found = false;
-        const subcommands = command.subcommands;
-        for (let word of words) {
+        const subcommands = getSubcommandsWithAliases(command);
+        for (const word of words) {
           for (const subcmd of subcommands) {
             if (subcmd.name === word) {
               command = subcmd;
@@ -487,7 +487,7 @@ function getContextCmdArgs(document: vscode.TextDocument, root: SyntaxNode, posi
 
 // Get subcommand completions
 function getCompletionsSubcommands(deepestCmd: Command): vscode.CompletionItem[] {
-  const subcommands = deepestCmd.subcommands;
+  const subcommands = getSubcommandsWithAliases(deepestCmd);
   if (subcommands && subcommands.length) {
     const compitems = subcommands.map((sub, idx) => {
       const item = createCompletionItem(sub.name, sub.description);
@@ -498,6 +498,7 @@ function getCompletionsSubcommands(deepestCmd: Command): vscode.CompletionItem[]
   }
   return [];
 }
+
 
 // Get option completion
 function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position, cmdSeq: Command[]): vscode.CompletionItem[] {
@@ -527,6 +528,7 @@ function createCompletionItem(label: string, desc: string): vscode.CompletionIte
 }
 
 
+// Get options including inherited ones
 function getOptions(cmdSeq: Command[]): Option[] {
   const inheritedOptionsArray = cmdSeq.map(x => (!!x.inheritedOptions) ? x.inheritedOptions : []);
   const deepestCmd = cmdSeq[cmdSeq.length - 1];
@@ -534,5 +536,27 @@ function getOptions(cmdSeq: Command[]): Option[] {
   return options;
 }
 
+
+// Get subcommands including aliases of a subcommands
+function getSubcommandsWithAliases(cmd: Command): Command[] {
+  const subcommands = cmd.subcommands;
+  if (!subcommands) {
+    return [];
+  }
+
+  const res: Command[] = [];
+  for (let subcmd of subcommands) {
+    res.push(subcmd);
+    if (!!subcmd.aliases) {
+      for (const alias of subcmd.aliases) {
+        const aliasCmd = {...subcmd};
+        aliasCmd.name = alias;
+        aliasCmd.description = `(Alias of ${subcmd.name}) `.concat(aliasCmd.description);
+        res.push(aliasCmd);
+      }
+    }
+  }
+  return res;
+}
 
 export function deactivate() { }

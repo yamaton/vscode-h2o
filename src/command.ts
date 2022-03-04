@@ -10,5 +10,6 @@ export interface Command {
   options: Option[],
   subcommands?: Command[],
   inheritedOptions?: Option[],
+  aliases?: string[],
 }
 
