@@ -97,7 +97,9 @@ export async function activate(context: vscode.ExtensionContext) {
           const name = cmdSeq[0].name;
           if (currentWord === name) {
             const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
-            const msg = new vscode.MarkdownString(`\`${name}\`` + `\n\n[Reset](${clearCacheCommandUri})`);
+            const thisCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
+            const tldrText = (!!thisCmd.tldr) ? `\n${thisCmd.tldr}` : "";
+            const msg = new vscode.MarkdownString(`\`${name}\`` + tldrText + `\n\n[Reset](${clearCacheCommandUri})`);
             msg.isTrusted = true;
             return new vscode.Hover(msg);
           } else if (cmdSeq.length > 1 && cmdSeq.some((cmd) => cmd.name === currentWord)) {
