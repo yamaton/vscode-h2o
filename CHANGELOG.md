@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.1] (2022-03-17)
+- Show "tldr" pages at the command hover if available in the command spec
+- Support `tldr`, `inheritedOptions`, and `aliases` fields in the command spec.
 
 ## [0.2.0] (2022-03-02)
 - Add "Shell Commands" Explorer view
