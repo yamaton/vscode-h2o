@@ -4,6 +4,8 @@ import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
 import { CommandListProvider } from './commandExplorer';
+import { formatTldr } from './utils';
+
 
 async function initializeParser(): Promise<Parser> {
   await Parser.init();
@@ -98,7 +100,7 @@ export async function activate(context: vscode.ExtensionContext) {
           if (currentWord === name) {
             const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
             const thisCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
-            const tldrText = (!!thisCmd.tldr) ? `\n${thisCmd.tldr}` : "";
+            const tldrText = (!!thisCmd.tldr) ? "\n" + formatTldr(thisCmd.tldr) : "";
             const msg = new vscode.MarkdownString(`\`${name}\`` + tldrText + `\n\n[Reset](${clearCacheCommandUri})`);
             msg.isTrusted = true;
             return new vscode.Hover(msg);
@@ -291,7 +293,8 @@ function optsToMessage(opts: Option[]): string {
   if (opts.length === 1) {
     const opt = opts[0];
     const namestr = opt.names.map((s) => `\`${s}\``).join(', ');
-    const msg = `${namestr}\n\n ${opt.description}`;
+    const argstr = (!!opt.argument) ? `\`${opt.argument}\`` : "";
+    const msg = `${namestr} ${argstr}\n\n ${opt.description}`;
     return msg;
 
   } else {
