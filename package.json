@@ -44,7 +44,7 @@
         "commands": [
             {
                 "command": "h2o.clearCache",
-                "title": "Shell Completion: Clear Cache Of..."
+                "title": "Shell Completion: Remove command spec..."
             },
             {
                 "command": "h2o.loadCommon",
@@ -60,7 +60,7 @@
             },
             {
                 "command": "h2o.loadCommand",
-                "title": "Shell Completion: Load Command... [experimental]"
+                "title": "Shell Completion: Load Command spec... [experimental]"
             },
             {
                 "command": "registeredCommands.refreshEntry",
