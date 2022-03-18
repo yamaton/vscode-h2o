@@ -2,26 +2,25 @@
 
 This extension adds autocomplete and introspection of commands to the **Shell Script mode**.
 
-* Command-line option/flag completion
-* Subcommand completion
-* Pop-up introspection for subcommands and options/flags
-* **No configuration needed**
+* Command-line option/flag/subcommand completion
+* Hover introspection for subcommands and options/flags
+* **Zero configuration**
 
-## Demo: Autocomplete in Shell Script
+## Demo: Autocomplete in shell script
 
 ![shellcomp](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/demo-autocomplete.gif)
 
 
 
-## Demo: Pop-up introspection
+## Demo: Introspect with hover
 
 ![hover](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/demo-mouseover.gif)
 
 
 
-## Preloaded data
+## Preloaded command specs
 
-This extension comes with some CLI data though it also can dynamically create autocompletion data from man pages and `--help` document in your local environment. The preprocessed data include:
+This extension comes with some CLI specs for autocompletion though it can dynamically create them by scanning man pages or `--help` documents in your local environment. The preprocessed specs include:
 
 * git
 * npm
@@ -35,11 +34,11 @@ This extension comes with some CLI data though it also can dynamically create au
 * go
 * ... and many more!
 
-[Here](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the complete list. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you want more tools added.
+[Here](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the complete list of preloaded specs. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you want more tools added.
 
-## [Optional] Autocompletion for bioinformatics tools
+## [Optional] Command specs for bioinformatics tools
 
-Autocompletion data for some bioinformatics tools is available. Just type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to load them all.
+Command specs for some bioinformatics tools is available. Just type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to load them all.
 
 * BLAST
 * GATK
@@ -51,15 +50,41 @@ Autocompletion data for some bioinformatics tools is available. Just type `Ctrl`
 [Here](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) is the list of bioinformatics tools supported by the extra data. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you find some missing.
 
 
-## Managing shell commands
+## Managing command specs
 
-"Shell Commands" Explorer in the Side Bar shows which command spces are installed. The extension can synthesize new ones on demand, though.
+"Shell Commands" Explorer in the Side Bar shows which command specs are loaded.
 
 ![](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/vscode-shell-command-explorer.png)
 
 
 
-## Extension Commands
+## Trouble Shooting
+
+### Not working?
+
+* If the command is in [this list](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Common CLI Data` to reload the preprocessed data.
+* If the command is in [this (bio) list](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to reload the preprocessed data.
+* Otherwise, it's likely that our program failed to extract the command spec from your system.  To retry the extraction process, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Clear Cache`, and enter the name of the command to remove the data from the cache. Then our program will try recreating the CLI data when the command is typed.
+
+
+### Annoyed by aggressive suggestions?
+
+We can adjust suggestions with the VS Code settings.
+
+* Editor: **Quick Suggestions** can suppress suggestions while typing.
+* Editor: **Suggest on Trigger Characters** can deactivate SPACE-key triggering.
+
+Note: The setting applies to other language modes as well.
+
+
+### Annoyed by unwanted commands?
+
+Shell Commands Explorer in the Side Bar is the best interface to remove unnecessary command specs.
+
+To remove all bioinformatics commands, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Data`.
+
+
+## This extension's commands
 
 This extension provides following commands:
 
@@ -68,28 +93,6 @@ This extension provides following commands:
 * `Shell Completion: Load Bioinformatics CLI Data`: Download curated bioinformatics CLI data from [here](https://github.com/yamaton/h2o-curated-data/tree/main/bio/json), and force update the local cache.
 * `Shell Completion: Remove Bioinformatics CLI Data`: Remove the bioinformatics package.
 * `Shell Completion: Load Command... [experimental]`: Load individual command spec from [experimental directory](https://github.com/yamaton/h2o-curated-data/tree/main/experimental/json).
-
-
-
-## Security with sandboxing
-
-When this extension sees an unregistered command, it runs the command in the background with options `--help` to get the command information. This may trigger harm if you have untrusted programs locally. To keep your system safe, this extension executes a command in a sandbox environment if available; i.e. program cannot access your network or filesystems.
-
-* In macOS, our program always runs in a sandbox using `sandbox-exec`.
-* In **Linux or WSL** (Windows Subsystem for Linux), consider installing **[bubblewrap](https://wiki.archlinux.org/title/Bubblewrap)**. This extension uses it automatically if available.
-
-## Trouble Shooting
-
-### Not working for some commands?
-
-* If the command is in [this list](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Common CLI Data` to reload the preprocessed data.
-* If the command is in [this (bio) list](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to reload the preprocessed data.
-* Otherwise, it's likely that our program failed to extract the command information.  To retry the extraction process, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Clear Cache`, and enter the name of the command to remove the data from the cache. Then our program will try recreating the CLI data when the command is typed.
-
-
-
-### Annoyed by unwanted programs?
-You can also remove any command individually by invoking `Shell Completion: Clear Cache` command after pressing `Ctrl`+`Shift`+`P` ( `⌘`+`⇧`+`P` ). To remove all bioinformatics commands, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Data`.
 
 
 
@@ -102,9 +105,18 @@ You can also remove any command individually by invoking `Shell Completion: Clea
 
 
 
+## Security with sandboxing
+
+When this extension sees an unregistered command, it runs the command in the background with options `--help` to get the command information. This may trigger harm if you have untrusted programs locally. To keep your system safe, this extension executes a command in a sandbox environment if available; i.e. program cannot access your network or filesystems.
+
+* In macOS, our program always runs in a sandbox using `sandbox-exec`.
+* In **Linux or WSL** (Windows Subsystem for Linux), consider installing **[bubblewrap](https://wiki.archlinux.org/title/Bubblewrap)**. This extension uses it automatically if available.
+
+
 ## Known Issues
 
 * Autocomplete and mouse-over introspection work only if
   * The command is available in [the preprocessed CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) loaded at the startup.
   * Or, H2O successfully extracts the CLI information from your local environment.
-
+* Extra hyphens remain when completing a command option.
+  * Will fix by the end of April 2022. Please refer [this issue](https://github.com/yamaton/h2o-curated-data/issues/2).
