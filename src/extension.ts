@@ -165,6 +165,12 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!name) {
       cmd = (await vscode.window.showInputBox({ placeHolder: 'which command?' }))!;
     }
+
+    if (!cmd || !cmd.trim()) {
+      console.info("[h2o.loadCommand] Cancelled operation.");
+      return;
+    }
+
     try {
       console.log(`[Command] Downloading ${cmd} data...`);
       await fetcher.downloadCommandToCache(cmd);
@@ -172,9 +178,8 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.window.showInformationMessage(msg);
     } catch (e) {
       console.error("Error: ", e);
-      return Promise.reject("[h2o.loadCommand] Error: ");
+      return Promise.reject(`[h2o.loadCommand] Failed to load ${cmd}`);
     }
-
   });
 
 
@@ -184,6 +189,12 @@ export async function activate(context: vscode.ExtensionContext) {
     if (!name) {
       cmd = (await vscode.window.showInputBox({ placeHolder: 'which command?' }))!;
     }
+
+    if (!cmd || !cmd.trim()) {
+      console.info("[h2o.clearCacheCommand] Cancelled operation.");
+      return;
+    }
+
     try {
       console.log(`[Command] Clearing cache for ${cmd}`);
       await fetcher.unset(cmd);
