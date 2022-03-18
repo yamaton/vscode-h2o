@@ -118,7 +118,7 @@
         "configuration": {
             "title": "Shell Completion",
             "properties": {
-                "h2o.h2oPath": {
+                "shellCompletion.h2oPath": {
                     "type": "string",
                     "default": "<bundled>",
                     "description": "Path to the H2O executable. Enter <bundled> if using the bundled."
