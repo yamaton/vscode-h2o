@@ -21,7 +21,7 @@ class HTTPResponseError extends Error {
 // -----
 // Call H2O executable and get command information from the local environment
 export function runH2o(name: string): Command | undefined {
-  let h2opath = vscode.workspace.getConfiguration('h2o').get('h2oPath') as string;
+  let h2opath = vscode.workspace.getConfiguration('shellCompletion').get('h2oPath') as string;
   if (h2opath === '<bundled>') {
     if (process.platform === 'linux') {
       h2opath = `${__dirname}/../bin/h2o-x86_64-unknown-linux`;
