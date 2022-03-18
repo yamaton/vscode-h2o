@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.2] (2022-03-18)
+- Fix an error when loading a command without an argument.
+
 ## [0.2.1] (2022-03-17)
 - Show "tldr" pages at the command hover if available in the command spec
 - Support `tldr`, `inheritedOptions`, and `aliases` fields in the command spec.
