@@ -1,10 +1,11 @@
 # Shell script command completion
 
-This extension adds autocomplete and introspection of commands to the **Shell Script mode**.
+This extension adds autocompletion and introspection of commands to the **Shell Script mode**.
 
 * Command-line option/flag/subcommand completion
 * Hover introspection for subcommands and options/flags
 * **Zero configuration**
+
 
 ## Demo: Autocomplete in shell script
 
@@ -18,9 +19,9 @@ This extension adds autocomplete and introspection of commands to the **Shell Sc
 
 
 
-## Preloaded command specs
+## Supported commands
 
-This extension comes with some CLI specs for autocompletion though it can dynamically create them by scanning man pages or `--help` documents in your local environment. The preprocessed specs include:
+This extension comes with some CLI specs though it can dynamically create specs by scanning man pages or `--help` documents in your local environment. The preloaded specs include:
 
 * git
 * npm
@@ -32,20 +33,20 @@ This extension comes with some CLI specs for autocompletion though it can dynami
 * conda
 * cargo
 * go
-* ... and many more!
+* ...
 
 [Here](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the complete list of preloaded specs. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you want more tools added.
 
-## [Optional] Command specs for bioinformatics tools
+## [Optional] Extra command specs for bioinformatics
 
-Command specs for some bioinformatics tools is available. Just type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to load them all.
+Command specs for some bioinformatics tools are available optionally. Just type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to load them all.
 
 * BLAST
 * GATK
 * seqkit
 * samtools
 * csvtools
-* ... and many more!
+* ...
 
 [Here](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) is the list of bioinformatics tools supported by the extra data. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you find some missing.
 
@@ -58,7 +59,7 @@ Command specs for some bioinformatics tools is available. Just type `Ctrl`+`Shif
 
 
 
-## Trouble Shooting
+## 🔥 Trouble Shooting
 
 ### Not working?
 
@@ -84,28 +85,16 @@ Shell Commands Explorer in the Side Bar is the best interface to remove unnecess
 To remove all bioinformatics commands, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Data`.
 
 
-## This extension's commands
+## 🔧 How the extension works
 
-This extension provides following commands:
-
-* `Shell Completion: Clear Cache`: Remove the specified command. `Reset` button on a hover window over a command also works in the same way.
-* `Shell Completion: Load Common CLI Data`: Download curated CLI data from [here](https://github.com/yamaton/h2o-curated-data/tree/main/general/json), and force update the local cache.
-* `Shell Completion: Load Bioinformatics CLI Data`: Download curated bioinformatics CLI data from [here](https://github.com/yamaton/h2o-curated-data/tree/main/bio/json), and force update the local cache.
-* `Shell Completion: Remove Bioinformatics CLI Data`: Remove the bioinformatics package.
-* `Shell Completion: Load Command... [experimental]`: Load individual command spec from [experimental directory](https://github.com/yamaton/h2o-curated-data/tree/main/experimental/json).
-
-
-
-## How the extension works
-
-* This extension uses [preprocessed data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) to show command data if available.
+* This extension uses [preprocessed data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) to show command info if available.
 * Otherwise, this extension runs [H2O](https://github.com/yamaton/h2o) and extracts CLI information by parsing `man <command>`  or  `<command> --help`.
   * **[NOTE]** Bundled `h2o` runs on Linux/WSL and macOS only.
 * This extension depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand shell script structure.
 
 
 
-## Security with sandboxing
+## 🛡️ Security with sandboxing
 
 When this extension sees an unregistered command, it runs the command in the background with options `--help` to get the command information. This may trigger harm if you have untrusted programs locally. To keep your system safe, this extension executes a command in a sandbox environment if available; i.e. program cannot access your network or filesystems.
 
@@ -113,7 +102,7 @@ When this extension sees an unregistered command, it runs the command in the bac
 * In **Linux or WSL** (Windows Subsystem for Linux), consider installing **[bubblewrap](https://wiki.archlinux.org/title/Bubblewrap)**. This extension uses it automatically if available.
 
 
-## Known Issues
+## ⚠️ Known Issues
 
 * Autocomplete and mouse-over introspection work only if
   * The command is available in [the preprocessed CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) loaded at the startup.
