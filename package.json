@@ -44,23 +44,23 @@
         "commands": [
             {
                 "command": "h2o.clearCache",
-                "title": "Shell Completion: Remove command spec..."
+                "title": "Shell Completion: Remove Command Spec"
             },
             {
                 "command": "h2o.loadCommon",
-                "title": "Shell Completion: Load Common CLI Data"
+                "title": "Shell Completion: Load All Common CLI Specs"
             },
             {
                 "command": "h2o.loadBio",
-                "title": "Shell Completion: Load Bioinformatics CLI Data"
+                "title": "Shell Completion: Load All Bioinformatics CLI Specs"
             },
             {
                 "command": "h2o.removeBio",
-                "title": "Shell Completion: Remove Bioinformatics CLI Data"
+                "title": "Shell Completion: Remove All Bioinformatics CLI Specs"
             },
             {
                 "command": "h2o.loadCommand",
-                "title": "Shell Completion: Load Command spec... [experimental]"
+                "title": "Shell Completion: Load Command Spec (experimental)"
             },
             {
                 "command": "registeredCommands.refreshEntry",
