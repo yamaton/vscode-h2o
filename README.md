@@ -61,14 +61,13 @@ Command specs for some bioinformatics tools are available optionally. Just type 
 
 ## 🔥 Trouble Shooting
 
-### Not working?
+### 😞 Not working?
 
 * If the command is in [this list](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Common CLI Data` to reload the preprocessed data.
 * If the command is in [this (bio) list](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to reload the preprocessed data.
 * Otherwise, it's likely that our program failed to extract the command spec from your system.  To retry the extraction process, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Clear Cache`, and enter the name of the command to remove the data from the cache. Then our program will try recreating the CLI data when the command is typed.
 
-
-### Annoyed by aggressive suggestions?
+### 😞 Annoyed by aggressive suggestions?
 
 We can adjust suggestions with the VS Code settings.
 
@@ -77,8 +76,7 @@ We can adjust suggestions with the VS Code settings.
 
 Note: The setting applies to other language modes as well.
 
-
-### Annoyed by unwanted commands?
+### 😞 Annoyed by unwanted commands?
 
 Shell Commands Explorer in the Side Bar is the best interface to remove unnecessary command specs.
 
