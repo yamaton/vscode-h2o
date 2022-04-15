@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.3] (2022-03-18)
+- Update README
+
 ## [0.2.2] (2022-03-18)
 - Fix an error when loading a command without an argument.
 
