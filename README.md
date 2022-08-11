@@ -35,7 +35,7 @@ This extension comes with some CLI specs though it can dynamically create specs 
 * go
 * ...
 
-[Here](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the complete list of preloaded specs. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you want more tools added.
+[general.txt](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the complete list of preloaded specs. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you want more tools added.
 
 ## [Optional] Extra command specs for bioinformatics
 
@@ -48,7 +48,7 @@ Command specs for some bioinformatics tools are available optionally. Just type 
 * csvtools
 * ...
 
-[Here](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) is the list of bioinformatics tools supported by the extra data. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you find some missing.
+[bio.txt](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) is the list of bioinformatics tools supported by the extra data. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you find some missing.
 
 
 ## Managing command specs
@@ -85,7 +85,7 @@ To remove all bioinformatics commands, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`
 
 ## 🔧 How the extension works
 
-* This extension uses [preprocessed data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) to show command info if available.
+* This extension uses [preprocessed specs](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) to show command info if available. (Also use [these specs](https://github.com/yamaton/h2o-curated-data/tree/main/bio/json) if the bioinformatics package is loaded.)
 * Otherwise, this extension runs [H2O](https://github.com/yamaton/h2o) and extracts CLI information by parsing `man <command>`  or  `<command> --help`.
   * **[NOTE]** Bundled `h2o` runs on Linux/WSL and macOS only.
 * This extension depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand shell script structure.
