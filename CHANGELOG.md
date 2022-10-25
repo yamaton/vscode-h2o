@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.4] (2022-10-24)
+- Fix completion shown after semicolons.
+
 ## [0.2.3] (2022-03-18)
 - Update README
 
