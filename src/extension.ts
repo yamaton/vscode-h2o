@@ -354,6 +354,11 @@ function getCurrentNode(n: SyntaxNode, position: vscode.Position): SyntaxNode {
 function walkbackIfNeeded(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position): vscode.Position {
   const thisNode = getCurrentNode(root, position);
   console.debug("[walkbackIfNeeded] thisNode.type: ", thisNode.type);
+  if (thisNode.type === ';') {
+    console.info("[walkbackIfNeeded] stop at semicolon.");
+    return position;
+  }
+
   if (position.character > 0 && thisNode.type !== 'word') {
     console.info("[walkbackIfNeeded] stepping back!");
     return walkbackIfNeeded(document, root, position.translate(0, -1));
