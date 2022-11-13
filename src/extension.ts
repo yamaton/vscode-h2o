@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import * as Parser from 'web-tree-sitter';
-import * as path from 'path';
 import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
@@ -430,7 +429,7 @@ function getContextCommandName(root: SyntaxNode, position: vscode.Position): str
   if (name === 'sudo') {
     name = commandNode?.firstNamedChild?.nextSibling?.text!;
   }
-  return path.basename(name);
+  return name;
 }
 
 // Get subcommand names NOT starting with `-`
