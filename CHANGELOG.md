@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.5] (2022-12-29)
+- Fix completion range discussed in https://github.com/yamaton/h2o-curated-data/issues/2
+
 ## [0.2.4] (2022-10-24)
 - Fix completion shown after semicolons.
 
