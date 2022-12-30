@@ -4,7 +4,7 @@ import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
 import { CommandListProvider } from './commandExplorer';
-import { formatTldr } from './utils';
+import { formatTldr, isPrefixOf, getLabelString } from './utils';
 
 
 async function initializeParser(): Promise<Parser> {
@@ -49,26 +49,44 @@ export async function activate(context: vscode.ExtensionContext) {
 
         // this is an ugly hack to get current Node
         const p = walkbackIfNeeded(document, tree.rootNode, position);
+        const isCursorTouchingWord = (p === position);
+        console.log(`[Completion] isCursorTouchingWord: ${isCursorTouchingWord}`);
 
         try {
           const cmdSeq = await getContextCmdSeq(tree.rootNode, p, fetcher);
           if (!!cmdSeq && cmdSeq.length) {
             const deepestCmd = cmdSeq[cmdSeq.length - 1];
             const compSubcommands = getCompletionsSubcommands(deepestCmd);
-            const compOptions = getCompletionsOptions(document, tree.rootNode, p, cmdSeq);
-            return [
+            let compOptions = getCompletionsOptions(document, tree.rootNode, p, cmdSeq);
+            let compItems = [
               ...compSubcommands,
               ...compOptions,
             ];
+
+            if (isCursorTouchingWord) {
+              const currentNode = getCurrentNode(tree.rootNode, position);
+              const currentWord = currentNode.text;
+              compItems = compItems.filter(compItem => isPrefixOf(currentWord, getLabelString(compItem.label)));
+              compItems.forEach(compItem => {
+                compItem.range = range(currentNode);
+              });
+              console.info(`[Completion] currentWord: ${currentWord}`);
+            }
+            return compItems;
           } else {
             throw new Error("unknown command");
           }
         } catch (e) {
-          const currentWord = getCurrentNode(tree.rootNode, position).text;
+          const currentNode = getCurrentNode(tree.rootNode, position);
+          const currentWord = currentNode.text;
           console.info(`[Completion] currentWord = ${currentWord}`);
-          if (!!compCommands && p === position && currentWord.length >= 3) {
+          if (!!compCommands && p === position && currentWord.length >= 2) {
             console.info("[Completion] Only command completion is available (2)");
-            return compCommands;
+            let compItems = compCommands.filter(cmd => isPrefixOf(currentWord, getLabelString(cmd.label)));
+            compItems.forEach(compItem => {
+              compItem.range = range(currentNode);
+            });
+            return compItems;
           }
           console.warn("[Completion] No completion item is available (1)", e);
           return Promise.reject("Error: No completion item is available");
@@ -570,7 +588,7 @@ function getSubcommandsWithAliases(cmd: Command): Command[] {
     res.push(subcmd);
     if (!!subcmd.aliases) {
       for (const alias of subcmd.aliases) {
-        const aliasCmd = {...subcmd};
+        const aliasCmd = { ...subcmd };
         aliasCmd.name = alias;
         aliasCmd.description = `(Alias of ${subcmd.name}) `.concat(aliasCmd.description);
         res.push(aliasCmd);
