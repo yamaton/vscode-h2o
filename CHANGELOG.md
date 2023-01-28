@@ -1,4 +1,9 @@
 # Change Log
+## [0.2.6] (2022-01-28)
+- Show usage in hovers
+- Show description in hovers when appropriate
+- Update `h2o` (command spec parser) to v0.4.6
+
 ## [0.2.5] (2022-12-29)
 - Fix completion range discussed in https://github.com/yamaton/h2o-curated-data/issues/2
 
