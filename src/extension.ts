@@ -4,7 +4,7 @@ import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
 import { CommandListProvider } from './commandExplorer';
-import { formatTldr, isPrefixOf, getLabelString } from './utils';
+import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription } from './utils';
 
 
 async function initializeParser(): Promise<Parser> {
@@ -116,13 +116,17 @@ export async function activate(context: vscode.ExtensionContext) {
         if (!!cmdSeq && cmdSeq.length) {
           const name = cmdSeq[0].name;
           if (currentWord === name) {
+            // Display root-level command
             const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
             const thisCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
-            const tldrText = (!!thisCmd.tldr) ? "\n" + formatTldr(thisCmd.tldr) : "";
-            const msg = new vscode.MarkdownString(`\`${name}\`` + tldrText + `\n\n[Reset](${clearCacheCommandUri})`);
+            const tldrText = formatTldr(thisCmd.tldr);
+            const usageText = formatUsage(thisCmd.usage);
+            const descText = (thisCmd.description !== thisCmd.name && !tldrText) ? formatDescription(thisCmd.description) : "";
+            const msg = new vscode.MarkdownString(`\`${name}\`${descText}${usageText}${tldrText}\n\n[Reset](${clearCacheCommandUri})`);
             msg.isTrusted = true;
             return new vscode.Hover(msg);
           } else if (cmdSeq.length > 1 && cmdSeq.some((cmd) => cmd.name === currentWord)) {
+            // Display a subcommand
             const thatCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
             const nameSeq: string[] = [];
             for (const cmd of cmdSeq) {
@@ -133,7 +137,8 @@ export async function activate(context: vscode.ExtensionContext) {
               }
             }
             const cmdPrefixName = nameSeq.join(" ");
-            const msg = `${cmdPrefixName} **${thatCmd.name}**\n\n ${thatCmd.description}`;
+            const usageText = formatUsage(thatCmd.usage);
+            const msg = `${cmdPrefixName} **${thatCmd.name}**\n\n${thatCmd.description}${usageText}`;
             return new vscode.Hover(new vscode.MarkdownString(msg));
           } else if (cmdSeq.length) {
             const opts = getMatchingOption(currentWord, name, cmdSeq);
