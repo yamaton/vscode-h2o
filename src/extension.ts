@@ -410,7 +410,7 @@ function getMatchingOption(currentWord: string, name: string, cmdSeq: Command[])
       // or, a short option immediately followed by an argument, i.e. '-oArgument'
       const shortOptionNames = unstackOption(thisName);
       const shortOptions = shortOptionNames.map(short => options.find(opt => opt.names.includes(short))!).filter(opt => opt);
-      if (shortOptionNames.length > 0 && shortOptionNames.length === shortOptions.length) {
+      if (shortOptionNames.length > 1 && shortOptionNames.length === shortOptions.length) {
         return shortOptions;        // i.e. -xvf
       } else if (shortOptions.length > 0) {
         return [shortOptions[0]];   // i.e. -oArgument
@@ -420,17 +420,22 @@ function getMatchingOption(currentWord: string, name: string, cmdSeq: Command[])
   return [];
 }
 
-function isNotOldStyle(name: string): boolean {
-  return name.startsWith('--') || name.length === 2;
-}
-
 function isOldStyle(name: string): boolean {
-  return !isNotOldStyle(name);
+  return name.startsWith('-') && !name.startsWith('--') && name.length > 2;
 }
 
 function unstackOption(name: string): string[] {
   const xs = name.substring(1).split('').map(c => c.padStart(2, '-'));
-  return [...new Set(xs)];
+  if (!xs.length) {
+    return [];
+  }
+  const ys = new Set(xs);
+  if (xs.length !== ys.size) {
+    // if characters are NOT unique like -baba
+    // then it returns ['-b'] assuming 'aba' is the argument
+    return [xs[0]];
+  }
+  return xs;
 }
 
 // Get command node inferred from the current position
