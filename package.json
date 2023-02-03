@@ -11,7 +11,7 @@
         "email": "yamato.matsuoka@tritonlab.io"
     },
     "license": "MIT",
-    "version": "0.2.6",
+    "version": "0.2.7",
     "engines": {
         "vscode": "^1.63.0"
     },

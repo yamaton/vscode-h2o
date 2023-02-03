@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.7] (2022-02-02)
+- Fix hover over unregistered old-style options
+
 ## [0.2.6] (2022-01-28)
 - Show usage in hovers
 - Show description in hovers when appropriate
