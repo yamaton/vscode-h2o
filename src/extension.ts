@@ -454,7 +454,7 @@ function getContextCommandName(root: SyntaxNode, position: vscode.Position): str
   // if you are at a command, a named node, the currentNode becomes one-layer deeper than other nameless nodes.
   const commandNode = _getContextCommandNode(root, position);
   let name = commandNode?.firstNamedChild?.text!;
-  if (name === 'sudo') {
+  if (name === 'sudo' || name === 'nohup') {
     name = commandNode?.firstNamedChild?.nextSibling?.text!;
   }
   return name;
@@ -517,7 +517,7 @@ async function getContextCmdSeq(root: SyntaxNode, position: vscode.Position, fet
 function getContextCmdArgs(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position): string[] {
   const p = walkbackIfNeeded(document, root, position);
   let node = _getContextCommandNode(root, p)?.firstNamedChild;
-  if (node?.text === 'sudo') {
+  if (node?.text === 'sudo' || node?.text === 'nohup') {
     node = node.nextSibling;
   }
   const res: string[] = [];
