@@ -30,7 +30,7 @@ export function formatDescription(text: string): string {
   const trimmed = text.trim();
   return `\n\n${trimmed}`;
 }
-vscode.MarkdownString
+
 // check if string a is prefix of b
 export function isPrefixOf(left: string, right: string): boolean {
   const lengthLeft = left.length;
