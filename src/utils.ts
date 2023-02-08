@@ -25,7 +25,6 @@ export function formatUsage(text: string | undefined): string {
   const trimmed = text.trim();
   const xs = trimmed.split("\n");
   const formatted = `Usage:\n\n${xs.map(x => '     ' + x).join("\n")}\n\n`;
-  console.log(formatted);
   return `\n\n${formatted}`;
 }
 
