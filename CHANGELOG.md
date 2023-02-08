@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.9] (2022-02-07)
+- Fix problems by removing unnecessary entries in package.json
+
 ## [0.2.8] (2022-02-07)
 - Improve command usage and TLDR formatting
 - Handle commands starting with `nohup`
