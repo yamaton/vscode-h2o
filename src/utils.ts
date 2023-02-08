@@ -7,7 +7,13 @@ export function formatTldr(text: string | undefined): string {
     return "";
   }
   const s = text.replace(/{{(.*?)}}/g, "$1");
-  const formatted = s.split("\n").filter((line: string) => !line.trimStart().startsWith("#")).join("\n").trimStart();
+  const formatted = s
+      .split("\n")
+      .filter((line: string) => !line.trimStart().startsWith("#"))
+      .map(line => line.replace(/^`(.*)`$/gi, '  ```\n  $1\n  ```\n'))
+      .map(line => line.replace(/^\> /gi, '\n'))
+      .join("\n")
+      .trimStart();
   return `\n\n${formatted}`;
 }
 
@@ -18,10 +24,8 @@ export function formatUsage(text: string | undefined): string {
   }
   const trimmed = text.trim();
   const xs = trimmed.split("\n");
-  const formatted = (xs.length === 1) ?
-    `Usage: \`${trimmed}\`` :
-    `Usage:\n\n${xs.map(x => '     ' + x).join("\n")}\n\n`;
-    console.log(formatted);
+  const formatted = `Usage:\n\n${xs.map(x => '     ' + x).join("\n")}\n\n`;
+  console.log(formatted);
   return `\n\n${formatted}`;
 }
 
