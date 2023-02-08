@@ -32,12 +32,7 @@
         "h2o"
     ],
     "activationEvents": [
-        "onLanguage:shellscript",
-        "onCommand:h2o.clearCache",
-        "onCommand:h2o.loadCommon",
-        "onCommand:h2o.loadBio",
-        "onCommand:h2o.removeBio",
-        "onView:registeredCommands"
+        "onLanguage:shellscript"
     ],
     "main": "./out/extension.js",
     "contributes": {
