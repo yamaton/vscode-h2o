@@ -1,4 +1,8 @@
 # Change Log
+## [0.2.8] (2022-02-07)
+- Improve command usage and TLDR formatting
+- Handle commands starting with `nohup`
+
 ## [0.2.7] (2022-02-02)
 - Fix hover over unregistered old-style options
 
