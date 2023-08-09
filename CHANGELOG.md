@@ -1,15 +1,21 @@
 # Change Log
-## [0.2.9] (2022-02-07)
+## [0.2.10] (2023-08-09)
+- Do not flood logs when command specs are handled in batch
+- Update dependencies for security
+- Rephrase README
+- (Fix dates in this change log)
+
+## [0.2.9] (2023-02-07)
 - Fix problems by removing unnecessary entries in package.json
 
-## [0.2.8] (2022-02-07)
+## [0.2.8] (2023-02-07)
 - Improve command usage and TLDR formatting
 - Handle commands starting with `nohup`
 
-## [0.2.7] (2022-02-02)
+## [0.2.7] (2023-02-02)
 - Fix hover over unregistered old-style options
 
-## [0.2.6] (2022-01-28)
+## [0.2.6] (2023-01-28)
 - Show usage in hovers
 - Show description in hovers when appropriate
 - Update `h2o` (command spec parser) to v0.4.6
