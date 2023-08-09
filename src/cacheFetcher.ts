@@ -75,14 +75,14 @@ export class CachingFetcher {
     const existing = this.getList();
 
     if (!existing || !existing.length || existing.length === 0) {
-      console.log("---------------------------------------");
-      console.log("          Clean state");
-      console.log("---------------------------------------");
+      console.log(">>>---------------------------------------");
+      console.log("  Clean state");
+      console.log("<<<---------------------------------------");
     } else {
-      console.log("---------------------------------------");
-      console.log("   Memento entries already exist");
-      console.log("---------------------------------------");
-      console.log("this.getList() = ", this.getList());
+      console.log(">>>---------------------------------------");
+      console.log("  Memento entries already exist");
+      console.log("    # of command specs in the local DB:", existing.length);
+      console.log("<<<---------------------------------------");
     }
   }
 
@@ -99,13 +99,19 @@ export class CachingFetcher {
 
   // Update Memento record and the name list
   // Pass undefined to remove the value.
-  private async updateCache(name: string, command: Command | undefined): Promise<void> {
-    const t0 = new Date();
-    const key = CachingFetcher.getKey(name);
-    await this.memento.update(key, command);
-    const t1 = new Date();
-    const diff = t1.getTime() - t0.getTime();
-    console.log(`[CacheFetcher.update] ${name}: Memento update took ${diff} ms.`);
+  private async updateCache(name: string, command: Command | undefined, logging: boolean = false): Promise<void> {
+    if (logging) {
+      console.log(`[CacheFetcher.update] Updating ${name}...`);
+      const t0 = new Date();
+      const key = CachingFetcher.getKey(name);
+      await this.memento.update(key, command);
+      const t1 = new Date();
+      const diff = t1.getTime() - t0.getTime();
+      console.log(`[CacheFetcher.update] ${name}: Memento update took ${diff} ms.`);
+    } else {
+      const key = CachingFetcher.getKey(name);
+      await this.memento.update(key, command);
+    }
   }
 
 
@@ -129,7 +135,7 @@ export class CachingFetcher {
         return Promise.reject(`Failed to fetch command ${name} from H2O`);
       }
       try {
-        this.updateCache(name, command);
+        this.updateCache(name, command, true);
       } catch (e) {
         console.log("Failed to update:", e);
       }
@@ -185,8 +191,7 @@ export class CachingFetcher {
     for (const cmd of commands) {
       const key = CachingFetcher.getKey(cmd.name);
       if (isForcing || this.getCache(cmd.name) === undefined) {
-        console.log(`[fetchAllCurated] Loading: ${cmd.name}`);
-        this.updateCache(cmd.name, cmd);
+        this.updateCache(cmd.name, cmd, false);
       }
     }
   }
@@ -232,7 +237,7 @@ export class CachingFetcher {
     }
 
     console.log(`[CacheFetcher.downloadCommand] Loading: ${cmd.name}`);
-    this.updateCache(cmd.name, cmd);
+    this.updateCache(cmd.name, cmd, true);
   }
 
 
