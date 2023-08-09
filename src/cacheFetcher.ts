@@ -52,10 +52,10 @@ export function runH2o(name: string): Command | undefined {
       console.log(`[CacheFetcher.runH2o] Got command output: ${command.name}`);
       return command;
     } else {
-      console.warn('[CacheFetcher.runH2o] Failed to parse H2O result as JSON: ', name);
+      console.warn('[CacheFetcher.runH2o] Failed to parse H2O result as JSON:', name);
     }
   } else {
-    console.warn('[CacheFetcher.runH2o] Failed to get H2O output: ', name);
+    console.warn('[CacheFetcher.runH2o] Failed to get H2O output:', name);
   }
 }
 
@@ -117,11 +117,11 @@ export class CachingFetcher {
 
     let cached = this.getCache(name);
     if (cached) {
-      console.log('[CacheFetcher.fetch] Fetching from cache: ', name);
+      console.log('[CacheFetcher.fetch] Fetching from cache:', name);
       return cached as Command;
     }
 
-    console.log('[CacheFetcher.fetch] Fetching from H2O: ', name);
+    console.log('[CacheFetcher.fetch] Fetching from H2O:', name);
     try {
       const command = runH2o(name);
       if (!command) {
@@ -131,7 +131,7 @@ export class CachingFetcher {
       try {
         this.updateCache(name, command);
       } catch (e) {
-        console.log("Failed to update: ", e);
+        console.log("Failed to update:", e);
       }
       return command;
 
@@ -165,7 +165,7 @@ export class CachingFetcher {
         console.error(`Error body: ${errorBody}`);
         return Promise.reject("Failed to fetch HTTP response.");
       } catch (e) {
-        console.error('Error ... even failed to fetch error body: ', e);
+        console.error('Error ... even failed to fetch error body:', e);
         return Promise.reject("Failed to fetch over HTTP");
       }
     }
@@ -180,7 +180,7 @@ export class CachingFetcher {
       console.error("[fetchAllCurated] Error: ", err);
       return Promise.reject("Failed to inflate and parse the content as JSON.");
     }
-    console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Command #: ", commands.length);
+    console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Command #:", commands.length);
 
     for (const cmd of commands) {
       const key = CachingFetcher.getKey(cmd.name);
@@ -215,7 +215,7 @@ export class CachingFetcher {
         console.error(`Error body: ${errorBody}`);
         return Promise.reject("Failed to fetch HTTP response.");
       } catch (e) {
-        console.error('Error ... even failed to fetch error body: ', e);
+        console.error('Error ... even failed to fetch error body:', e);
         return Promise.reject("Failed to fetch over HTTP");
       }
     }
@@ -260,7 +260,7 @@ export class CachingFetcher {
         console.error(`Error body: ${errorBody}`);
         return Promise.reject("Failed to fetch HTTP response.");
       } catch (e) {
-        console.error('Error ... even failed to fetch error body: ', e);
+        console.error('Error ... even failed to fetch error body:', e);
         return Promise.reject("Failed to fetch over HTTP");
       }
     }
