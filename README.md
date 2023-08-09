@@ -1,109 +1,77 @@
-# Shell script command completion
+# Shell Script Command Completion
 
-This extension adds autocompletion and introspection of commands to the **Shell Script mode**.
+This extension brings autocompletion and introspection of shell commands to VS Code, enhancing the **Shell Script mode**.
 
-* Command-line option/flag/subcommand completion
-* Hover introspection for subcommands and options/flags
-* **Zero configuration**
+## Features
 
+* Autocomplete command-line options, flags, and subcommands
+* Hover to get descriptions for subcommands and options/flags
+* **Zero configuration** required
+* 🧬 Opt-in support for bioinformatics CLI tools 🧬
 
-## Demo: Autocomplete in shell script
+## Demos
+
+### Autocomplete in Shell Script
 
 ![shellcomp](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/demo-autocomplete.gif)
 
-
-
-## Demo: Introspect with hover
+### Introspection with Hover
 
 ![hover](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/demo-mouseover.gif)
 
+## Supported Commands
+
+The extension comes preloaded with 400+ CLI specifications but can also dynamically create specs by scanning man pages or `--help` documents. The  preloaded specs include common tools like `git`, `npm`, `docker`, `terraform`, and many more. See the complete list in [general.txt](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt). If you'd like more tools added, please [request them here](https://github.com/yamaton/h2o-curated-data/issues/1).
+
+### 🧬 Extra Command Specs for Bioinformatics
+
+500+ Command specifications for bioinformatics tools can be optionally loaded. Press `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and select `Shell Completion: Load Bioinformatics CLI Specs`. If the commands are not recognized, you may need to clear the cache as described below. The supported tools include `BLAST`, `GATK`, `seqkit`, `samtools`, and more. See [bio.txt](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) for the full list and [request any missing tools here](https://github.com/yamaton/h2o-curated-data/issues/1).
 
 
-## Supported commands
+## Managing Command Specs
 
-This extension comes with some CLI specs though it can dynamically create specs by scanning man pages or `--help` documents in your local environment. The preloaded specs include:
-
-* git
-* npm
-* docker
-* terraform
-* kubectl
-* brew
-* apt
-* conda
-* cargo
-* go
-* ...
-
-[general.txt](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) is the complete list of preloaded specs. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you want more tools added.
-
-## [Optional] Extra command specs for bioinformatics
-
-Command specs for some bioinformatics tools are available optionally. Just type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to load them all.
-
-* BLAST
-* GATK
-* seqkit
-* samtools
-* csvtools
-* ...
-
-[bio.txt](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt) is the list of bioinformatics tools supported by the extra data. Please post [here](https://github.com/yamaton/h2o-curated-data/issues/1) if you find some missing.
-
-
-## Managing command specs
-
-"Shell Commands" Explorer in the Side Bar shows which command specs are loaded.
+The "Shell Commands" Explorer in the Side Bar displays loaded command specifications.
 
 ![](https://raw.githubusercontent.com/yamaton/vscode-h2o/main/images/vscode-shell-command-explorer.png)
 
+## 🔥 Troubleshooting
+
+### 😞 Not Working?
+
+* If the command is on [this list](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Common CLI Specs` to reload the common CLI specs.
+* If the command is in [this bio list](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Specs` to reload the bioinformatics CLI specs.
+* If the command is still not recognized, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Command Spec`, then enter the name of the command to remove it from the cache. Our program will then try recreating the CLI spec.
 
 
-## 🔥 Trouble Shooting
+### 😞 Annoyed by Aggressive Suggestions?
 
-### 😞 Not working?
+Adjust suggestions with the VS Code settings:
+* Suppress with **Quick Suggestions**
+* Deactivate SPACE-key triggering with **Suggest on Trigger Characters**
 
-* If the command is in [this list](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Common CLI Data` to reload the preprocessed data.
-* If the command is in [this (bio) list](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt), type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Load Bioinformatics CLI Data` to reload the preprocessed data.
-* Otherwise, it's likely that our program failed to extract the command spec from your system.  To retry the extraction process, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Clear Cache`, and enter the name of the command to remove the data from the cache. Then our program will try recreating the CLI data when the command is typed.
+Note: These settings apply to other language modes as well.
 
-### 😞 Annoyed by aggressive suggestions?
+### 😞 Annoyed by Unwanted Commands?
 
-We can adjust suggestions with the VS Code settings.
-
-* Editor: **Quick Suggestions** can suppress suggestions while typing.
-* Editor: **Suggest on Trigger Characters** can deactivate SPACE-key triggering.
-
-Note: The setting applies to other language modes as well.
-
-### 😞 Annoyed by unwanted commands?
-
-Shell Commands Explorer in the Side Bar is the best interface to remove unnecessary command specs.
-
-To remove all bioinformatics commands, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Data`.
+Use the Shell Commands Explorer to remove unnecessary command specs. To remove all bioinformatics commands, type `Ctrl`+`Shift`+`P` (or `⌘`+`⇧`+`P` on macOS) and choose `Shell Completion: Remove Bioinformatics CLI Specs`.
 
 
-## 🔧 How the extension works
+## 🔧 How the Extension Works
 
-* This extension uses [preprocessed specs](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) to show command info if available. (Also use [these specs](https://github.com/yamaton/h2o-curated-data/tree/main/bio/json) if the bioinformatics package is loaded.)
-* Otherwise, this extension runs [H2O](https://github.com/yamaton/h2o) and extracts CLI information by parsing `man <command>`  or  `<command> --help`.
-  * **[NOTE]** Bundled `h2o` runs on Linux/WSL and macOS only.
-* This extension depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand shell script structure.
+* Utilizes [preprocessed specs](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) if available.
+* Extracts CLI information by parsing `man <command>` or `<command> --help`.
+* Runs on Linux/WSL and macOS only.
+* Depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand shell script structure.
 
+## 🛡️ Security with Sandboxing
 
+The extension executes unrecognized commands with `--help` to get information, potentially posing a risk if untrusted programs exist locally. To mitigate this risk, it uses a sandbox environment, ensuring that unrecognized commands run in a controlled and secure environment, limiting network and filesystem access.
 
-## 🛡️ Security with sandboxing
-
-When this extension sees an unregistered command, it runs the command in the background with options `--help` to get the command information. This may trigger harm if you have untrusted programs locally. To keep your system safe, this extension executes a command in a sandbox environment if available; i.e. program cannot access your network or filesystems.
-
-* In macOS, our program always runs in a sandbox using `sandbox-exec`.
-* In **Linux or WSL** (Windows Subsystem for Linux), consider installing **[bubblewrap](https://wiki.archlinux.org/title/Bubblewrap)**. This extension uses it automatically if available.
-
+* macOS: always runs in a sandbox with `sandbox-exec`.
+* **Linux or WSL**: consider installing **[bubblewrap](https://wiki.archlinux.org/title/Bubblewrap)**.
 
 ## ⚠️ Known Issues
 
-* Autocomplete and mouse-over introspection work only if
-  * The command is available in [the preprocessed CLI data](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) loaded at the startup.
-  * Or, H2O successfully extracts the CLI information from your local environment.
-* Extra hyphens remain when completing a command option.
-  * Will fix by the end of April 2022. Please refer [this issue](https://github.com/yamaton/h2o-curated-data/issues/2).
+* Autocomplete and hover introspection require either:
+  * The command in [preprocessed CLI specs](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) loaded at startup.
+  * Successful extraction of CLI information by the included parser from the local environment.
