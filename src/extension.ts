@@ -156,17 +156,19 @@ export async function activate(context: vscode.ExtensionContext) {
   });
 
   function updateTree(p: Parser, edit: vscode.TextDocumentChangeEvent) {
-    if (edit.contentChanges.length === 0) { return; }
+    if (edit.document.isClosed || edit.contentChanges.length === 0) { return; }
 
     const old = trees[edit.document.uri.toString()];
-    for (const e of edit.contentChanges) {
-      const startIndex = e.rangeOffset;
-      const oldEndIndex = e.rangeOffset + e.rangeLength;
-      const newEndIndex = e.rangeOffset + e.text.length;
-      const indices = [startIndex, oldEndIndex, newEndIndex];
-      const [startPosition, oldEndPosition, newEndPosition] = indices.map(i => asPoint(edit.document.positionAt(i)));
-      const delta = { startIndex, oldEndIndex, newEndIndex, startPosition, oldEndPosition, newEndPosition };
-      old.edit(delta);
+    if (!!old) {
+      for (const e of edit.contentChanges) {
+        const startIndex = e.rangeOffset;
+        const oldEndIndex = e.rangeOffset + e.rangeLength;
+        const newEndIndex = e.rangeOffset + e.text.length;
+        const indices = [startIndex, oldEndIndex, newEndIndex];
+        const [startPosition, oldEndPosition, newEndPosition] = indices.map(i => asPoint(edit.document.positionAt(i)));
+        const delta = { startIndex, oldEndIndex, newEndIndex, startPosition, oldEndPosition, newEndPosition };
+        old.edit(delta);
+      }
     }
     const t = p.parse(edit.document.getText(), old);
     trees[edit.document.uri.toString()] = t;
@@ -178,7 +180,11 @@ export async function activate(context: vscode.ExtensionContext) {
 
   function close(document: vscode.TextDocument) {
     console.log("[Close] removing a tree");
-    delete trees[document.uri.toString()];
+    const t = trees[document.uri.toString()];
+    if (t) {
+      t.delete();
+      delete trees[document.uri.toString()];
+    }
   }
 
 
