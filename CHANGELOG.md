@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.11] (2023-08-10)
+- Fix Runtime errors in edits and saves
+
 ## [0.2.10] (2023-08-09)
 - Do not flood logs when command specs are handled in batch
 - Update dependencies for security
