@@ -156,6 +156,6 @@
     "dependencies": {
         "node-fetch": "^2.6.6",
         "pako": "^2.0.4",
-        "web-tree-sitter": "^0.19.4"
+        "web-tree-sitter": "^0.20.8"
     }
 }
