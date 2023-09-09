@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.12] (2023-09-09)
+- Fix the extension not activated on WSL2 with dependency updates
+
 ## [0.2.11] (2023-08-10)
 - Fix Runtime errors in edits and saves
 
