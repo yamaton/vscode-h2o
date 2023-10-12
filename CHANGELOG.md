@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.13] (2023-10-11)
+- Fix [Issue #8](https://github.com/yamaton/vscode-h2o/issues/8) thanks to [@vdesabou](https://github.com/vdesabou)
+
 ## [0.2.12] (2023-09-09)
 - Fix the extension not activated on WSL2 with dependency updates
 
