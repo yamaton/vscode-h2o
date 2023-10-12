@@ -587,7 +587,7 @@ function createCompletionItem(label: string, desc: string): vscode.CompletionIte
 function getOptions(cmdSeq: Command[]): Option[] {
   const inheritedOptionsArray = cmdSeq.map(x => (!!x.inheritedOptions) ? x.inheritedOptions : []);
   const deepestCmd = cmdSeq[cmdSeq.length - 1];
-  const options = deepestCmd.options.concat(...inheritedOptionsArray);
+  const options = (!!deepestCmd && !!deepestCmd.options) ? deepestCmd.options.concat(...inheritedOptionsArray) : [];
   return options;
 }
 
