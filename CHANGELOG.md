@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.14] (2023-10-14)
+- Update README with instruction that Command Palettes work only in "Shell Script" mode.
+
 ## [0.2.13] (2023-10-11)
 - Fix [Issue #8](https://github.com/yamaton/vscode-h2o/issues/8) thanks to [@vdesabou](https://github.com/vdesabou)
 
