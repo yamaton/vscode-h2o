@@ -7,6 +7,8 @@ import { CommandListProvider } from './commandExplorer';
 import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription } from './utils';
 
 
+const supportedLanguages = ['shellscript', 'bitbake'];
+
 async function initializeParser(): Promise<Parser> {
   await Parser.init();
   const parser = new Parser;
@@ -29,7 +31,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 
   const compprovider = vscode.languages.registerCompletionItemProvider(
-    'shellscript',
+    supportedLanguages,
     {
       async provideCompletionItems(document, position, token, context) {
         if (!parser) {
@@ -96,7 +98,7 @@ export async function activate(context: vscode.ExtensionContext) {
     ' ',  // triggerCharacter
   );
 
-  const hoverprovider = vscode.languages.registerHoverProvider('shellscript', {
+  const hoverprovider = vscode.languages.registerHoverProvider(supportedLanguages, {
     async provideHover(document, position, token) {
 
       if (!parser) {

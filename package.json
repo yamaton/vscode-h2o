@@ -1,7 +1,7 @@
 {
     "name": "vscode-h2o",
     "displayName": "Shell Script Command Completion",
-    "version": "0.2.14",
+    "version": "0.2.15",
     "description": "Add CLI autocomplete to shell script",
     "repository": {
         "url": "https://github.com/yamaton/vscode-h2o"
@@ -32,7 +32,8 @@
         "h2o"
     ],
     "activationEvents": [
-        "onLanguage:shellscript"
+        "onLanguage:shellscript",
+        "onLanguage:bitbake"
     ],
     "main": "./out/extension.js",
     "contributes": {
@@ -72,23 +73,27 @@
             "commandPalette": [
                 {
                     "command": "h2o.clearCache",
-                    "when": "editorLangId == shellscript"
+                    "when": "editorLangId == shellscript || editorLangId == bitbake"
+
                 },
                 {
                     "command": "h2o.loadCommon",
-                    "when": "editorLangId == shellscript"
+                    "when": "editorLangId == shellscript || editorLangId == bitbake"
+
                 },
                 {
                     "command": "h2o.loadBio",
-                    "when": "editorLangId == shellscript"
+                    "when": "editorLangId == shellscript || editorLangId == bitbake"
+
                 },
                 {
                     "command": "h2o.removeBio",
-                    "when": "editorLangId == shellscript"
+                    "when": "editorLangId == shellscript || editorLangId == bitbake"
+
                 },
                 {
                     "command": "h2o.loadCommand",
-                    "when": "editorLangId == shellscript"
+                    "when": "editorLangId == shellscript || editorLangId == bitbake"
                 }
             ],
             "view/title": [

@@ -1,4 +1,7 @@
 # Change Log
+## [0.2.15] (2023-11-04)
+- Add experimental support of Bitbake per [Issue #10](https://github.com/yamaton/vscode-h2o/issues/10)
+
 ## [0.2.14] (2023-10-14)
 - Update README with instruction that Command Palettes work only in "Shell Script" mode.
 
