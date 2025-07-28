@@ -74,22 +74,18 @@
                 {
                     "command": "h2o.clearCache",
                     "when": "editorLangId == shellscript || editorLangId == bitbake"
-
                 },
                 {
                     "command": "h2o.loadCommon",
                     "when": "editorLangId == shellscript || editorLangId == bitbake"
-
                 },
                 {
                     "command": "h2o.loadBio",
                     "when": "editorLangId == shellscript || editorLangId == bitbake"
-
                 },
                 {
                     "command": "h2o.removeBio",
                     "when": "editorLangId == shellscript || editorLangId == bitbake"
-
                 },
                 {
                     "command": "h2o.loadCommand",
@@ -147,7 +143,7 @@
         "@types/glob": "^7.2.0",
         "@types/mocha": "^10.0.0",
         "@types/node": "^18.11.9",
-        "@types/node-fetch": "^2.5.12",
+        "@types/node-fetch": "^2.6.12",
         "@types/pako": "^1.0.2",
         "@types/vscode": "^1.63.0",
         "@typescript-eslint/eslint-plugin": "^5.7.0",
