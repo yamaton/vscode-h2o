@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 
 # Execute H2O executable within bubblewrap if available.
 #
@@ -8,23 +8,45 @@
 # $ wrap-h2o ./h2o-x86_64-unknown-linux ls
 #
 
-readonly h2opath="$1"
-readonly cmd="$2"
-# https://stackoverflow.com/a/246128/524526
-BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
-readonly BASEDIR
+if [ "$#" -ne 2 ]; then
+    echo "Usage: wrap-h2o <path-to-executable> <command-name>" >&2
+    exit 64
+fi
 
-if [[ "$(command -v "$h2opath")" ]] && [[ "$(command -v "$cmd")" ]]; then
-    if [[ "$(uname -s)" == "Linux" ]] && [[ "$(command -v bwrap)" ]]; then
-        echo "[info] bwrap!" 1>&2
-        bwrap --ro-bind / / --dev /dev --tmpfs /tmp --unshare-all -- "$h2opath" --command "$cmd" --format json
-    elif [[ "$(uname -s)" == "Darwin" ]] && [[ "$(command -v sandbox-exec)" ]]; then
-        echo "[info] sandbox-exec!" 1>&2
-        sandbox-exec -f "$BASEDIR"/profile.sb -- "$h2opath" --command "$cmd" --format json
-    else
-        echo "[warn] no sandbox running!" 1>&2
-        "$h2opath" --command "$cmd" --format json
-    fi
-else
+h2opath=$1
+cmd=$2
+
+if ! command -v "$h2opath" >/dev/null 2>&1 || ! command -v "$cmd" >/dev/null 2>&1; then
     exit 127
+fi
+
+platform=$(uname -s)
+if [ "$platform" = "Linux" ] && command -v bwrap >/dev/null 2>&1; then
+    echo "[info] bwrap!" >&2
+    exec bwrap --ro-bind / / --dev /dev --tmpfs /tmp --unshare-all -- "$h2opath" --command "$cmd" --format json
+elif [ "$platform" = "Darwin" ] && command -v sandbox-exec >/dev/null 2>&1; then
+    script_path=$0
+    case "$script_path" in
+        */*) ;;
+        *) script_path=$(command -v "$script_path") || exit 1 ;;
+    esac
+    case "$script_path" in
+        */*)
+            script_dir=${script_path%/*}
+            if [ -z "$script_dir" ]; then
+                script_dir=/
+            fi
+            ;;
+        *) script_dir=. ;;
+    esac
+    base_dir=$(
+        CDPATH=
+        cd -P "$script_dir" 2>/dev/null && pwd
+    ) || exit 1
+
+    echo "[info] sandbox-exec!" >&2
+    exec sandbox-exec -f "$base_dir/profile.sb" -- "$h2opath" --command "$cmd" --format json
+else
+    echo "[warn] no sandbox running!" >&2
+    exec "$h2opath" --command "$cmd" --format json
 fi
