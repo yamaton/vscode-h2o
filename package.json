@@ -149,12 +149,11 @@
         "test:release-tools": "node scripts/test-h2o-release.mjs",
         "h2o:verify-release": "node scripts/verify-h2o-release.mjs",
         "h2o:fetch": "node scripts/fetch-h2o.mjs",
-        "prepare:h2o-bundle": "npm run h2o:fetch -- --target x86_64-apple-darwin --target x86_64-unknown-linux-musl && node scripts/stage-h2o-bundle.mjs",
         "verify:native": "node scripts/verify-native.mjs",
-        "package:vsix:prepared": "vsce package --out artifacts/vscode-h2o.vsix",
-        "package:vsix": "npm run prepare:h2o-bundle && npm run package:vsix:prepared",
-        "verify:vsix": "node scripts/verify-vsix.mjs artifacts/vscode-h2o.vsix",
-        "package:verify": "npm run prepare:h2o-bundle && npm run verify:native && npm run package:vsix:prepared && npm run verify:vsix"
+        "package:platform": "node scripts/package-platform.mjs",
+        "package:vsix": "npm run package:platform -- --target linux-x64",
+        "verify:vsix": "node scripts/verify-vsix.mjs artifacts/vscode-h2o-linux-x64.vsix linux-x64",
+        "package:verify": "npm run package:vsix"
     },
     "devDependencies": {
         "@types/mocha": "^10.0.10",

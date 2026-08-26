@@ -52,6 +52,7 @@ export function validateH2oLock(lock) {
   assert.match(lock.tag, /^v[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$/, 'invalid H2O release tag');
   assert.match(lock.tagSha1, sha1Pattern, 'invalid H2O release tag SHA-1');
   assert.ok(lock.assets && Object.keys(lock.assets).length > 0, 'H2O lock has no assets');
+  assert.ok(lock.vsixTargets && Object.keys(lock.vsixTargets).length > 0, 'H2O lock has no VSIX targets');
 
   const archiveNames = new Set();
   const binaryNames = new Set();
@@ -66,11 +67,27 @@ export function validateH2oLock(lock) {
     assert.match(asset.binarySha256, sha256Pattern, `invalid binary SHA-256 for ${target}`);
     assert.ok(Number.isSafeInteger(asset.archiveSize) && asset.archiveSize > 0, `invalid archive size for ${target}`);
     assert.ok(Number.isSafeInteger(asset.binarySize) && asset.binarySize > 0, `invalid binary size for ${target}`);
+    assert.ok(asset.static === undefined || typeof asset.static === 'boolean', `invalid static flag for ${target}`);
+    assert.ok(!asset.static || target.includes('-linux-'), `static flag is only supported for ELF targets: ${target}`);
     assert.ok(!archiveNames.has(asset.archive), `duplicate archive in H2O lock: ${asset.archive}`);
     assert.ok(!binaryNames.has(asset.binary), `duplicate binary in H2O lock: ${asset.binary}`);
     archiveNames.add(asset.archive);
     binaryNames.add(asset.binary);
   }
+
+  for (const [vsixTarget, h2oTarget] of Object.entries(lock.vsixTargets)) {
+    assertSafeName(vsixTarget, 'VSIX target');
+    assert.ok(lock.assets[h2oTarget], `VSIX target ${vsixTarget} refers to an unknown H2O target: ${h2oTarget}`);
+    if (vsixTarget.startsWith('alpine-')) {
+      assert.strictEqual(lock.assets[h2oTarget].static, true, `${vsixTarget} requires a static H2O asset`);
+    }
+  }
+}
+
+export function h2oTargetForVsix(lock, vsixTarget) {
+  const h2oTarget = lock.vsixTargets[vsixTarget];
+  assert.ok(h2oTarget, `unsupported VSIX target: ${vsixTarget}`);
+  return h2oTarget;
 }
 
 export function sha256File(filePath) {
@@ -97,9 +114,31 @@ export function verifyBinaryHeader(content, target) {
   );
 }
 
+export function verifyStaticElf(content, target) {
+  assert.strictEqual(content[4], 2, `${target} must use the ELF64 class`);
+  assert.strictEqual(content[5], 1, `${target} must use little-endian ELF encoding`);
+  const programHeaderOffset = Number(content.readBigUInt64LE(32));
+  const programHeaderSize = content.readUInt16LE(54);
+  const programHeaderCount = content.readUInt16LE(56);
+  assert.ok(Number.isSafeInteger(programHeaderOffset), `${target} has an invalid ELF program header offset`);
+  assert.ok(programHeaderSize >= 56, `${target} has an invalid ELF program header size`);
+  assert.ok(
+    programHeaderOffset + (programHeaderSize * programHeaderCount) <= content.length,
+    `${target} has truncated ELF program headers`,
+  );
+  for (let index = 0; index < programHeaderCount; index += 1) {
+    const offset = programHeaderOffset + (index * programHeaderSize);
+    assert.notStrictEqual(content.readUInt32LE(offset), 3, `${target} must not contain a PT_INTERP segment`);
+  }
+}
+
 export function verifyBinary(filePath, target, asset) {
   verifyFile(filePath, asset.binarySize, asset.binarySha256, asset.binary);
-  verifyBinaryHeader(readFileSync(filePath), target);
+  const content = readFileSync(filePath);
+  verifyBinaryHeader(content, target);
+  if (asset.static) {
+    verifyStaticElf(content, target);
+  }
 }
 
 export function validateArchiveEntries(entries, expectedBinary) {

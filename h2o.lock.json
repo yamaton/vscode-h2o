@@ -3,6 +3,13 @@
   "repository": "yamaton/h2o",
   "tag": "v0.6.0",
   "tagSha1": "b34428f0f4b6e71742438802dfaaeb10a612fcdc",
+  "vsixTargets": {
+    "alpine-x64": "x86_64-unknown-linux-musl",
+    "darwin-arm64": "aarch64-apple-darwin",
+    "darwin-x64": "x86_64-apple-darwin",
+    "linux-arm64": "aarch64-unknown-linux-gnu",
+    "linux-x64": "x86_64-unknown-linux-musl"
+  },
   "assets": {
     "aarch64-apple-darwin": {
       "archive": "h2o-aarch64-apple-darwin.tar.gz",
@@ -42,7 +49,8 @@
       "archiveSize": 8088588,
       "binary": "h2o-x86_64-unknown-linux-musl",
       "binarySha256": "443efe5ed392a3168f5b2de36c4b9df2b630fa5930b4a7dab39d3df49515aa39",
-      "binarySize": 35795024
+      "binarySize": 35795024,
+      "static": true
     }
   }
 }

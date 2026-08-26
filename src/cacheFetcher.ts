@@ -59,11 +59,7 @@ const defaultDependencies: CachingFetcherDependencies = {
 export function runH2o(name: string, runtime: H2oRuntime = createDefaultH2oRuntime()): Command | undefined {
   let h2opath = runtime.getConfiguredPath();
   if (h2opath === '<bundled>') {
-    if (runtime.platform === 'linux') {
-      h2opath = path.join(runtime.extensionDir, '../bin/h2o-x86_64-unknown-linux');
-    } else if (runtime.platform === 'darwin') {
-      h2opath = path.join(runtime.extensionDir, '../bin/h2o-x86_64-apple-darwin');
-    } else {
+    if (runtime.platform !== 'linux' && runtime.platform !== 'darwin') {
       if (neverNotifiedError) {
         const msg = "Bundled help scanner (H2O) supports Linux and MacOS. Please set the H2O path.";
         runtime.showErrorMessage(msg);
@@ -71,6 +67,7 @@ export function runH2o(name: string, runtime: H2oRuntime = createDefaultH2oRunti
       neverNotifiedError = false;
       return undefined;
     }
+    h2opath = path.join(runtime.extensionDir, '../bin/h2o');
   }
 
   const wrapperPath = path.join(runtime.extensionDir, '../bin/wrap-h2o');

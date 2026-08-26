@@ -4,18 +4,19 @@ import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { loadH2oLock, verifyBinaryHeader } from './lib/h2o-release.mjs';
+import { h2oTargetForVsix, loadH2oLock, verifyBinaryHeader, verifyStaticElf } from './lib/h2o-release.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const h2oLock = loadH2oLock(path.join(projectRoot, 'h2o.lock.json'));
-const vsixPath = path.resolve(projectRoot, process.argv[2] || 'artifacts/vscode-h2o.vsix');
+const vsixPath = path.resolve(projectRoot, process.argv[2] || 'artifacts/vscode-h2o-linux-x64.vsix');
+const vsixTarget = process.argv[3] || 'linux-x64';
+const h2oTarget = h2oTargetForVsix(h2oLock, vsixTarget);
 const maxVsixBytes = 12 * 1024 * 1024;
 
 const requiredFiles = [
   '[Content_Types].xml',
   'extension.vsixmanifest',
-  'extension/bin/h2o-x86_64-apple-darwin',
-  'extension/bin/h2o-x86_64-unknown-linux',
+  'extension/bin/h2o',
   'extension/bin/profile.sb',
   'extension/bin/wrap-h2o',
   'extension/changelog.md',
@@ -106,7 +107,7 @@ function unzip(...args) {
 }
 
 function archivedFile(file) {
-  return execFileSync('unzip', ['-p', vsixPath, file], { maxBuffer: 40 * 1024 * 1024 });
+  return execFileSync('unzip', ['-p', vsixPath, file], { maxBuffer: 64 * 1024 * 1024 });
 }
 
 function sha256(content) {
@@ -138,28 +139,21 @@ const vsixManifest = archivedFile('extension.vsixmanifest').toString('utf8');
 assert.ok(vsixManifest.includes(`Id="${sourceManifest.name}"`), 'VSIX manifest has the wrong extension ID');
 assert.ok(vsixManifest.includes(`Publisher="${sourceManifest.publisher}"`), 'VSIX manifest has the wrong publisher');
 assert.ok(vsixManifest.includes(`Version="${sourceManifest.version}"`), 'VSIX manifest has the wrong version');
+assert.ok(vsixManifest.includes(`TargetPlatform="${vsixTarget}"`), 'VSIX manifest has the wrong target platform');
 
-for (const asset of [
-  {
-    file: 'bin/h2o-x86_64-apple-darwin',
-    target: 'x86_64-apple-darwin',
-  },
-  {
-    file: 'bin/h2o-x86_64-unknown-linux',
-    target: 'x86_64-unknown-linux-musl',
-  },
-]) {
-  const packagedAsset = archivedFile(`extension/${asset.file}`);
-  const expected = h2oLock.assets[asset.target];
-  assert.strictEqual(packagedAsset.length, expected.binarySize, `${asset.file} has an unexpected size`);
-  assert.strictEqual(sha256(packagedAsset), expected.binarySha256, `${asset.file} differs from h2o.lock.json`);
-  verifyBinaryHeader(packagedAsset, asset.target);
-  assert.strictEqual(
-    sha256(packagedAsset),
-    sha256(readFileSync(path.join(projectRoot, asset.file))),
-    `${asset.file} changed while packaging`,
-  );
+const packagedH2o = archivedFile('extension/bin/h2o');
+const expectedH2o = h2oLock.assets[h2oTarget];
+assert.strictEqual(packagedH2o.length, expectedH2o.binarySize, 'bin/h2o has an unexpected size');
+assert.strictEqual(sha256(packagedH2o), expectedH2o.binarySha256, 'bin/h2o differs from h2o.lock.json');
+verifyBinaryHeader(packagedH2o, h2oTarget);
+if (expectedH2o.static) {
+  verifyStaticElf(packagedH2o, h2oTarget);
 }
+assert.strictEqual(
+  sha256(packagedH2o),
+  sha256(readFileSync(path.join(projectRoot, 'bin/h2o'))),
+  'bin/h2o changed while packaging',
+);
 
 const packagedWasm = archivedFile('extension/tree-sitter-bash.wasm');
 assert.ok(packagedWasm.length > 100000, 'tree-sitter-bash.wasm is truncated');
@@ -176,8 +170,7 @@ assert.strictEqual(
 
 const zipListing = execFileSync('zipinfo', ['-l', vsixPath], { encoding: 'utf8' });
 for (const file of [
-  'extension/bin/h2o-x86_64-apple-darwin',
-  'extension/bin/h2o-x86_64-unknown-linux',
+  'extension/bin/h2o',
   'extension/bin/wrap-h2o',
 ]) {
   const listingLine = zipListing.split(/\r?\n/).find((line) => line.endsWith(file));

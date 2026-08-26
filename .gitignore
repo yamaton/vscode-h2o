@@ -5,5 +5,5 @@ node_modules
 *.vsix
 coverage/
 artifacts/
-bin/h2o-x86_64-apple-darwin
-bin/h2o-x86_64-unknown-linux
+bin/h2o
+bin/h2o-*

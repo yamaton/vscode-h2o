@@ -205,7 +205,7 @@ suite('runH2o', () => {
 
     assert.deepStrictEqual(actual, command('git'));
     assert.ok(invocation?.command.endsWith('/bin/wrap-h2o'));
-    assert.ok(invocation?.args[0].endsWith('/bin/h2o-x86_64-unknown-linux'));
+    assert.ok(invocation?.args[0].endsWith('/bin/h2o'));
     assert.strictEqual(invocation?.args[1], 'git');
   });
 

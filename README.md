@@ -21,7 +21,7 @@ This extension brings autocompletion and introspection of shell commands to VS C
 
 ## Supported Commands
 
-The extension comes preloaded with 400+ CLI specifications but can also dynamically create specs by scanning man pages or `--help` documents. The preloaded specs include common tools like `git`, `npm`, `docker`, `terraform`, and many more. See the complete list in [general.txt](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt). If you'd like more tools to be added, please [submit a request here](https://github.com/yamaton/h2o-curated-data/issues/1).
+The extension comes preloaded with 400+ CLI specifications but can also dynamically create specs by scanning `--help` output. The preloaded specs include common tools like `git`, `npm`, `docker`, `terraform`, and many more. See the complete list in [general.txt](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt). If you'd like more tools to be added, please [submit a request here](https://github.com/yamaton/h2o-curated-data/issues/1).
 
 ### 🧬 Extra Command Specs for Bioinformatics
 
@@ -56,9 +56,19 @@ Use the Shell Commands Explorer to remove unnecessary command specs. To remove a
 ## 🔧 How the Extension Works
 
 * Utilizes [preprocessed specs](https://github.com/yamaton/h2o-curated-data/tree/main/general/json) when available.
-* Extracts CLI information by parsing `man <command>` or `<command> --help`.
+* Extracts CLI information by parsing `<command> --help` with the bundled [H2O](https://github.com/yamaton/h2o) scanner. The bundled scanner does not consult man pages.
 * Runs on Linux/WSL and macOS only.
 * Depends on [tree-sitter](https://tree-sitter.github.io/tree-sitter/) to understand the shell script structure.
+
+### Supported Platforms
+
+The Marketplace selects a package containing the native H2O scanner for the current Extension Host:
+
+* Linux x64, including glibc-based distributions and Alpine
+* Linux arm64 on glibc-based distributions
+* macOS x64 and arm64
+
+Alpine arm64 and Windows are not currently supported.
 
 ## 🛡️ Security with Sandboxing
 

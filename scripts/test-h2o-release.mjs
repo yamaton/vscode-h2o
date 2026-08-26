@@ -5,11 +5,13 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import {
   loadH2oLock,
+  h2oTargetForVsix,
   validateH2oLock,
   validateArchiveEntries,
   verifyBinaryHeader,
   verifyExtractedBinary,
   verifyReleaseStatement,
+  verifyStaticElf,
 } from './lib/h2o-release.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -32,6 +34,9 @@ const statement = {
 };
 
 verifyReleaseStatement(lock, statement);
+assert.strictEqual(h2oTargetForVsix(lock, 'linux-x64'), 'x86_64-unknown-linux-musl');
+assert.strictEqual(h2oTargetForVsix(lock, 'alpine-x64'), 'x86_64-unknown-linux-musl');
+assert.throws(() => h2oTargetForVsix(lock, 'alpine-arm64'), /unsupported VSIX target/);
 
 const clonedLock = () => JSON.parse(JSON.stringify(lock));
 const wrongTag = clonedLock();
@@ -52,12 +57,30 @@ unsafeTarget.assets['..'] = unsafeTarget.assets[firstTarget];
 delete unsafeTarget.assets[firstTarget];
 assert.throws(() => validateH2oLock(unsafeTarget), /invalid H2O target/);
 
-const x64ElfHeader = Buffer.alloc(20);
+const unknownVsixAsset = clonedLock();
+unknownVsixAsset.vsixTargets['linux-riscv64'] = 'riscv64-unknown-linux-gnu';
+assert.throws(() => validateH2oLock(unknownVsixAsset), /unknown H2O target/);
+
+const dynamicAlpine = clonedLock();
+delete dynamicAlpine.assets[dynamicAlpine.vsixTargets['alpine-x64']].static;
+assert.throws(() => validateH2oLock(dynamicAlpine), /requires a static H2O asset/);
+
+const x64ElfHeader = Buffer.alloc(120);
 Buffer.from([0x7f, 0x45, 0x4c, 0x46]).copy(x64ElfHeader);
+x64ElfHeader[4] = 2;
+x64ElfHeader[5] = 1;
 Buffer.from([0x3e, 0x00]).copy(x64ElfHeader, 18);
 verifyBinaryHeader(x64ElfHeader, 'x86_64-unknown-linux-musl');
 assert.throws(() => verifyBinaryHeader(x64ElfHeader, 'aarch64-unknown-linux-gnu'), /wrong CPU architecture/);
 assert.throws(() => verifyBinaryHeader(x64ElfHeader, 'x86_64-apple-darwin'), /wrong executable format/);
+
+x64ElfHeader.writeBigUInt64LE(64n, 32);
+x64ElfHeader.writeUInt16LE(56, 54);
+x64ElfHeader.writeUInt16LE(1, 56);
+x64ElfHeader.writeUInt32LE(1, 64);
+verifyStaticElf(x64ElfHeader, 'x86_64-unknown-linux-musl');
+x64ElfHeader.writeUInt32LE(3, 64);
+assert.throws(() => verifyStaticElf(x64ElfHeader, 'x86_64-unknown-linux-musl'), /PT_INTERP/);
 
 const expectedBinary = lock.assets[firstTarget].binary;
 validateArchiveEntries([expectedBinary], expectedBinary);

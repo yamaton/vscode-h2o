@@ -4,28 +4,17 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { loadH2oLock, verifyBinary } from './lib/h2o-release.mjs';
+import { h2oTargetForVsix, loadH2oLock, verifyBinary } from './lib/h2o-release.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const lock = loadH2oLock(path.join(projectRoot, 'h2o.lock.json'));
-const binaries = [
-  {
-    path: 'bin/h2o-x86_64-unknown-linux',
-    platform: 'linux',
-    target: 'x86_64-unknown-linux-musl',
-  },
-  {
-    path: 'bin/h2o-x86_64-apple-darwin',
-    platform: 'darwin',
-    target: 'x86_64-apple-darwin',
-  },
-];
-
-for (const binary of binaries) {
-  const absolutePath = path.join(projectRoot, binary.path);
-  verifyBinary(absolutePath, binary.target, lock.assets[binary.target]);
-  assert.notStrictEqual(statSync(absolutePath).mode & 0o111, 0, `${binary.path} must be executable`);
-}
+const hostTarget = `${process.platform}-${process.arch}`;
+const vsixTarget = process.argv[2] ?? hostTarget;
+const h2oTarget = h2oTargetForVsix(lock, vsixTarget);
+const binaryPath = 'bin/h2o';
+const executable = path.join(projectRoot, binaryPath);
+verifyBinary(executable, h2oTarget, lock.assets[h2oTarget]);
+assert.notStrictEqual(statSync(executable).mode & 0o111, 0, `${binaryPath} must be executable`);
 
 const wrapperPath = path.join(projectRoot, 'bin/wrap-h2o');
 assert.notStrictEqual(statSync(wrapperPath).mode & 0o111, 0, 'bin/wrap-h2o must be executable');
@@ -141,25 +130,24 @@ assert.deepStrictEqual(
   'tree-sitter-bash.wasm has an invalid WebAssembly header',
 );
 
-const runnable = binaries.find((binary) => binary.platform === process.platform);
-if (runnable && process.arch === 'x64') {
-  const executable = path.join(projectRoot, runnable.path);
+const runnable = vsixTarget === hostTarget || (vsixTarget === 'alpine-x64' && hostTarget === 'linux-x64');
+if (runnable) {
   const version = spawnSync(executable, ['--version'], { encoding: 'utf8', timeout: 10000 });
-  assert.strictEqual(version.status, 0, `${runnable.path} --version failed: ${version.stderr}`);
-  assert.match(version.stdout, /^h2o [0-9]+\.[0-9]+\.[0-9]+/m, `${runnable.path} returned an invalid version`);
+  assert.strictEqual(version.status, 0, `${binaryPath} --version failed: ${version.stderr}`);
+  assert.match(version.stdout, /^h2o [0-9]+\.[0-9]+\.[0-9]+/m, `${binaryPath} returned an invalid version`);
 
   const scan = spawnSync(wrapperPath, [executable, 'git'], {
     encoding: 'utf8',
     timeout: 10000,
   });
-  assert.strictEqual(scan.status, 0, `${runnable.path} could not scan git: ${scan.stderr}`);
+  assert.strictEqual(scan.status, 0, `${binaryPath} could not scan git: ${scan.stderr}`);
   const command = JSON.parse(scan.stdout);
-  assert.strictEqual(command.name, 'git', `${runnable.path} scanned the wrong command`);
+  assert.strictEqual(command.name, 'git', `${binaryPath} scanned the wrong command`);
   const optionCount = (command.options?.length ?? 0)
     + (command.subcommands ?? []).reduce((count, subcommand) => count + (subcommand.options?.length ?? 0), 0);
-  assert.ok(optionCount > 0, `${runnable.path} emitted no git options`);
+  assert.ok(optionCount > 0, `${binaryPath} emitted no git options`);
 } else {
-  console.log(`Native execution skipped on ${process.platform}/${process.arch}; content checks still passed.`);
+  console.log(`Native execution skipped for ${vsixTarget} on ${hostTarget}; content checks still passed.`);
 }
 
 console.log('Pinned native executable and WebAssembly checks passed.');
