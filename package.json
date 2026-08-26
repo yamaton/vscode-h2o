@@ -146,14 +146,16 @@
         "test:unit": "mocha --ui tdd \"out/test/unit/**/*.test.js\"",
         "test:integration": "node ./out/test/runTest.js",
         "audit:prod": "npm audit --omit=dev --audit-level=high",
-        "test:release-tools": "node scripts/test-h2o-release.mjs",
+        "test:release-tools": "node scripts/test-h2o-release.mjs && node scripts/test-release-tag.mjs && node scripts/test-marketplace-release.mjs",
         "h2o:verify-release": "node scripts/verify-h2o-release.mjs",
         "h2o:fetch": "node scripts/fetch-h2o.mjs",
         "verify:native": "node scripts/verify-native.mjs",
         "package:platform": "node scripts/package-platform.mjs",
         "package:vsix": "npm run package:platform -- --target linux-x64",
         "verify:vsix": "node scripts/verify-vsix.mjs artifacts/vscode-h2o-linux-x64.vsix linux-x64",
-        "package:verify": "npm run package:vsix"
+        "package:verify": "npm run package:vsix",
+        "verify:release-artifacts": "node scripts/publish-marketplace.mjs --verify-only",
+        "publish:marketplace": "node scripts/publish-marketplace.mjs"
     },
     "devDependencies": {
         "@types/mocha": "^10.0.10",

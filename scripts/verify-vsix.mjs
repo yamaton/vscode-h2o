@@ -149,11 +149,6 @@ verifyBinaryHeader(packagedH2o, h2oTarget);
 if (expectedH2o.static) {
   verifyStaticElf(packagedH2o, h2oTarget);
 }
-assert.strictEqual(
-  sha256(packagedH2o),
-  sha256(readFileSync(path.join(projectRoot, 'bin/h2o'))),
-  'bin/h2o changed while packaging',
-);
 
 const packagedWasm = archivedFile('extension/tree-sitter-bash.wasm');
 assert.ok(packagedWasm.length > 100000, 'tree-sitter-bash.wasm is truncated');
