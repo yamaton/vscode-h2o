@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "repository": "yamaton/h2o",
+  "tag": "v0.6.0",
+  "tagSha1": "b34428f0f4b6e71742438802dfaaeb10a612fcdc",
+  "assets": {
+    "aarch64-apple-darwin": {
+      "archive": "h2o-aarch64-apple-darwin.tar.gz",
+      "archiveSha256": "4f90adf82dabbc42657bf7ad2722c3c0b887279254e1670feca673ad3d4fe1ff",
+      "archiveSize": 10069508,
+      "binary": "h2o-aarch64-apple-darwin",
+      "binarySha256": "41bdf0f522bb2b9ec0e5029d2caa7578c42af46a875e952a46f0bbbf676ebebf",
+      "binarySize": 49994320
+    },
+    "aarch64-unknown-linux-gnu": {
+      "archive": "h2o-aarch64-unknown-linux-gnu.tar.gz",
+      "archiveSha256": "470a882e65690a9d6fd1d1923083ecf19105ab14e89454ea18173c4333d989c6",
+      "archiveSize": 7307812,
+      "binary": "h2o-aarch64-unknown-linux-gnu",
+      "binarySha256": "b5b9c0f1e107a6775693492df8cf7e90c3aba5b48f83b99c84ff5dab40739149",
+      "binarySize": 34533576
+    },
+    "x86_64-apple-darwin": {
+      "archive": "h2o-x86_64-apple-darwin.tar.gz",
+      "archiveSha256": "56151dabcbc69bec154d4ed96e2c8013fe46240333451a1f692b7702edcbd3cf",
+      "archiveSize": 1120748,
+      "binary": "h2o-x86_64-apple-darwin",
+      "binarySha256": "f28da355205c0c9891c0e0eff31951bbd6d9f95d6e61d75ec1556da3eb92f120",
+      "binarySize": 5204576
+    },
+    "x86_64-unknown-linux-gnu": {
+      "archive": "h2o-x86_64-unknown-linux-gnu.tar.gz",
+      "archiveSha256": "ba13ce36337f741b8b2ab1d62318fd7b200c707ed1e07d24885958c17a48d4f8",
+      "archiveSize": 3782037,
+      "binary": "h2o-x86_64-unknown-linux-gnu",
+      "binarySha256": "efc028d21c598e9710a400ca098bcfa3272e2ab740369d56c06b64b3dfd3fb6b",
+      "binarySize": 17289280
+    },
+    "x86_64-unknown-linux-musl": {
+      "archive": "h2o-x86_64-unknown-linux-musl.tar.gz",
+      "archiveSha256": "98b1cba16b44eb06f573659b8a6b258ec4e373b79b839ff7216f2e78a31b2484",
+      "archiveSize": 8088588,
+      "binary": "h2o-x86_64-unknown-linux-musl",
+      "binarySha256": "443efe5ed392a3168f5b2de36c4b9df2b630fa5930b4a7dab39d3df49515aa39",
+      "binarySize": 35795024
+    }
+  }
+}

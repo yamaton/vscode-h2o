@@ -4,8 +4,10 @@ import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { loadH2oLock, verifyBinaryHeader } from './lib/h2o-release.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
+const h2oLock = loadH2oLock(path.join(projectRoot, 'h2o.lock.json'));
 const vsixPath = path.resolve(projectRoot, process.argv[2] || 'artifacts/vscode-h2o.vsix');
 const maxVsixBytes = 12 * 1024 * 1024;
 
@@ -140,33 +142,37 @@ assert.ok(vsixManifest.includes(`Version="${sourceManifest.version}"`), 'VSIX ma
 for (const asset of [
   {
     file: 'bin/h2o-x86_64-apple-darwin',
-    minBytes: 1000000,
-    magic: Buffer.from([0xcf, 0xfa, 0xed, 0xfe]),
+    target: 'x86_64-apple-darwin',
   },
   {
     file: 'bin/h2o-x86_64-unknown-linux',
-    minBytes: 1000000,
-    magic: Buffer.from([0x7f, 0x45, 0x4c, 0x46]),
-  },
-  {
-    file: 'tree-sitter-bash.wasm',
-    minBytes: 100000,
-    magic: Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]),
+    target: 'x86_64-unknown-linux-musl',
   },
 ]) {
   const packagedAsset = archivedFile(`extension/${asset.file}`);
-  assert.ok(packagedAsset.length > asset.minBytes, `${asset.file} is truncated or an LFS pointer`);
-  assert.deepStrictEqual(
-    packagedAsset.subarray(0, asset.magic.length),
-    asset.magic,
-    `${asset.file} has an invalid binary header`,
-  );
+  const expected = h2oLock.assets[asset.target];
+  assert.strictEqual(packagedAsset.length, expected.binarySize, `${asset.file} has an unexpected size`);
+  assert.strictEqual(sha256(packagedAsset), expected.binarySha256, `${asset.file} differs from h2o.lock.json`);
+  verifyBinaryHeader(packagedAsset, asset.target);
   assert.strictEqual(
     sha256(packagedAsset),
     sha256(readFileSync(path.join(projectRoot, asset.file))),
     `${asset.file} changed while packaging`,
   );
 }
+
+const packagedWasm = archivedFile('extension/tree-sitter-bash.wasm');
+assert.ok(packagedWasm.length > 100000, 'tree-sitter-bash.wasm is truncated');
+assert.deepStrictEqual(
+  packagedWasm.subarray(0, 8),
+  Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]),
+  'tree-sitter-bash.wasm has an invalid binary header',
+);
+assert.strictEqual(
+  sha256(packagedWasm),
+  sha256(readFileSync(path.join(projectRoot, 'tree-sitter-bash.wasm'))),
+  'tree-sitter-bash.wasm changed while packaging',
+);
 
 const zipListing = execFileSync('zipinfo', ['-l', vsixPath], { encoding: 'utf8' });
 for (const file of [

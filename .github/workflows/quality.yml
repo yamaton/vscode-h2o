@@ -20,16 +20,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - name: Check out repository and LFS objects
+      - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          lfs: true
           persist-credentials: false
-
-      - name: Verify Git LFS checkout
-        run: |
-          git lfs pull
-          git lfs fsck
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -46,8 +40,20 @@ jobs:
       - name: Audit packaged dependencies
         run: npm run audit:prod
 
+      - name: Verify pinned immutable H2O release
+        run: npm run h2o:verify-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Validate every pinned H2O release asset
+        run: npm run h2o:fetch -- --all
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Build and verify VSIX
         run: npm run package:verify
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Upload verified VSIX
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -101,16 +107,10 @@ jobs:
     runs-on: macos-15-intel
     timeout-minutes: 20
     steps:
-      - name: Check out repository and LFS objects
+      - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          lfs: true
           persist-credentials: false
-
-      - name: Verify Git LFS checkout
-        run: |
-          git lfs pull
-          git lfs fsck
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -123,6 +123,11 @@ jobs:
 
       - name: Build extension and tests
         run: npm run build
+
+      - name: Prepare verified H2O bundle
+        run: npm run prepare:h2o-bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       - name: Verify bundled macOS scanner
         run: npm run verify:native

@@ -133,7 +133,7 @@
     },
     "scripts": {
         "vscode:prepublish": "npm run build",
-        "check:unit": "npm run lint && npm run typecheck && npm run build && npm run test:coverage",
+        "check:unit": "npm run lint && npm run typecheck && npm run build && npm run test:coverage && npm run test:release-tools",
         "clean": "node scripts/clean.mjs",
         "build": "npm run clean && npm run compile",
         "compile": "tsc -p ./",
@@ -146,10 +146,15 @@
         "test:unit": "mocha --ui tdd \"out/test/unit/**/*.test.js\"",
         "test:integration": "node ./out/test/runTest.js",
         "audit:prod": "npm audit --omit=dev --audit-level=high",
+        "test:release-tools": "node scripts/test-h2o-release.mjs",
+        "h2o:verify-release": "node scripts/verify-h2o-release.mjs",
+        "h2o:fetch": "node scripts/fetch-h2o.mjs",
+        "prepare:h2o-bundle": "npm run h2o:fetch -- --target x86_64-apple-darwin --target x86_64-unknown-linux-musl && node scripts/stage-h2o-bundle.mjs",
         "verify:native": "node scripts/verify-native.mjs",
-        "package:vsix": "vsce package --out artifacts/vscode-h2o.vsix",
+        "package:vsix:prepared": "vsce package --out artifacts/vscode-h2o.vsix",
+        "package:vsix": "npm run prepare:h2o-bundle && npm run package:vsix:prepared",
         "verify:vsix": "node scripts/verify-vsix.mjs artifacts/vscode-h2o.vsix",
-        "package:verify": "npm run verify:native && npm run package:vsix && npm run verify:vsix"
+        "package:verify": "npm run prepare:h2o-bundle && npm run verify:native && npm run package:vsix:prepared && npm run verify:vsix"
     },
     "devDependencies": {
         "@types/mocha": "^10.0.10",

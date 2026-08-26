@@ -9,6 +9,7 @@ scripts/**
 src/**
 .gitignore
 GEMINI.md
+h2o.lock.json
 package-lock.json
 test.bb
 .yarnrc

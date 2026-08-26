@@ -1,48 +1,29 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { loadH2oLock, verifyBinary } from './lib/h2o-release.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
+const lock = loadH2oLock(path.join(projectRoot, 'h2o.lock.json'));
 const binaries = [
   {
     path: 'bin/h2o-x86_64-unknown-linux',
     platform: 'linux',
-    magic: Buffer.from([0x7f, 0x45, 0x4c, 0x46]),
+    target: 'x86_64-unknown-linux-musl',
   },
   {
     path: 'bin/h2o-x86_64-apple-darwin',
     platform: 'darwin',
-    magic: Buffer.from([0xcf, 0xfa, 0xed, 0xfe]),
+    target: 'x86_64-apple-darwin',
   },
 ];
 
-function git(...args) {
-  return execFileSync('git', args, { cwd: projectRoot, encoding: 'utf8' });
-}
-
-function sha256(content) {
-  return createHash('sha256').update(content).digest('hex');
-}
-
 for (const binary of binaries) {
-  const attribute = git('check-attr', '--cached', 'filter', '--', binary.path).trim();
-  assert.match(attribute, /: filter: lfs$/, `${binary.path} must remain managed by Git LFS`);
-
-  const pointer = git('show', `:${binary.path}`);
-  const oid = pointer.match(/^oid sha256:([0-9a-f]{64})$/m)?.[1];
-  const expectedSize = Number(pointer.match(/^size ([0-9]+)$/m)?.[1]);
-  assert.ok(oid, `${binary.path} must have a valid LFS SHA-256 pointer in the index`);
-  assert.ok(Number.isSafeInteger(expectedSize), `${binary.path} must have a valid LFS size in the index`);
-
   const absolutePath = path.join(projectRoot, binary.path);
-  const content = readFileSync(absolutePath);
-  assert.strictEqual(content.length, expectedSize, `${binary.path} is an unexpanded or truncated LFS object`);
-  assert.strictEqual(sha256(content), oid, `${binary.path} does not match its LFS pointer`);
-  assert.deepStrictEqual(content.subarray(0, 4), binary.magic, `${binary.path} has the wrong executable format`);
+  verifyBinary(absolutePath, binary.target, lock.assets[binary.target]);
   assert.notStrictEqual(statSync(absolutePath).mode & 0o111, 0, `${binary.path} must be executable`);
 }
 
@@ -167,19 +148,18 @@ if (runnable && process.arch === 'x64') {
   assert.strictEqual(version.status, 0, `${runnable.path} --version failed: ${version.stderr}`);
   assert.match(version.stdout, /^h2o [0-9]+\.[0-9]+\.[0-9]+/m, `${runnable.path} returned an invalid version`);
 
-  const scan = spawnSync(executable, ['--command', 'git', '--format', 'json'], {
+  const scan = spawnSync(wrapperPath, [executable, 'git'], {
     encoding: 'utf8',
-    timeout: 30000,
-    maxBuffer: 20 * 1024 * 1024,
+    timeout: 10000,
   });
   assert.strictEqual(scan.status, 0, `${runnable.path} could not scan git: ${scan.stderr}`);
-  const jsonLine = scan.stdout.split(/\r?\n/).findLast((line) => line.startsWith('{'));
-  assert.ok(jsonLine, `${runnable.path} did not emit command JSON`);
-  const command = JSON.parse(jsonLine);
+  const command = JSON.parse(scan.stdout);
   assert.strictEqual(command.name, 'git', `${runnable.path} scanned the wrong command`);
-  assert.ok(Array.isArray(command.options) && command.options.length > 0, `${runnable.path} emitted no git options`);
+  const optionCount = (command.options?.length ?? 0)
+    + (command.subcommands ?? []).reduce((count, subcommand) => count + (subcommand.options?.length ?? 0), 0);
+  assert.ok(optionCount > 0, `${runnable.path} emitted no git options`);
 } else {
   console.log(`Native execution skipped on ${process.platform}/${process.arch}; content checks still passed.`);
 }
 
-console.log('Git LFS, native executable, and WebAssembly checks passed.');
+console.log('Pinned native executable and WebAssembly checks passed.');
