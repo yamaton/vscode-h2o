@@ -72,7 +72,7 @@ The Visual Studio Marketplace selects a package containing the native H2O scanne
 | Alpine | arm64 | Not currently supported |
 | Windows | x64, arm64 | Not currently supported |
 
-Remote environments such as WSL use the platform of their VS Code Extension Host. VS Code 1.63 or later is required.
+Remote environments such as WSL use the platform of their VS Code Extension Host. VS Code 1.101 or later is required.
 
 ## How It Works
 

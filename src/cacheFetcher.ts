@@ -47,7 +47,7 @@ function createDefaultH2oRuntime(): H2oRuntime {
 
 const defaultDependencies: CachingFetcherDependencies = {
   // node-fetch v2 implements its own timeout, so this remains compatible with
-  // the Node.js version embedded in the minimum supported VS Code (1.63).
+  // the Node.js version embedded in the minimum supported VS Code (1.101).
   fetch: (url: string, timeoutMs: number) => fetch(url, { timeout: timeoutMs }),
   runLocalCommand: (name: string) => runH2o(name),
   requestTimeoutMs: 10000,

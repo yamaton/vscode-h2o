@@ -10,6 +10,7 @@
 - Add automated unit, integration, native-binary, VSIX-content, dependency, and Marketplace release checks.
 - Reorganize the README as a landing page with detailed coverage, platform, security, management, and troubleshooting documentation below the introduction.
 - Update the Marketplace description, categories, and search keywords to reflect completion, hover, and BitBake support.
+- Raise the minimum supported VS Code version to 1.101, aligning the extension API and Node.js types with its Node.js 22 Extension Host.
 
 ## [0.2.15] (2023-11-04)
 - Add experimental support of Bitbake per [Issue #10](https://github.com/yamaton/vscode-h2o/issues/10)

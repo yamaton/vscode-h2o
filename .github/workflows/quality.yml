@@ -122,9 +122,9 @@ jobs:
           - label: stable / Linux
             runner: ubuntu-24.04
             vscode-version: stable
-          - label: VS Code 1.63.2 / Linux
+          - label: VS Code 1.101.2 / Linux
             runner: ubuntu-22.04
-            vscode-version: 1.63.2
+            vscode-version: 1.101.2
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
