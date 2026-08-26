@@ -1,0 +1,133 @@
+name: Quality Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-and-package:
+    name: Unit, native, and VSIX contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository and LFS objects
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: true
+          persist-credentials: false
+
+      - name: Verify Git LFS checkout
+        run: |
+          git lfs pull
+          git lfs fsck
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Run static and unit gates
+        run: npm run check:unit
+
+      - name: Audit packaged dependencies
+        run: npm run audit:prod
+
+      - name: Build and verify VSIX
+        run: npm run package:verify
+
+      - name: Upload verified VSIX
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: vscode-h2o-${{ github.sha }}
+          path: artifacts/vscode-h2o.vsix
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  integration-linux:
+    name: Extension Host (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: stable / Linux
+            runner: ubuntu-24.04
+            vscode-version: stable
+          - label: VS Code 1.63.2 / Linux
+            runner: ubuntu-22.04
+            vscode-version: 1.63.2
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build extension and tests
+        run: npm run build
+
+      - name: Run Extension Host integration checks
+        run: xvfb-run -a npm run test:integration
+        env:
+          VSCODE_VERSION: ${{ matrix.vscode-version }}
+          VSCODE_TEST_NO_SANDBOX: '1'
+
+  integration-macos-intel:
+    name: Extension Host and native scanner (macOS Intel)
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository and LFS objects
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          lfs: true
+          persist-credentials: false
+
+      - name: Verify Git LFS checkout
+        run: |
+          git lfs pull
+          git lfs fsck
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build extension and tests
+        run: npm run build
+
+      - name: Verify bundled macOS scanner
+        run: npm run verify:native
+
+      - name: Run stable Extension Host integration checks
+        run: npm run test:integration
+        env:
+          VSCODE_VERSION: stable
