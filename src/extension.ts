@@ -4,6 +4,7 @@ import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
 import { CommandListProvider } from './commandExplorer';
+import { getCommandName } from './analyzer';
 import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription } from './utils';
 
 
@@ -463,13 +464,8 @@ function _getContextCommandNode(root: SyntaxNode, position: vscode.Position): Sy
 
 // Get command name covering the position if exists
 function getContextCommandName(root: SyntaxNode, position: vscode.Position): string | undefined {
-  // if you are at a command, a named node, the currentNode becomes one-layer deeper than other nameless nodes.
   const commandNode = _getContextCommandNode(root, position);
-  let name = commandNode?.firstNamedChild?.text!;
-  if (name === 'sudo' || name === 'nohup') {
-    name = commandNode?.firstNamedChild?.nextSibling?.text!;
-  }
-  return name;
+  return getCommandName(commandNode);
 }
 
 // Get subcommand names NOT starting with `-`
