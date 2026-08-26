@@ -4,7 +4,7 @@ import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
 import { CommandListProvider } from './commandExplorer';
-import { getCommandName } from './analyzer';
+import { getCommandArguments, getCommandName } from './analyzer';
 import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription } from './utils';
 
 
@@ -471,18 +471,8 @@ function getContextCommandName(root: SyntaxNode, position: vscode.Position): str
 // Get subcommand names NOT starting with `-`
 // [FIXME] this catches option's argument; use database instead
 function _getSubcommandCandidates(root: SyntaxNode, position: vscode.Position): string[] {
-  const candidates: string[] = [];
-  let commandNode = _getContextCommandNode(root, position)!;
-  if (commandNode) {
-    let n = commandNode?.firstNamedChild;
-    while (n?.nextSibling) {
-      n = n?.nextSibling;
-      if (!n.text.startsWith('-')) {
-        candidates.push(n.text);
-      }
-    }
-  }
-  return candidates;
+  const commandNode = _getContextCommandNode(root, position);
+  return getCommandArguments(commandNode).filter(argument => !argument.startsWith('-'));
 }
 
 
@@ -524,21 +514,15 @@ async function getContextCmdSeq(root: SyntaxNode, position: vscode.Position, fet
 // Get command arguments as string[]
 function getContextCmdArgs(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position): string[] {
   const p = walkbackIfNeeded(document, root, position);
-  let node = _getContextCommandNode(root, p)?.firstNamedChild;
-  if (node?.text === 'sudo' || node?.text === 'nohup') {
-    node = node.nextSibling;
-  }
-  const res: string[] = [];
-  while (node?.nextSibling) {
-    node = node.nextSibling;
-    let text = node.text;
+  const commandNode = _getContextCommandNode(root, p);
+  return getCommandArguments(commandNode).map(argument => {
+    let text = argument;
     // --option=arg
     if (text.startsWith('--') && text.includes('=')) {
       text = text.split('=', 2)[0];
     }
-    res.push(text);
-  }
-  return res;
+    return text;
+  });
 }
 
 
