@@ -1,66 +1,103 @@
-import * as vscode from 'vscode';
-import { Memento } from 'vscode';
 import { spawnSync } from 'child_process';
+import * as path from 'path';
+import type { Memento } from 'vscode';
+import type * as Vscode from 'vscode';
 import { Command } from './command';
 import fetch from 'node-fetch';
-import { Response } from 'node-fetch';
+import type { Response } from 'node-fetch';
 import * as pako from 'pako';
 
 let neverNotifiedError = true;
 
 
-class HTTPResponseError extends Error {
-  response: Response;
-  constructor(res: Response) {
-    super(`HTTP Error Response: ${res.status} ${res.statusText}`);
-    this.response = res;
-  }
+interface SpawnResult {
+  error?: Error;
+  status: number | null;
+  stdout?: string | Buffer;
 }
+
+export interface H2oRuntime {
+  extensionDir: string;
+  platform: NodeJS.Platform;
+  getConfiguredPath(): string;
+  showErrorMessage(message: string): void;
+  spawn(command: string, args: string[]): SpawnResult;
+}
+
+export interface CachingFetcherDependencies {
+  fetch(url: string, timeoutMs: number): Promise<Response>;
+  runLocalCommand(name: string): Command | undefined;
+  requestTimeoutMs: number;
+}
+
+function createDefaultH2oRuntime(): H2oRuntime {
+  // `vscode` is only available inside the extension host. Loading it lazily
+  // keeps the command runner testable in a plain Node.js process.
+  const vscode = require('vscode') as typeof Vscode;
+  return {
+    extensionDir: __dirname,
+    platform: process.platform,
+    getConfiguredPath: () => vscode.workspace.getConfiguration('shellCompletion').get('h2oPath') as string,
+    showErrorMessage: (message: string) => {
+      void vscode.window.showErrorMessage(message);
+    },
+    spawn: (command: string, args: string[]) => spawnSync(command, args, { encoding: 'utf8', timeout: 10000 }),
+  };
+}
+
+const defaultDependencies: CachingFetcherDependencies = {
+  // node-fetch v2 implements its own timeout, so this remains compatible with
+  // the Node.js version embedded in the minimum supported VS Code (1.63).
+  fetch: (url: string, timeoutMs: number) => fetch(url, { timeout: timeoutMs }),
+  runLocalCommand: (name: string) => runH2o(name),
+  requestTimeoutMs: 10000,
+};
 
 
 // -----
 // Call H2O executable and get command information from the local environment
-export function runH2o(name: string): Command | undefined {
-  let h2opath = vscode.workspace.getConfiguration('shellCompletion').get('h2oPath') as string;
+export function runH2o(name: string, runtime: H2oRuntime = createDefaultH2oRuntime()): Command | undefined {
+  let h2opath = runtime.getConfiguredPath();
   if (h2opath === '<bundled>') {
-    if (process.platform === 'linux') {
-      h2opath = `${__dirname}/../bin/h2o-x86_64-unknown-linux`;
-    } else if (process.platform === 'darwin') {
-      h2opath = `${__dirname}/../bin/h2o-x86_64-apple-darwin`;
+    if (runtime.platform === 'linux') {
+      h2opath = path.join(runtime.extensionDir, '../bin/h2o-x86_64-unknown-linux');
+    } else if (runtime.platform === 'darwin') {
+      h2opath = path.join(runtime.extensionDir, '../bin/h2o-x86_64-apple-darwin');
     } else {
       if (neverNotifiedError) {
         const msg = "Bundled help scanner (H2O) supports Linux and MacOS. Please set the H2O path.";
-        vscode.window.showErrorMessage(msg);
+        runtime.showErrorMessage(msg);
       }
       neverNotifiedError = false;
-      return;
+      return undefined;
     }
   }
 
-  const wrapperPath = `${__dirname}/../bin/wrap-h2o`;
+  const wrapperPath = path.join(runtime.extensionDir, '../bin/wrap-h2o');
   console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
-  const proc = spawnSync(wrapperPath, [h2opath, name], {encoding: "utf8", timeout: 10000});
+  const proc = runtime.spawn(wrapperPath, [h2opath, name]);
   if (proc.error) {
     console.warn(`[CacheFetcher.runH2o] Failed to run H2O for ${name}: ${proc.error.message}`);
-    return;
+    return undefined;
   }
   if (proc.status !== 0) {
     console.log(`[CacheFetcher.runH2o] H2O raises error for ${name}`);
-    return;
+    return undefined;
   }
   console.log(`[CacheFetcher.runH2o] proc.status = ${proc.status}`);
   const out = proc.stdout;
   if (out) {
-    const command = JSON.parse(out);
-    if (command) {
+    try {
+      const command = JSON.parse(out.toString()) as Command;
       console.log(`[CacheFetcher.runH2o] Got command output: ${command.name}`);
       return command;
-    } else {
-      console.warn('[CacheFetcher.runH2o] Failed to parse H2O result as JSON:', name);
+    } catch (error) {
+      console.warn('[CacheFetcher.runH2o] Failed to parse H2O result as JSON:', name, error);
     }
   } else {
     console.warn('[CacheFetcher.runH2o] Failed to get H2O output:', name);
   }
+  return undefined;
 }
 
 
@@ -71,9 +108,14 @@ export class CachingFetcher {
   static readonly keyPrefix = 'h2oFetcher.cache.';
   static readonly commandListKey = 'h2oFetcher.registered.all';
 
+  private readonly dependencies: CachingFetcherDependencies;
+
   constructor(
-    private memento: Memento
-  ) {}
+    private memento: Memento,
+    dependencies: Partial<CachingFetcherDependencies> = {},
+  ) {
+    this.dependencies = { ...defaultDependencies, ...dependencies };
+  }
 
   public async init(): Promise<void> {
     const existing = this.getList();
@@ -125,7 +167,7 @@ export class CachingFetcher {
       return Promise.reject(`Command name too short: ${name}`);
     }
 
-    let cached = this.getCache(name);
+    const cached = this.getCache(name);
     if (cached) {
       console.log('[CacheFetcher.fetch] Fetching from cache:', name);
       return cached as Command;
@@ -133,13 +175,13 @@ export class CachingFetcher {
 
     console.log('[CacheFetcher.fetch] Fetching from H2O:', name);
     try {
-      const command = runH2o(name);
+      const command = this.dependencies.runLocalCommand(name);
       if (!command) {
         console.warn(`[CacheFetcher.fetch] Failed to fetch command ${name} from H2O`);
         return Promise.reject(`Failed to fetch command ${name} from H2O`);
       }
       try {
-        this.updateCache(name, command, true);
+        await this.updateCache(name, command, true);
       } catch (e) {
         console.log("Failed to update:", e);
       }
@@ -156,29 +198,7 @@ export class CachingFetcher {
   public async fetchAllCurated(kind = 'general', isForcing = false): Promise<void> {
     console.log("[CacheFetcher.fetchAllCurated] Started running...");
     const url = `https://github.com/yamaton/h2o-curated-data/raw/main/${kind}.json.gz`;
-    const checkStatus = (res: Response) => {
-      if (res.ok) {
-        return res;
-      } else {
-        throw new HTTPResponseError(res);
-      }
-    };
-
-    let response: Response;
-    try {
-      response = await fetch(url);
-      checkStatus(response);
-    } catch (error) {
-      try {
-        const err = error as HTTPResponseError;
-        const errorBody = await err.response.text();
-        console.error(`Error body: ${errorBody}`);
-        return Promise.reject("Failed to fetch HTTP response.");
-      } catch (e) {
-        console.error('Error ... even failed to fetch error body:', e);
-        return Promise.reject("Failed to fetch over HTTP");
-      }
-    }
+    const response = await this.fetchResponse(url);
     console.log("[CacheFetcher.fetchAllCurated] received HTTP response");
 
     let commands: Command[] = [];
@@ -193,9 +213,8 @@ export class CachingFetcher {
     console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Command #:", commands.length);
 
     for (const cmd of commands) {
-      const key = CachingFetcher.getKey(cmd.name);
       if (isForcing || this.getCache(cmd.name) === undefined) {
-        this.updateCache(cmd.name, cmd, false);
+        await this.updateCache(cmd.name, cmd, false);
       }
     }
   }
@@ -205,29 +224,7 @@ export class CachingFetcher {
   public async downloadCommandToCache(name: string, kind = 'experimental'): Promise<void> {
     console.log(`[CacheFetcher.downloadCommand] Started getting ${name} in ${kind}...`);
     const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}/json/${name}.json`;
-    const checkStatus = (res: Response) => {
-      if (res.ok) {
-        return res;
-      } else {
-        throw new HTTPResponseError(res);
-      }
-    };
-
-    let response: Response;
-    try {
-      response = await fetch(url);
-      checkStatus(response);
-    } catch (error) {
-      try {
-        const err = error as HTTPResponseError;
-        const errorBody = await err.response.text();
-        console.error(`Error body: ${errorBody}`);
-        return Promise.reject("Failed to fetch HTTP response.");
-      } catch (e) {
-        console.error('Error ... even failed to fetch error body:', e);
-        return Promise.reject("Failed to fetch over HTTP");
-      }
-    }
+    const response = await this.fetchResponse(url);
     console.log("[CacheFetcher.downloadCommand] received HTTP response");
 
     let cmd: Command;
@@ -241,7 +238,7 @@ export class CachingFetcher {
     }
 
     console.log(`[CacheFetcher.downloadCommand] Loading: ${cmd.name}`);
-    this.updateCache(cmd.name, cmd, true);
+    await this.updateCache(cmd.name, cmd, true);
   }
 
 
@@ -250,29 +247,7 @@ export class CachingFetcher {
   public async fetchList(kind = 'bio'): Promise<string[]> {
     console.log("[CacheFetcher.fetchList] Started running...");
     const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}.txt`;
-    const checkStatus = (res: Response) => {
-      if (res.ok) {
-        return res;
-      } else {
-        throw new HTTPResponseError(res);
-      }
-    };
-
-    let response: Response;
-    try {
-      response = await fetch(url);
-      checkStatus(response);
-    } catch (error) {
-      try {
-        const err = error as HTTPResponseError;
-        const errorBody = await err.response.text();
-        console.error(`Error body: ${errorBody}`);
-        return Promise.reject("Failed to fetch HTTP response.");
-      } catch (e) {
-        console.error('Error ... even failed to fetch error body:', e);
-        return Promise.reject("Failed to fetch over HTTP");
-      }
-    }
+    const response = await this.fetchResponse(url);
     console.log("[CacheFetcher.fetchList] received HTTP response");
 
     let names: string[] = [];
@@ -286,6 +261,28 @@ export class CachingFetcher {
     }
     names.forEach((name) => console.log("    Received ", name));
     return names;
+  }
+
+  private async fetchResponse(url: string): Promise<Response> {
+    let response: Response;
+    try {
+      response = await this.dependencies.fetch(url, this.dependencies.requestTimeoutMs);
+    } catch (error) {
+      console.error(`[CacheFetcher] Failed to fetch ${url}:`, error);
+      throw new Error("Failed to fetch over HTTP");
+    }
+
+    if (!response.ok) {
+      let errorBody = '';
+      try {
+        errorBody = await response.text();
+      } catch (error) {
+        console.error('[CacheFetcher] Failed to read HTTP error body:', error);
+      }
+      console.error(`HTTP ${response.status} ${response.statusText}: ${errorBody}`);
+      throw new Error("Failed to fetch HTTP response.");
+    }
+    return response;
   }
 
   // Unset cache data of command `name` by assigning undefined

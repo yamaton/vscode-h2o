@@ -1,4 +1,4 @@
-import * as vscode from 'vscode';
+import type { CompletionItemLabel } from 'vscode';
 
 // Format tldr pages by cleaning tldr-specific notations {{path/to/file}}
 // as well as removing the title starting with '#'.
@@ -46,6 +46,6 @@ export function isPrefixOf(left: string, right: string): boolean {
 
 
 // get a string from CompletionItem.label type
-export function getLabelString(compItemLabel: string | vscode.CompletionItemLabel): string {
+export function getLabelString(compItemLabel: string | CompletionItemLabel): string {
   return (typeof compItemLabel === 'string') ? compItemLabel : compItemLabel.label;
 }
