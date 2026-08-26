@@ -1,38 +1,7 @@
-import * as path from 'path';
-import * as Mocha from 'mocha';
-import * as glob from 'glob';
+import { runExtensionTests } from './extension.test';
 
-export function run(): Promise<void> {
-	// Create the mocha test
-	const mocha = new Mocha({
-		ui: 'tdd',
-		color: true
-	});
-
-	const testsRoot = __dirname;
-
-	return new Promise((c, e) => {
-		glob('**/*.test.js', { cwd: testsRoot }, (err, files) => {
-			if (err) {
-				return e(err);
-			}
-
-			// Add files to the test suite
-			files.forEach(f => mocha.addFile(path.resolve(testsRoot, f)));
-
-			try {
-				// Run the mocha test
-				mocha.run(failures => {
-					if (failures > 0) {
-						e(new Error(`${failures} tests failed.`));
-					} else {
-						c();
-					}
-				});
-			} catch (err) {
-				console.error(err);
-				e(err);
-			}
-		});
-	});
+export async function run(): Promise<void> {
+	console.log('Running Extension Host integration checks...');
+	await runExtensionTests();
+	console.log('Extension Host integration checks passed.');
 }

@@ -1,10 +1,16 @@
 .vscode/**
 .vscode-test/**
+.github/**
+artifacts/**
 coverage/**
 out/test/**
+scripts/**
 
 src/**
 .gitignore
+GEMINI.md
+package-lock.json
+test.bb
 .yarnrc
 vsc-extension-quickstart.md
 **/tsconfig.json

@@ -132,21 +132,26 @@
         }
     },
     "scripts": {
-        "vscode:prepublish": "npm run compile",
-        "check:unit": "npm run lint && npm run typecheck && npm run compile && npm run test:coverage",
+        "vscode:prepublish": "npm run build",
+        "check:unit": "npm run lint && npm run typecheck && npm run build && npm run test:coverage",
+        "clean": "node scripts/clean.mjs",
+        "build": "npm run clean && npm run compile",
         "compile": "tsc -p ./",
         "typecheck": "tsc --noEmit -p ./",
         "watch": "tsc -watch -p ./",
-        "pretest": "npm run compile && npm run lint",
+        "pretest": "npm run lint && npm run typecheck && npm run build",
         "lint": "eslint src --ext ts --max-warnings=0",
         "test": "npm run test:unit && npm run test:integration",
         "test:coverage": "c8 --check-coverage --lines 80 --statements 80 --branches 80 --functions 75 --include out/cacheFetcher.js --include out/utils.js npm run test:unit",
         "test:unit": "mocha --ui tdd \"out/test/unit/**/*.test.js\"",
         "test:integration": "node ./out/test/runTest.js",
-        "audit:prod": "npm audit --omit=dev --audit-level=high"
+        "audit:prod": "npm audit --omit=dev --audit-level=high",
+        "verify:native": "node scripts/verify-native.mjs",
+        "package:vsix": "vsce package --out artifacts/vscode-h2o.vsix",
+        "verify:vsix": "node scripts/verify-vsix.mjs artifacts/vscode-h2o.vsix",
+        "package:verify": "npm run verify:native && npm run package:vsix && npm run verify:vsix"
     },
     "devDependencies": {
-        "@types/glob": "^7.2.0",
         "@types/mocha": "^10.0.10",
         "@types/node": "^22.20.1",
         "@types/node-fetch": "^2.6.12",
@@ -158,7 +163,6 @@
         "@vscode/vsce": "^3.9.2",
         "c8": "^12.0.0",
         "eslint": "^8.57.1",
-        "glob": "^7.2.0",
         "mocha": "^11.8.0",
         "typescript": "^5.9.3"
     },
