@@ -24,6 +24,11 @@ suite('shell command analysis', () => {
     return node;
   }
 
+  function descendantsOfType(node: SyntaxNode, type: string): SyntaxNode[] {
+    const matches = node.type === type ? [node] : [];
+    return matches.concat(...node.children.map(child => descendantsOfType(child, type)));
+  }
+
   test('uses the command name field after leading environment assignments', () => {
     const command = parseFirstNode('VAR=value git status --short');
     assert.strictEqual(getCommandName(command), 'git');
@@ -87,5 +92,32 @@ suite('shell command analysis', () => {
 
   test('does not treat a standalone assignment as a command', () => {
     assert.strictEqual(getCommandName(parseFirstNode('VAR=value')), undefined);
+  });
+
+  test('analyzes command nodes inside lists and pipelines', () => {
+    const root = parser.parse('git status; npm test | grep ok').rootNode;
+    const commands = descendantsOfType(root, 'command');
+
+    assert.deepStrictEqual(commands.map(command => ({
+      name: getCommandName(command),
+      arguments: getCommandArguments(command),
+    })), [
+      { name: 'git', arguments: ['status'] },
+      { name: 'npm', arguments: ['test'] },
+      { name: 'grep', arguments: ['ok'] },
+    ]);
+  });
+
+  test('preserves commands across line continuations and incomplete input', () => {
+    const continued = parseFirstNode('git \\\n  --flag');
+    assert.strictEqual(getCommandName(continued), 'git');
+    assert.deepStrictEqual(getCommandArguments(continued), ['--flag']);
+
+    const incompleteTree = parser.parse('git "unterminated');
+    assert.strictEqual(incompleteTree.rootNode.hasError(), true);
+    const incomplete = incompleteTree.rootNode.firstNamedChild;
+    assert.ok(incomplete);
+    assert.strictEqual(getCommandName(incomplete), 'git');
+    assert.deepStrictEqual(getCommandArguments(incomplete), ['"unterminated']);
   });
 });
