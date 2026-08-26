@@ -39,7 +39,11 @@ export function runH2o(name: string): Command | undefined {
 
   const wrapperPath = `${__dirname}/../bin/wrap-h2o`;
   console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
-  const proc = spawnSync(wrapperPath, [h2opath, name], {encoding: "utf8"});
+  const proc = spawnSync(wrapperPath, [h2opath, name], {encoding: "utf8", timeout: 10000});
+  if (proc.error) {
+    console.warn(`[CacheFetcher.runH2o] Failed to run H2O for ${name}: ${proc.error.message}`);
+    return;
+  }
   if (proc.status !== 0) {
     console.log(`[CacheFetcher.runH2o] H2O raises error for ${name}`);
     return;
