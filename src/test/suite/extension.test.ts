@@ -402,6 +402,45 @@ async function verifyCommandContext(parser: Parser): Promise<void> {
 	tree.delete();
 }
 
+async function verifyIterativeWalkback(parser: Parser): Promise<void> {
+	for (const content of [
+		'tool alpha |   ',
+		'tool alpha |&   ',
+		'tool alpha &&   ',
+		'tool alpha ||   ',
+		'tool alpha &   ',
+	]) {
+		const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+		const tree = parser.parse(document.getText());
+		try {
+			const walked = walkbackIfNeeded(
+				document,
+				tree.rootNode,
+				document.positionAt(content.length),
+			);
+			assert.deepStrictEqual(walked, new vscode.Position(0, 10));
+			assert.strictEqual(getContextCommandName(tree.rootNode, walked), 'tool');
+		} finally {
+			tree.delete();
+		}
+	}
+
+	const content = `tool alpha ${' '.repeat(20_000)}`;
+	const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+	const tree = parser.parse(document.getText());
+	try {
+		const walked = walkbackIfNeeded(
+			document,
+			tree.rootNode,
+			document.positionAt(content.length),
+		);
+		assert.deepStrictEqual(walked, new vscode.Position(0, 10));
+		assert.strictEqual(getContextCommandName(tree.rootNode, walked), 'tool');
+	} finally {
+		tree.delete();
+	}
+}
+
 async function captureDocumentChange(
 	document: vscode.TextDocument,
 	apply: () => Thenable<boolean>,
@@ -647,6 +686,7 @@ suite('Parser and provider behavior', () => {
 	});
 
 	test('resolves command context', async () => verifyCommandContext(parser));
+	test('iterates without changing walkback results', async () => verifyIterativeWalkback(parser));
 	test('keeps incremental trees equivalent to fresh parses', async () => verifyIncrementalParsing(parser));
 	test('uses pre-edit coordinates for incremental tree edits', async () => verifyIncrementalEditCoordinates(parser));
 	test('ignores edits in unrelated languages', async () => verifyUnrelatedLanguagesAreIgnored(parser));

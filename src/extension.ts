@@ -396,25 +396,37 @@ export function getCurrentNode(n: SyntaxNode, position: vscode.Position): Syntax
 // the position, say, after 'echo '
 // [FIXME] Do not rely on such an ugly hack
 export function walkbackIfNeeded(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position): vscode.Position {
-  const thisNode = getCurrentNode(root, position);
-  console.debug("[walkbackIfNeeded] thisNode.type: ", thisNode.type);
-  if (thisNode.type === ';') {
-    console.info("[walkbackIfNeeded] stop at semicolon.");
-    return position;
-  }
+  let currentPosition = position;
+  let moveCount = 0;
 
-  if (position.character > 0 && thisNode.type !== 'word') {
-    console.info("[walkbackIfNeeded] stepping back!");
-    return walkbackIfNeeded(document, root, position.translate(0, -1));
-  } else if (thisNode.type !== 'word' && position.character === 0 && position.line > 0) {
-    const prevLineIndex = position.line - 1;
-    const prevLine = document.lineAt(prevLineIndex);
-    if (prevLine.text.trimEnd().endsWith('\\')) {
-      const charIndex = prevLine.text.trimEnd().length - 1;
-      return walkbackIfNeeded(document, root, new vscode.Position(prevLineIndex, charIndex));
+  while (true) {
+    const thisNode = getCurrentNode(root, currentPosition);
+    if (thisNode.type === ';') {
+      if (moveCount > 0) {
+        console.debug(`[walkbackIfNeeded] moved ${moveCount} time(s); stopped at ${thisNode.type}.`);
+      }
+      return currentPosition;
     }
+
+    if (currentPosition.character > 0 && thisNode.type !== 'word') {
+      currentPosition = currentPosition.translate(0, -1);
+      moveCount += 1;
+      continue;
+    } else if (thisNode.type !== 'word' && currentPosition.character === 0 && currentPosition.line > 0) {
+      const prevLineIndex = currentPosition.line - 1;
+      const prevLine = document.lineAt(prevLineIndex);
+      if (prevLine.text.trimEnd().endsWith('\\')) {
+        const charIndex = prevLine.text.trimEnd().length - 1;
+        currentPosition = new vscode.Position(prevLineIndex, charIndex);
+        moveCount += 1;
+        continue;
+      }
+    }
+    if (moveCount > 0) {
+      console.debug(`[walkbackIfNeeded] moved ${moveCount} time(s); stopped at ${thisNode.type}.`);
+    }
+    return currentPosition;
   }
-  return position;
 }
 
 export function updateTree(p: Parser, trees: TreeCache, edit: vscode.TextDocumentChangeEvent): void {
