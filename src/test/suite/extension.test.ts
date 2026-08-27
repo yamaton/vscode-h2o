@@ -2,6 +2,8 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
+import { Response } from 'node-fetch';
+import * as pako from 'pako';
 import {
 	disposeParserResources,
 	getContextCommandName,
@@ -11,10 +13,20 @@ import {
 	walkbackIfNeeded,
 } from '../../extension';
 import type { TreeCache } from '../../extension';
-import { CachingFetcher } from '../../cacheFetcher';
+import { CachingFetcher, CachingFetcherDependencies } from '../../cacheFetcher';
 import type { Command } from '../../command';
 
 const extensionId = 'tetradresearch.vscode-h2o';
+
+interface InitialCuratedProbe {
+	completion: Promise<void>;
+	commandNames: string[];
+	memento: vscode.Memento;
+	startedAt: number;
+	updateStarts: number[];
+}
+
+let initialCuratedProbe: InitialCuratedProbe | undefined;
 
 async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Promise<T> {
 	let timeout: NodeJS.Timeout | undefined;
@@ -35,9 +47,64 @@ async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Pro
 async function activateExtension(): Promise<vscode.Extension<unknown>> {
 	const extension = vscode.extensions.getExtension(extensionId);
 	assert.ok(extension, `${extensionId} must be installed in the Extension Host`);
-	await withTimeout(extension.activate(), 10000);
+
+	const originalStartInitialCuratedFetch = CachingFetcher.prototype.startInitialCuratedFetch;
+	const runId = `${Date.now()}-${process.pid}`;
+	const commands = Array.from({ length: 128 }, (_value, index): Command => ({
+		name: `vscode-h2o-integration-${runId}-${index}`,
+		description: 'x'.repeat(4096),
+		options: [],
+	}));
+	const body = Buffer.from(pako.gzip(JSON.stringify(commands)));
+
+	CachingFetcher.prototype.startInitialCuratedFetch = function startInitialCuratedFetch(kind = 'general'): Promise<void> {
+		const internals = this as unknown as {
+			memento: vscode.Memento;
+			dependencies: CachingFetcherDependencies;
+		};
+		const memento = internals.memento;
+		const updateStarts: number[] = [];
+		internals.memento = {
+			keys: () => memento.keys(),
+			get: memento.get.bind(memento) as vscode.Memento['get'],
+			update: (key, value) => {
+				updateStarts.push(Date.now());
+				return memento.update(key, value);
+			},
+		};
+		internals.dependencies = {
+			...internals.dependencies,
+			fetch: async () => new Response(body, { status: 200 }),
+		};
+		const startedAt = Date.now();
+		const completion = originalStartInitialCuratedFetch.call(this, kind);
+		initialCuratedProbe = {
+			completion,
+			commandNames: commands.map(command => command.name),
+			memento,
+			startedAt,
+			updateStarts,
+		};
+		return completion;
+	};
+
+	try {
+		await withTimeout(extension.activate(), 10000);
+	} finally {
+		CachingFetcher.prototype.startInitialCuratedFetch = originalStartInitialCuratedFetch;
+	}
 	assert.strictEqual(extension.isActive, true);
+	assert.ok(initialCuratedProbe, 'activation must start the controlled curated load');
 	return extension;
+}
+
+async function verifyInitialCuratedPersistence(): Promise<void> {
+	assert.ok(initialCuratedProbe);
+	await withTimeout(initialCuratedProbe.completion, 15000);
+	assert.strictEqual(initialCuratedProbe.updateStarts.length, initialCuratedProbe.commandNames.length);
+	const updateStartSpan = Math.max(...initialCuratedProbe.updateStarts) - Math.min(...initialCuratedProbe.updateStarts);
+	assert.ok(updateStartSpan < 1000, `curated Memento writes started over ${updateStartSpan} ms instead of one batch`);
+	assert.ok(Date.now() - initialCuratedProbe.startedAt < 15000, 'controlled curated persistence exceeded 15 seconds');
 }
 
 async function verifyRegisteredCommands(): Promise<void> {
@@ -410,20 +477,42 @@ async function verifyParserResourceDisposal(): Promise<void> {
 	assert.deepStrictEqual(Object.keys(trees), []);
 }
 
-export async function runExtensionTests(): Promise<void> {
+suiteSetup(async () => {
 	await activateExtension();
-	await verifyRegisteredCommands();
-	await verifyCommandHandlers();
+});
 
-	const parser = await initializeParser();
-	try {
-		await verifyCommandContext(parser);
-		await verifyIncrementalParsing(parser);
-		await verifyUnrelatedLanguagesAreIgnored(parser);
-		await verifyProviderTreeOwnership(parser);
-		await verifyCompletionRefreshesCommandList();
-	} finally {
-		parser.delete();
+suiteTeardown(async () => {
+	if (initialCuratedProbe) {
+		await Promise.all(initialCuratedProbe.commandNames.map(name =>
+			initialCuratedProbe!.memento.update(CachingFetcher.getKey(name), undefined)
+		));
 	}
-	await verifyParserResourceDisposal();
-}
+});
+
+suite('Extension activation', () => {
+	test('registers contributed commands', verifyRegisteredCommands);
+	test('batches controlled curated writes through real globalState', verifyInitialCuratedPersistence);
+	test('handles non-destructive command paths', verifyCommandHandlers);
+});
+
+suite('Parser and provider behavior', () => {
+	let parser: Parser;
+
+	suiteSetup(async () => {
+		parser = await initializeParser();
+	});
+
+	suiteTeardown(() => {
+		parser.delete();
+	});
+
+	test('resolves command context', async () => verifyCommandContext(parser));
+	test('keeps incremental trees equivalent to fresh parses', async () => verifyIncrementalParsing(parser));
+	test('ignores edits in unrelated languages', async () => verifyUnrelatedLanguagesAreIgnored(parser));
+	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
+	test('refreshes command names after asynchronous lookup', verifyCompletionRefreshesCommandList);
+});
+
+suite('Parser resource disposal', () => {
+	test('deletes cached trees and the parser', verifyParserResourceDisposal);
+});

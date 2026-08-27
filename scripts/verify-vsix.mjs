@@ -8,6 +8,7 @@ import { h2oTargetForVsix, loadH2oLock, verifyBinaryHeader, verifyStaticElf } fr
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const h2oLock = loadH2oLock(path.join(projectRoot, 'h2o.lock.json'));
+const packageLock = JSON.parse(readFileSync(path.join(projectRoot, 'package-lock.json'), 'utf8'));
 const vsixPath = path.resolve(projectRoot, process.argv[2] || 'artifacts/vscode-h2o-linux-x64.vsix');
 const vsixTarget = process.argv[3] || 'linux-x64';
 const h2oTarget = h2oTargetForVsix(h2oLock, vsixTarget);
@@ -37,70 +38,13 @@ const requiredFiles = [
   'extension/readme.md',
   'extension/tree-sitter-bash.wasm',
 ];
-const requiredProductionFiles = [
-  'extension/node_modules/node-fetch/LICENSE.md',
-  'extension/node_modules/node-fetch/README.md',
-  'extension/node_modules/node-fetch/browser.js',
-  'extension/node_modules/node-fetch/lib/index.es.js',
-  'extension/node_modules/node-fetch/lib/index.js',
-  'extension/node_modules/node-fetch/lib/index.mjs',
-  'extension/node_modules/node-fetch/package.json',
-  'extension/node_modules/pako/LICENSE',
-  'extension/node_modules/pako/README.md',
-  'extension/node_modules/pako/dist/pako.es5.js',
-  'extension/node_modules/pako/dist/pako.es5.min.js',
-  'extension/node_modules/pako/dist/pako.esm.mjs',
-  'extension/node_modules/pako/dist/pako.js',
-  'extension/node_modules/pako/dist/pako.min.js',
-  'extension/node_modules/pako/dist/pako_deflate.es5.js',
-  'extension/node_modules/pako/dist/pako_deflate.es5.min.js',
-  'extension/node_modules/pako/dist/pako_deflate.js',
-  'extension/node_modules/pako/dist/pako_deflate.min.js',
-  'extension/node_modules/pako/dist/pako_inflate.es5.js',
-  'extension/node_modules/pako/dist/pako_inflate.es5.min.js',
-  'extension/node_modules/pako/dist/pako_inflate.js',
-  'extension/node_modules/pako/dist/pako_inflate.min.js',
-  'extension/node_modules/pako/index.js',
-  'extension/node_modules/pako/lib/deflate.js',
-  'extension/node_modules/pako/lib/inflate.js',
-  'extension/node_modules/pako/lib/utils/common.js',
-  'extension/node_modules/pako/lib/utils/strings.js',
-  'extension/node_modules/pako/lib/zlib/README',
-  'extension/node_modules/pako/lib/zlib/adler32.js',
-  'extension/node_modules/pako/lib/zlib/constants.js',
-  'extension/node_modules/pako/lib/zlib/crc32.js',
-  'extension/node_modules/pako/lib/zlib/deflate.js',
-  'extension/node_modules/pako/lib/zlib/gzheader.js',
-  'extension/node_modules/pako/lib/zlib/inffast.js',
-  'extension/node_modules/pako/lib/zlib/inflate.js',
-  'extension/node_modules/pako/lib/zlib/inftrees.js',
-  'extension/node_modules/pako/lib/zlib/messages.js',
-  'extension/node_modules/pako/lib/zlib/trees.js',
-  'extension/node_modules/pako/lib/zlib/zstream.js',
-  'extension/node_modules/pako/package.json',
-  'extension/node_modules/tr46/.npmignore',
-  'extension/node_modules/tr46/index.js',
-  'extension/node_modules/tr46/lib/.gitkeep',
-  'extension/node_modules/tr46/lib/mappingTable.json',
-  'extension/node_modules/tr46/package.json',
-  'extension/node_modules/web-tree-sitter/LICENSE',
-  'extension/node_modules/web-tree-sitter/README.md',
-  'extension/node_modules/web-tree-sitter/package.json',
-  'extension/node_modules/web-tree-sitter/tree-sitter.js',
-  'extension/node_modules/web-tree-sitter/tree-sitter.wasm',
-  'extension/node_modules/webidl-conversions/LICENSE.md',
-  'extension/node_modules/webidl-conversions/README.md',
-  'extension/node_modules/webidl-conversions/lib/index.js',
-  'extension/node_modules/webidl-conversions/package.json',
-  'extension/node_modules/whatwg-url/LICENSE.txt',
-  'extension/node_modules/whatwg-url/README.md',
-  'extension/node_modules/whatwg-url/lib/URL-impl.js',
-  'extension/node_modules/whatwg-url/lib/URL.js',
-  'extension/node_modules/whatwg-url/lib/public-api.js',
-  'extension/node_modules/whatwg-url/lib/url-state-machine.js',
-  'extension/node_modules/whatwg-url/lib/utils.js',
-  'extension/node_modules/whatwg-url/package.json',
-];
+const productionPackages = Object.entries(packageLock.packages)
+  .filter(([packagePath, metadata]) => packagePath.startsWith('node_modules/') && metadata.dev !== true)
+  .map(([packagePath, metadata]) => ({
+    archivePath: `extension/${packagePath}`,
+    version: metadata.version,
+  }))
+  .sort((left, right) => left.archivePath.localeCompare(right.archivePath));
 
 function unzip(...args) {
   return execFileSync('unzip', args, { encoding: 'utf8', maxBuffer: 20 * 1024 * 1024 });
@@ -119,10 +63,24 @@ unzip('-t', vsixPath);
 const entries = unzip('-Z1', vsixPath).trim().split(/\r?\n/);
 assert.strictEqual(new Set(entries).size, entries.length, 'VSIX contains duplicate paths');
 
+const dependencyEntries = entries.filter(entry => entry.startsWith('extension/node_modules/'));
+const extensionEntries = entries.filter(entry => !entry.startsWith('extension/node_modules/'));
+assert.deepStrictEqual([...extensionEntries].sort(), [...requiredFiles].sort(), 'VSIX contains missing or unexpected extension files');
+
+const expectedPackageManifests = productionPackages.map(package_ => `${package_.archivePath}/package.json`);
+const actualPackageManifests = dependencyEntries.filter(entry => entry.endsWith('/package.json'));
 assert.deepStrictEqual(
-  [...entries].sort(),
-  [...requiredFiles, ...requiredProductionFiles].sort(),
-  'VSIX contains missing or unexpected files',
+  [...actualPackageManifests].sort(),
+  [...expectedPackageManifests].sort(),
+  'VSIX production package set differs from package-lock.json',
+);
+for (const package_ of productionPackages) {
+  const manifest = JSON.parse(archivedFile(`${package_.archivePath}/package.json`).toString('utf8'));
+  assert.strictEqual(manifest.version, package_.version, `${package_.archivePath} differs from package-lock.json`);
+}
+assert.ok(
+  dependencyEntries.every(entry => productionPackages.some(package_ => entry.startsWith(`${package_.archivePath}/`))),
+  'VSIX contains files outside locked production packages',
 );
 assert.ok(entries.every((entry) => !/\.(?:map|ts)$/i.test(entry)), 'VSIX must not contain TypeScript or source maps');
 assert.ok(entries.every((entry) => !/(?:^|\/)(?:test|tests|coverage|artifacts|scripts)(?:\/|$)/i.test(entry)), 'VSIX contains test or build-only files');

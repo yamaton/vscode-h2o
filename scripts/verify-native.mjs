@@ -138,9 +138,10 @@ if (runnable) {
 
   const scan = spawnSync(wrapperPath, [executable, 'git'], {
     encoding: 'utf8',
-    timeout: 10000,
+    timeout: 30000,
+    maxBuffer: 20 * 1024 * 1024,
   });
-  assert.strictEqual(scan.status, 0, `${binaryPath} could not scan git: ${scan.stderr}`);
+  assert.strictEqual(scan.status, 0, `${binaryPath} could not scan git: ${scan.error?.message ?? scan.stderr}`);
   const command = JSON.parse(scan.stdout);
   assert.strictEqual(command.name, 'git', `${binaryPath} scanned the wrong command`);
   const optionCount = (command.options?.length ?? 0)

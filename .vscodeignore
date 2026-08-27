@@ -5,6 +5,7 @@ artifacts/**
 coverage/**
 out/test/**
 scripts/**
+test/**
 
 src/**
 .gitignore

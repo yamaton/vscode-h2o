@@ -1,0 +1,10 @@
+{
+  "name": "vscode-h2o-packaged-test-runner",
+  "displayName": "VSCode H2O Packaged Test Runner",
+  "version": "0.0.0",
+  "publisher": "vscode-h2o-tests",
+  "private": true,
+  "engines": {
+    "vscode": "^1.101.0"
+  }
+}
