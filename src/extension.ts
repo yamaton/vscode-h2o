@@ -329,6 +329,20 @@ function asPoint(p: vscode.Position): Parser.Point {
   return { row: p.line, column: p.character };
 }
 
+function advancePoint(start: Parser.Point, text: string): Parser.Point {
+  let row = start.row;
+  let column = start.column;
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) === 10) {
+      row += 1;
+      column = 0;
+    } else {
+      column += 1;
+    }
+  }
+  return { row, column };
+}
+
 // Convert: option -> UI text (string)
 function optsToMessage(opts: Option[]): string {
   if (opts.length === 1) {
@@ -413,12 +427,15 @@ export function updateTree(p: Parser, trees: TreeCache, edit: vscode.TextDocumen
   const key = edit.document.uri.toString();
   const old = trees[key];
   if (!!old) {
-    for (const e of edit.contentChanges) {
+    // Apply later ranges first so each remaining range still addresses the pre-edit tree.
+    const changes = [...edit.contentChanges].sort((left, right) => right.rangeOffset - left.rangeOffset);
+    for (const e of changes) {
       const startIndex = e.rangeOffset;
       const oldEndIndex = e.rangeOffset + e.rangeLength;
       const newEndIndex = e.rangeOffset + e.text.length;
-      const indices = [startIndex, oldEndIndex, newEndIndex];
-      const [startPosition, oldEndPosition, newEndPosition] = indices.map(i => asPoint(edit.document.positionAt(i)));
+      const startPosition = asPoint(e.range.start);
+      const oldEndPosition = asPoint(e.range.end);
+      const newEndPosition = advancePoint(startPosition, e.text);
       const delta = { startIndex, oldEndIndex, newEndIndex, startPosition, oldEndPosition, newEndPosition };
       old.edit(delta);
     }

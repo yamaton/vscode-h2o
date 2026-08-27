@@ -166,6 +166,16 @@ function trackDeletion(tree: Parser.Tree): () => number {
 	return () => count;
 }
 
+function trackEdits(tree: Parser.Tree): Parser.Edit[] {
+	const edits: Parser.Edit[] = [];
+	const originalEdit = tree.edit.bind(tree);
+	tree.edit = (delta) => {
+		edits.push(delta);
+		return originalEdit(delta);
+	};
+	return edits;
+}
+
 interface Deferred<T> {
 	promise: Promise<T>;
 	resolve(value: T): void;
@@ -449,6 +459,127 @@ async function verifyIncrementalParsing(parser: Parser): Promise<void> {
 	trees[key].delete();
 }
 
+async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
+	const shorteningDocument = await vscode.workspace.openTextDocument({
+		language: 'shellscript',
+		content: 'git status\necho ok',
+	});
+	const shorteningKey = shorteningDocument.uri.toString();
+	const shorteningTree = parser.parse(shorteningDocument.getText());
+	const shorteningEdits = trackEdits(shorteningTree);
+	const shorteningTrees: TreeCache = { [shorteningKey]: shorteningTree };
+	const shortening = new vscode.WorkspaceEdit();
+	shortening.replace(shorteningDocument.uri, new vscode.Range(0, 4, 0, 10), 'st');
+	const shorteningEvent = await captureDocumentChange(
+		shorteningDocument,
+		() => vscode.workspace.applyEdit(shortening),
+	);
+	updateTree(parser, shorteningTrees, shorteningEvent);
+	assert.deepStrictEqual(shorteningEdits, [{
+		startIndex: 4,
+		oldEndIndex: 10,
+		newEndIndex: 6,
+		startPosition: { row: 0, column: 4 },
+		oldEndPosition: { row: 0, column: 10 },
+		newEndPosition: { row: 0, column: 6 },
+	}]);
+	let fresh = parser.parse(shorteningDocument.getText());
+	assert.deepStrictEqual(snapshot(shorteningTrees[shorteningKey].rootNode), snapshot(fresh.rootNode));
+	fresh.delete();
+	shorteningTrees[shorteningKey].delete();
+
+	const multipleDocument = await vscode.workspace.openTextDocument({
+		language: 'shellscript',
+		content: 'git status\necho keep\nnpm test',
+	});
+	const multipleKey = multipleDocument.uri.toString();
+	const multipleTree = parser.parse(multipleDocument.getText());
+	const multipleEdits = trackEdits(multipleTree);
+	const multipleTrees: TreeCache = { [multipleKey]: multipleTree };
+	const multiple = new vscode.WorkspaceEdit();
+	multiple.replace(multipleDocument.uri, new vscode.Range(0, 4, 0, 10), 'log\n--oneline');
+	multiple.replace(multipleDocument.uri, new vscode.Range(1, 5, 1, 9), 'kept value');
+	multiple.replace(multipleDocument.uri, new vscode.Range(2, 4, 2, 8), 'run --silent');
+	const multipleEvent = await captureDocumentChange(multipleDocument, () => vscode.workspace.applyEdit(multiple));
+	const ascendingMultipleEvent: vscode.TextDocumentChangeEvent = {
+		...multipleEvent,
+		contentChanges: [...multipleEvent.contentChanges].sort(
+			(left, right) => left.rangeOffset - right.rangeOffset,
+		),
+	};
+	assert.deepStrictEqual(
+		ascendingMultipleEvent.contentChanges.map(change => change.rangeOffset),
+		[4, 16, 25],
+	);
+	updateTree(parser, multipleTrees, ascendingMultipleEvent);
+	assert.deepStrictEqual(multipleEdits, [
+		{
+			startIndex: 25,
+			oldEndIndex: 29,
+			newEndIndex: 37,
+			startPosition: { row: 2, column: 4 },
+			oldEndPosition: { row: 2, column: 8 },
+			newEndPosition: { row: 2, column: 16 },
+		},
+		{
+			startIndex: 16,
+			oldEndIndex: 20,
+			newEndIndex: 26,
+			startPosition: { row: 1, column: 5 },
+			oldEndPosition: { row: 1, column: 9 },
+			newEndPosition: { row: 1, column: 15 },
+		},
+		{
+			startIndex: 4,
+			oldEndIndex: 10,
+			newEndIndex: 17,
+			startPosition: { row: 0, column: 4 },
+			oldEndPosition: { row: 0, column: 10 },
+			newEndPosition: { row: 1, column: 9 },
+		},
+	]);
+	fresh = parser.parse(multipleDocument.getText());
+	assert.deepStrictEqual(snapshot(multipleTrees[multipleKey].rootNode), snapshot(fresh.rootNode));
+	fresh.delete();
+	multipleTrees[multipleKey].delete();
+
+	const unicodeDocument = await vscode.workspace.openTextDocument({
+		language: 'shellscript',
+		content: 'echo 😀あ\r\ngit status',
+	});
+	const unicodeKey = unicodeDocument.uri.toString();
+	const unicodeTree = parser.parse(unicodeDocument.getText());
+	const unicodeEdits = trackEdits(unicodeTree);
+	const unicodeTrees: TreeCache = { [unicodeKey]: unicodeTree };
+	const unicode = new vscode.WorkspaceEdit();
+	unicode.replace(unicodeDocument.uri, new vscode.Range(0, 5, 0, 8), '🎉い');
+	unicode.replace(unicodeDocument.uri, new vscode.Range(1, 4, 1, 10), 'log\n--oneline');
+	const unicodeEvent = await captureDocumentChange(unicodeDocument, () => vscode.workspace.applyEdit(unicode));
+	updateTree(parser, unicodeTrees, unicodeEvent);
+	assert.deepStrictEqual(unicodeEdits, [
+		{
+			startIndex: 14,
+			oldEndIndex: 20,
+			newEndIndex: 28,
+			startPosition: { row: 1, column: 4 },
+			oldEndPosition: { row: 1, column: 10 },
+			newEndPosition: { row: 2, column: 9 },
+		},
+		{
+			startIndex: 5,
+			oldEndIndex: 8,
+			newEndIndex: 8,
+			startPosition: { row: 0, column: 5 },
+			oldEndPosition: { row: 0, column: 8 },
+			newEndPosition: { row: 0, column: 8 },
+		},
+	]);
+	fresh = parser.parse(unicodeDocument.getText());
+	assert.deepStrictEqual(snapshot(unicodeTrees[unicodeKey].rootNode), snapshot(fresh.rootNode));
+	fresh.delete();
+	unicodeTrees[unicodeKey].delete();
+}
+
 async function verifyUnrelatedLanguagesAreIgnored(parser: Parser): Promise<void> {
 	const document = await vscode.workspace.openTextDocument({
 		language: 'typescript',
@@ -517,6 +648,7 @@ suite('Parser and provider behavior', () => {
 
 	test('resolves command context', async () => verifyCommandContext(parser));
 	test('keeps incremental trees equivalent to fresh parses', async () => verifyIncrementalParsing(parser));
+	test('uses pre-edit coordinates for incremental tree edits', async () => verifyIncrementalEditCoordinates(parser));
 	test('ignores edits in unrelated languages', async () => verifyUnrelatedLanguagesAreIgnored(parser));
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
 	test('refreshes command names after asynchronous lookup', verifyCompletionRefreshesCommandList);

@@ -88,11 +88,14 @@ suite('web-tree-sitter compatibility', () => {
     editedTree.edit({
       startIndex: 4,
       oldEndIndex: 10,
-      newEndIndex: 16,
+      newEndIndex: 17,
       startPosition: { row: 0, column: 4 },
       oldEndPosition: { row: 0, column: 10 },
-      newEndPosition: { row: 0, column: 16 },
+      newEndPosition: { row: 0, column: 17 },
     });
+
+    assert.strictEqual(editedTree.rootNode.endIndex, updated.length);
+    assert.deepStrictEqual(editedTree.rootNode.endPosition, { row: 1, column: 7 });
 
     const incremental = parser.parse(updated, editedTree);
     const fresh = parser.parse(updated);
