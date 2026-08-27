@@ -179,6 +179,6 @@
     },
     "dependencies": {
         "node-fetch": "^2.6.6",
-        "web-tree-sitter": "^0.20.8"
+        "web-tree-sitter": "^0.26.13"
     }
 }
