@@ -5,6 +5,7 @@ import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
 import { CommandListProvider } from './commandExplorer';
 import { getCommandArguments, getCommandName } from './analyzer';
+import { loadLanguageOnce } from './parserLanguage';
 import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription } from './utils';
 
 
@@ -21,7 +22,7 @@ export interface ParserInitializationDependencies {
 const defaultParserInitializationDependencies: ParserInitializationDependencies = {
   init: () => Parser.init(),
   createParser: () => new Parser(),
-  loadLanguage: wasmPath => Parser.Language.load(wasmPath),
+  loadLanguage: loadLanguageOnce,
 };
 
 export async function initializeParser(

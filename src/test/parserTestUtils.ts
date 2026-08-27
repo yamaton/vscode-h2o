@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
+import { loadLanguageOnce } from '../parserLanguage';
 
 export interface NodeSnapshot {
   type: string;
@@ -20,7 +21,7 @@ export async function createBashParser(): Promise<Parser> {
   const wasmPath = path.resolve(__dirname, '../../tree-sitter-bash.wasm');
 
   try {
-    parser.setLanguage(await Parser.Language.load(wasmPath));
+    parser.setLanguage(await loadLanguageOnce(wasmPath));
     return parser;
   } catch (error) {
     parser.delete();

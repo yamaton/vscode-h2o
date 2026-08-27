@@ -23,6 +23,25 @@ suite('parser test utilities', () => {
     parser?.delete();
   });
 
+  test('shares languages without sharing parser ownership', async () => {
+    let first: Parser | undefined;
+    let second: Parser | undefined;
+
+    try {
+      [first, second] = await Promise.all([createBashParser(), createBashParser()]);
+      assert.notStrictEqual(first, second);
+      assert.strictEqual(first.getLanguage(), second.getLanguage());
+
+      first.delete();
+      first = undefined;
+      const text = withParsedTree(second, 'echo still-alive', tree => tree.rootNode.text);
+      assert.strictEqual(text, 'echo still-alive');
+    } finally {
+      first?.delete();
+      second?.delete();
+    }
+  });
+
   test('deletes parsed trees after synchronous callbacks finish', () => {
     let successDeleteCount = () => 0;
     const text = withParsedTree(parser, 'echo ok', tree => {

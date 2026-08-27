@@ -969,6 +969,19 @@ suite('Parser and provider behavior', () => {
 	test('keeps incremental trees equivalent to fresh parses', async () => verifyIncrementalParsing(parser));
 	test('uses pre-edit coordinates for incremental tree edits', async () => verifyIncrementalEditCoordinates(parser));
 	test('ignores edits in unrelated languages', async () => verifyUnrelatedLanguagesAreIgnored(parser));
+	test('reuses the loaded language across parser initialization', async () => {
+		const otherParser = await initializeParser();
+		try {
+			assert.notStrictEqual(otherParser, parser);
+			assert.strictEqual(otherParser.getLanguage(), parser.getLanguage());
+		} finally {
+			otherParser.delete();
+		}
+
+		withParsedTree(parser, 'echo still-alive', tree => {
+			assert.strictEqual(tree.rootNode.text, 'echo still-alive');
+		});
+	});
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
 	test('refreshes command names after asynchronous lookup', verifyCompletionRefreshesCommandList);
 });
