@@ -16,7 +16,7 @@ test.bb
 .yarnrc
 vsc-extension-quickstart.md
 **/tsconfig.json
-**/.eslintrc.json
+**/eslint.config.*
 **/*.map
 **/*.ts
 bin/h2o-*
