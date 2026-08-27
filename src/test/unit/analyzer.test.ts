@@ -1,7 +1,12 @@
 import * as assert from 'assert';
 import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
-import { getCommandArguments, getCommandName } from '../../analyzer';
+import {
+  CommandWord,
+  getCommandArguments,
+  getCommandInvocationToPosition,
+  getCommandName,
+} from '../../analyzer';
 import {
   createBashParser,
   descendantsOfType,
@@ -12,6 +17,19 @@ import {
 interface CommandAnalysis {
   name: string | undefined;
   arguments: string[];
+}
+
+function wordTexts(words: readonly CommandWord[]): string[] {
+  return words.map(word => word.text);
+}
+
+function invocationArgumentTexts(
+  command: SyntaxNode,
+  position: Parser.Point,
+  includeArgumentAtPosition: boolean,
+): string[] {
+  const invocation = getCommandInvocationToPosition(command, position, includeArgumentAtPosition);
+  return wordTexts(invocation?.arguments ?? []);
 }
 
 suite('shell command analysis', () => {
@@ -212,6 +230,37 @@ suite('shell command analysis', () => {
       assert.ok(incomplete);
       assert.strictEqual(getCommandName(incomplete), 'git');
       assert.doesNotThrow(() => getCommandArguments(incomplete));
+    });
+  });
+
+  test('limits command arguments to the cursor context', () => {
+    withFirstNamedNode(parser, 'docker run build', command => {
+      const insideRun = { row: 0, column: 8 };
+      assert.deepStrictEqual(
+        invocationArgumentTexts(command, insideRun, true),
+        ['run'],
+      );
+      assert.deepStrictEqual(
+        invocationArgumentTexts(command, { row: 0, column: 10 }, false),
+        [],
+      );
+      assert.deepStrictEqual(
+        invocationArgumentTexts(command, { row: 0, column: 10 }, true),
+        ['run'],
+      );
+      assert.deepStrictEqual(
+        invocationArgumentTexts(command, { row: 0, column: 15 }, true),
+        ['run', 'build'],
+      );
+    });
+  });
+
+  test('uses wrapped-command arguments when limiting by position', () => {
+    withFirstNamedNode(parser, 'sudo -- docker run build', command => {
+      assert.deepStrictEqual(
+        invocationArgumentTexts(command, { row: 0, column: 16 }, true),
+        ['run'],
+      );
     });
   });
 });

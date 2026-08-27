@@ -1,3 +1,4 @@
+import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 
 const transparentCommandWrappers = new Set(['sudo', 'nohup']);
@@ -52,9 +53,15 @@ function getWrappedCommandNode(nameNode: SyntaxNode): SyntaxNode | null {
   return node;
 }
 
-interface CommandInvocation {
-  name: string;
-  arguments: string[];
+export interface CommandWord {
+  text: string;
+  startPosition: Parser.Point;
+  endPosition: Parser.Point;
+}
+
+export interface CommandInvocation {
+  name: CommandWord;
+  arguments: CommandWord[];
 }
 
 function getCommandInvocation(commandNode: SyntaxNode | null | undefined): CommandInvocation | undefined {
@@ -72,19 +79,56 @@ function getCommandInvocation(commandNode: SyntaxNode | null | undefined): Comma
     return undefined;
   }
 
-  const args: string[] = [];
+  const args: CommandWord[] = [];
   let node = commandNameNode.nextNamedSibling;
   while (node) {
-    args.push(node.text);
+    args.push({
+      text: node.text,
+      startPosition: node.startPosition,
+      endPosition: node.endPosition,
+    });
     node = node.nextNamedSibling;
   }
-  return { name: commandNameNode.text, arguments: args };
+  return {
+    name: {
+      text: commandNameNode.text,
+      startPosition: commandNameNode.startPosition,
+      endPosition: commandNameNode.endPosition,
+    },
+    arguments: args,
+  };
+}
+
+function comparePoints(left: Parser.Point, right: Parser.Point): number {
+  return left.row === right.row ? left.column - right.column : left.row - right.row;
 }
 
 export function getCommandName(commandNode: SyntaxNode | null | undefined): string | undefined {
-  return getCommandInvocation(commandNode)?.name;
+  return getCommandInvocation(commandNode)?.name.text;
 }
 
 export function getCommandArguments(commandNode: SyntaxNode | null | undefined): string[] {
-  return getCommandInvocation(commandNode)?.arguments ?? [];
+  return getCommandInvocation(commandNode)?.arguments.map(argument => argument.text) ?? [];
+}
+
+/**
+ * Returns an invocation limited to the cursor context. A completion request
+ * excludes the argument being edited, while a hover request includes it.
+ */
+export function getCommandInvocationToPosition(
+  commandNode: SyntaxNode | null | undefined,
+  position: Parser.Point,
+  includeArgumentAtPosition: boolean,
+): CommandInvocation | undefined {
+  const invocation = getCommandInvocation(commandNode);
+  if (!invocation) {
+    return undefined;
+  }
+
+  return {
+    name: invocation.name,
+    arguments: invocation.arguments.filter(argument => includeArgumentAtPosition
+      ? comparePoints(argument.startPosition, position) <= 0
+      : comparePoints(argument.endPosition, position) < 0),
+  };
 }

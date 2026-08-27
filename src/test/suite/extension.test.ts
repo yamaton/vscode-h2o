@@ -258,6 +258,134 @@ function commandForProviderRace(): Command {
 	};
 }
 
+function hierarchicalDockerCommand(): Command {
+	return {
+		name: 'docker',
+		description: 'docker root',
+		options: [],
+		inheritedOptions: [{
+			names: ['--verbose'],
+			argument: '',
+			description: 'verbose output',
+		}],
+			subcommands: [
+				{
+					name: 'run',
+					description: 'run a container',
+				options: [{
+					names: ['--run-only'],
+					argument: '',
+					description: 'RUN_ONLY_DESCRIPTION',
+				}],
+				subcommands: [{
+					name: 'child',
+					description: 'nested run command',
+					options: [{
+						names: ['--child-only'],
+						argument: '',
+						description: 'child option',
+					}],
+				}],
+			},
+			{
+				name: 'build',
+				description: 'build an image',
+				options: [{
+					names: ['--build-only'],
+					argument: '',
+					description: 'build option',
+				}],
+			},
+			{
+				name: 'builder',
+				description: 'manage builds',
+				options: [],
+				subcommands: [{
+					name: 'imagetools',
+					description: 'work with images',
+					options: [],
+					subcommands: [{
+						name: 'create',
+						description: 'create an image',
+						options: [{
+							names: ['--create-only'],
+							argument: '',
+							description: 'deep option',
+						}],
+					}],
+				}],
+			},
+		],
+	};
+}
+
+function cargoCommandWithBuildAlias(): Command {
+	return {
+		name: 'cargo',
+		description: 'Rust package manager',
+		options: [],
+		subcommands: [{
+			name: 'build',
+			aliases: ['b'],
+			description: 'Compile the current package',
+			options: [{
+				names: ['--release'],
+				argument: '',
+				description: 'Build optimized artifacts',
+			}],
+		}],
+	};
+}
+
+function bunCommand(): Command {
+	return {
+		name: 'bun',
+		description: 'BUN_ROOT_DESCRIPTION',
+		options: [],
+		subcommands: [{
+			name: 'add',
+			description: 'BUN_ADD_DESCRIPTION',
+			options: [],
+		}],
+	};
+}
+
+function aliasCollisionCommand(): Command {
+	return {
+		name: 'clash',
+		description: 'alias collision fixture',
+		options: [],
+		subcommands: [{
+			name: 'canonical',
+			aliases: ['shared'],
+			description: 'alias owner',
+			options: [{
+				names: ['--alias-owner'],
+				argument: '',
+				description: 'alias owner option',
+			}],
+		}, {
+			name: 'shared',
+			description: 'canonical owner',
+			options: [{
+				names: ['--canonical-only'],
+				argument: '',
+				description: 'canonical option',
+			}],
+		}, {
+			name: 'first',
+			aliases: ['short'],
+			description: 'first ambiguous alias owner',
+			options: [],
+		}, {
+			name: 'second',
+			aliases: ['short'],
+			description: 'second ambiguous alias owner',
+			options: [],
+		}],
+	};
+}
+
 function completionLabel(item: vscode.CompletionItem): string {
 	return typeof item.label === 'string' ? item.label : item.label.label;
 }
@@ -414,6 +542,104 @@ async function verifyCompletionRefreshesCommandList(): Promise<void> {
 		releaseFetch.resolve();
 		CachingFetcher.prototype.fetch = originalFetch;
 		CachingFetcher.prototype.getList = originalGetList;
+	}
+}
+
+async function verifyHierarchicalCommandResolution(): Promise<void> {
+	const originalFetch = CachingFetcher.prototype.fetch;
+	CachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+		if (name === 'docker') {
+			return hierarchicalDockerCommand();
+		}
+		if (name === 'cargo') {
+			return cargoCommandWithBuildAlias();
+		}
+		if (name === 'bun') {
+			return bunCommand();
+		}
+		if (name === 'clash') {
+			return aliasCollisionCommand();
+		}
+		throw new Error(`Unexpected command lookup: ${name}`);
+	};
+
+	async function completionLabels(content: string): Promise<string[]> {
+		const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+		const completion = await withTimeout(
+			vscode.commands.executeCommand<vscode.CompletionList>(
+				'vscode.executeCompletionItemProvider',
+				document.uri,
+				document.positionAt(content.length),
+			),
+			5000,
+		);
+		return completion.items
+			.filter(item => item.sortText?.startsWith('33-') || item.sortText?.startsWith('55-'))
+			.map(completionLabel);
+	}
+
+	async function hoverAt(content: string, character: number): Promise<string> {
+		const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+		const hovers = await withTimeout(
+			vscode.commands.executeCommand<vscode.Hover[]>(
+				'vscode.executeHoverProvider',
+				document.uri,
+				new vscode.Position(0, character),
+			),
+			5000,
+		);
+		return hoverText(hovers);
+	}
+
+	try {
+		const siblingAfterPositional = await completionLabels('docker run build ');
+		assert.ok(siblingAfterPositional.includes('--run-only'));
+		assert.ok(!siblingAfterPositional.includes('--build-only'));
+		assert.ok(!siblingAfterPositional.includes('child'));
+
+		const editingSeparator = await completionLabels('docker --');
+		assert.ok(editingSeparator.includes('--verbose'));
+		assert.ok(!editingSeparator.includes('run'));
+
+		const afterSeparator = await completionLabels('docker -- ');
+		assert.ok(!afterSeparator.includes('run'));
+		assert.ok(!afterSeparator.includes('--verbose'));
+
+		const optionBeforeSubcommand = await completionLabels('docker --verbose run ');
+		assert.ok(optionBeforeSubcommand.includes('--run-only'));
+
+		const deepPath = await completionLabels('docker builder imagetools create ');
+		assert.ok(deepPath.includes('--create-only'));
+
+		const touchingExactSubcommand = await completionLabels('docker run');
+		assert.ok(touchingExactSubcommand.includes('run'));
+
+		const afterSubcommand = await completionLabels('docker run ');
+		assert.ok(afterSubcommand.includes('--run-only'));
+
+		const afterAlias = await completionLabels('cargo b ');
+		assert.ok(afterAlias.includes('--release'));
+
+		assert.ok((await hoverAt('docker run --run-only child', 13)).includes('RUN_ONLY_DESCRIPTION'));
+		assert.ok((await hoverAt('docker run image --run-only', 19)).includes('RUN_ONLY_DESCRIPTION'));
+		assert.ok(!(await hoverAt('docker -- --verbose', 12)).includes('verbose output'));
+
+		const aliasHoverText = await hoverAt('cargo b', 6);
+		assert.ok(aliasHoverText.includes('cargo **b**'));
+		assert.ok(aliasHoverText.includes('(Alias of build) Compile the current package'));
+
+		assert.ok(!(await hoverAt('bun add add', 9)).includes('BUN_ADD_DESCRIPTION'));
+		assert.ok(!(await hoverAt('bun add bun', 9)).includes('BUN_ROOT_DESCRIPTION'));
+
+		const collidingLabels = await completionLabels('clash sh');
+		assert.strictEqual(collidingLabels.filter(label => label === 'shared').length, 1);
+		assert.ok(!collidingLabels.includes('short'));
+
+		const canonicalAfterCollision = await completionLabels('clash shared ');
+		assert.ok(canonicalAfterCollision.includes('--canonical-only'));
+		assert.ok(!canonicalAfterCollision.includes('--alias-owner'));
+	} finally {
+		CachingFetcher.prototype.fetch = originalFetch;
 	}
 }
 
@@ -984,6 +1210,7 @@ suite('Parser and provider behavior', () => {
 	});
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
 	test('refreshes command names after asynchronous lookup', verifyCompletionRefreshesCommandList);
+	test('resolves command specs strictly through their hierarchy', verifyHierarchicalCommandResolution);
 });
 
 suite('Parser resource disposal', () => {

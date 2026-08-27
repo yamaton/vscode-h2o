@@ -3,8 +3,18 @@ import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { Option, Command } from './command';
+import {
+  CommandPathResolution,
+  getDirectSubcommandLabels,
+  resolveCommandPath,
+} from './commandResolver';
 import { CommandListProvider } from './commandExplorer';
-import { getCommandArguments, getCommandName } from './analyzer';
+import {
+  CommandInvocation,
+  CommandWord,
+  getCommandInvocationToPosition,
+  getCommandName,
+} from './analyzer';
 import { loadLanguageOnce } from './parserLanguage';
 import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription } from './utils';
 
@@ -53,6 +63,11 @@ async function withTreeCopy<T>(tree: Parser.Tree, operation: (copy: Parser.Tree)
   } finally {
     copy.delete();
   }
+}
+
+interface ResolvedCommandContext {
+  invocation: CommandInvocation;
+  resolution: CommandPathResolution<CommandWord>;
 }
 
 export interface ActivationDependencies {
@@ -107,11 +122,27 @@ async function registerExtension(
           console.log(`[Completion] isCursorTouchingWord: ${isCursorTouchingWord}`);
 
           try {
-            const cmdSeq = await getContextCmdSeq(requestTree.rootNode, p, fetcher);
+            const includeCurrentArgument = !isCursorTouchingWord;
+            const commandContext = await getContextCommandResolution(
+              requestTree.rootNode,
+              p,
+              fetcher,
+              includeCurrentArgument,
+            );
+            const cmdSeq = commandContext.resolution.path;
             if (!!cmdSeq && cmdSeq.length) {
               const deepestCmd = cmdSeq[cmdSeq.length - 1];
-              const compSubcommands = getCompletionsSubcommands(deepestCmd);
-              let compOptions = getCompletionsOptions(document, requestTree.rootNode, p, cmdSeq);
+              const compSubcommands = commandContext.resolution.stopReason === undefined
+                ? getCompletionsSubcommands(deepestCmd)
+                : [];
+              let compOptions = commandContext.resolution.stopReason === 'end-of-options'
+                ? []
+                : getCompletionsOptions(
+                  requestTree.rootNode,
+                  p,
+                  cmdSeq,
+                  includeCurrentArgument,
+                );
               let compItems = [
                 ...compSubcommands,
                 ...compOptions,
@@ -169,13 +200,18 @@ async function registerExtension(
       return withTreeCopy(tree, async requestTree => {
         const currentWord = getCurrentNode(requestTree.rootNode, position).text;
         try {
-          const cmdSeq = await getContextCmdSeq(requestTree.rootNode, position, fetcher);
+          const commandContext = await getContextCommandResolution(requestTree.rootNode, position, fetcher);
+          const cmdSeq = commandContext.resolution.path;
           if (!!cmdSeq && cmdSeq.length) {
             const name = cmdSeq[0].name;
-            if (currentWord === name) {
+            const subcommandStepIndex = commandContext.resolution.steps.findIndex(
+              step => rangeOfWord(step.source).contains(position),
+            );
+            const subcommandStep = commandContext.resolution.steps[subcommandStepIndex];
+            if (rangeOfWord(commandContext.invocation.name).contains(position)) {
               // Display root-level command
               const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
-              const thisCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
+              const thisCmd = cmdSeq[0];
               const tldrText = formatTldr(thisCmd.tldr);
               const usageText = formatUsage(thisCmd.usage);
               const descText = (thisCmd.description !== thisCmd.name && !tldrText) ? formatDescription(thisCmd.description) : "";
@@ -184,22 +220,21 @@ async function registerExtension(
                 enabledCommands: ['h2o.clearCache'],
               };
               return new vscode.Hover(msg);
-            } else if (cmdSeq.length > 1 && cmdSeq.some((cmd) => cmd.name === currentWord)) {
+            } else if (subcommandStep) {
               // Display a subcommand
-              const thatCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
-              const nameSeq: string[] = [];
-              for (const cmd of cmdSeq) {
-                if (cmd.name !== currentWord) {
-                  nameSeq.push(cmd.name);
-                } else {
-                  break;
-                }
-              }
-              const cmdPrefixName = nameSeq.join(" ");
+              const thatCmd = subcommandStep.command;
+              const cmdPrefixName = cmdSeq
+                .slice(0, subcommandStepIndex + 1)
+                .map(command => command.name)
+                .join(" ");
+              const description = subcommandStep.matchedBy === 'alias'
+                ? `(Alias of ${thatCmd.name}) ${thatCmd.description}`
+                : thatCmd.description;
               const usageText = formatUsage(thatCmd.usage);
-              const msg = `${cmdPrefixName} **${thatCmd.name}**\n\n${thatCmd.description}${usageText}`;
+              const msg = `${cmdPrefixName} **${subcommandStep.source.text}**\n\n${description}${usageText}`;
               return new vscode.Hover(new vscode.MarkdownString(msg));
-            } else if (cmdSeq.length) {
+            } else if (cmdSeq.length
+              && commandContext.resolution.stopReason !== 'end-of-options') {
               const opts = getMatchingOption(currentWord, name, cmdSeq);
               const msg = optsToMessage(opts);
               return new vscode.Hover(new vscode.MarkdownString(msg));
@@ -444,6 +479,15 @@ function range(n: SyntaxNode): vscode.Range {
   );
 }
 
+function rangeOfWord(word: CommandWord): vscode.Range {
+  return new vscode.Range(
+    word.startPosition.row,
+    word.startPosition.column,
+    word.endPosition.row,
+    word.endPosition.column,
+  );
+}
+
 
 // --------------- For Hovers and Completions ----------------------
 
@@ -619,55 +663,50 @@ export function getContextCommandName(root: SyntaxNode, position: vscode.Positio
   return getCommandName(commandNode);
 }
 
-// Get subcommand names NOT starting with `-`
-// [FIXME] this catches option's argument; use database instead
-function _getSubcommandCandidates(root: SyntaxNode, position: vscode.Position): string[] {
-  const commandNode = _getContextCommandNode(root, position);
-  return getCommandArguments(commandNode).filter(argument => !argument.startsWith('-'));
-}
-
-
 // Get command and subcommand inferred from the current position
-async function getContextCmdSeq(root: SyntaxNode, position: vscode.Position, fetcher: CachingFetcher): Promise<Command[]> {
-  let name = getContextCommandName(root, position);
-  if (!name) {
-    return Promise.reject("[getContextCmdSeq] Command name not found.");
+async function getContextCommandResolution(
+  root: SyntaxNode,
+  position: vscode.Position,
+  fetcher: CachingFetcher,
+  includeArgumentAtPosition = true,
+): Promise<ResolvedCommandContext> {
+  const commandNode = _getContextCommandNode(root, position);
+  const invocation = getCommandInvocationToPosition(
+    commandNode,
+    asPoint(position),
+    includeArgumentAtPosition,
+  );
+  if (!invocation) {
+    return Promise.reject("[getContextCommandResolution] Command name not found.");
   }
 
   try {
-    let command = await fetcher.fetch(name);
-    const seq: Command[] = [command];
-    if (!!command) {
-      const words = _getSubcommandCandidates(root, position);
-      let found = true;
-      while (found && !!command.subcommands && command.subcommands.length) {
-        found = false;
-        const subcommands = getSubcommandsWithAliases(command);
-        for (const word of words) {
-          for (const subcmd of subcommands) {
-            if (subcmd.name === word) {
-              command = subcmd;
-              seq.push(command);
-              found = true;
-            }
-          }
-        }
-      }
-    }
-    return seq;
+    const command = await fetcher.fetch(invocation.name.text);
+    return {
+      invocation,
+      resolution: resolveCommandPath(command, invocation.arguments),
+    };
   } catch (e) {
-    console.error("[getContextCmdSeq] Error: ", e);
-    return Promise.reject("[getContextCmdSeq] unknown command!");
+    console.error("[getContextCommandResolution] Error: ", e);
+    return Promise.reject("[getContextCommandResolution] unknown command!");
   }
 }
 
 
 // Get command arguments as string[]
-function getContextCmdArgs(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position): string[] {
-  const p = walkbackIfNeeded(document, root, position);
-  const commandNode = _getContextCommandNode(root, p);
-  return getCommandArguments(commandNode).map(argument => {
-    let text = argument;
+function getContextCmdArgs(
+  root: SyntaxNode,
+  position: vscode.Position,
+  includeArgumentAtPosition: boolean,
+): string[] {
+  const commandNode = _getContextCommandNode(root, position);
+  const invocation = getCommandInvocationToPosition(
+    commandNode,
+    asPoint(position),
+    includeArgumentAtPosition,
+  );
+  return (invocation?.arguments ?? []).map(argument => {
+    let text = argument.text;
     // --option=arg
     if (text.startsWith('--') && text.includes('=')) {
       text = text.split('=', 2)[0];
@@ -679,10 +718,13 @@ function getContextCmdArgs(document: vscode.TextDocument, root: SyntaxNode, posi
 
 // Get subcommand completions
 function getCompletionsSubcommands(deepestCmd: Command): vscode.CompletionItem[] {
-  const subcommands = getSubcommandsWithAliases(deepestCmd);
-  if (subcommands && subcommands.length) {
-    const compitems = subcommands.map((sub, idx) => {
-      const item = createCompletionItem(sub.name, sub.description);
+  const labels = getDirectSubcommandLabels(deepestCmd);
+  if (labels.length) {
+    const compitems = labels.map((label, idx) => {
+      const description = label.matchedBy === 'alias'
+        ? `(Alias of ${label.command.name}) ${label.command.description}`
+        : label.command.description;
+      const item = createCompletionItem(label.spelling, description);
       item.sortText = `33-${idx.toString().padStart(4)}`;
       return item;
     });
@@ -693,8 +735,13 @@ function getCompletionsSubcommands(deepestCmd: Command): vscode.CompletionItem[]
 
 
 // Get option completion
-function getCompletionsOptions(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position, cmdSeq: Command[]): vscode.CompletionItem[] {
-  const args = getContextCmdArgs(document, root, position);
+function getCompletionsOptions(
+  root: SyntaxNode,
+  position: vscode.Position,
+  cmdSeq: Command[],
+  includeArgumentAtPosition: boolean,
+): vscode.CompletionItem[] {
+  const args = getContextCmdArgs(root, position, includeArgumentAtPosition);
   const compitems: vscode.CompletionItem[] = [];
   const options = getOptions(cmdSeq);
   options.forEach((opt, idx) => {
@@ -728,27 +775,5 @@ function getOptions(cmdSeq: Command[]): Option[] {
   return options;
 }
 
-
-// Get subcommands including aliases of a subcommands
-function getSubcommandsWithAliases(cmd: Command): Command[] {
-  const subcommands = cmd.subcommands;
-  if (!subcommands) {
-    return [];
-  }
-
-  const res: Command[] = [];
-  for (let subcmd of subcommands) {
-    res.push(subcmd);
-    if (!!subcmd.aliases) {
-      for (const alias of subcmd.aliases) {
-        const aliasCmd = { ...subcmd };
-        aliasCmd.name = alias;
-        aliasCmd.description = `(Alias of ${subcmd.name}) `.concat(aliasCmd.description);
-        res.push(aliasCmd);
-      }
-    }
-  }
-  return res;
-}
 
 export function deactivate() { }
