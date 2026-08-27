@@ -1,7 +1,7 @@
 import * as assert from 'assert';
+import { gzipSync } from 'node:zlib';
 import type { Memento } from 'vscode';
 import { Response } from 'node-fetch';
-import * as pako from 'pako';
 import { CachingFetcher, CachingFetcherDependencies, H2oRuntime, runH2o } from '../../cacheFetcher';
 import { Command } from '../../command';
 
@@ -43,7 +43,7 @@ function dependencies(overrides: Partial<CachingFetcherDependencies> = {}): Part
 }
 
 function responseWithGzip(commands: Command[]): Response {
-  const body = Buffer.from(pako.gzip(JSON.stringify(commands)));
+  const body = gzipSync(JSON.stringify(commands));
   return new Response(body, { status: 200 });
 }
 
@@ -227,7 +227,7 @@ suite('CachingFetcher', () => {
       fetch: async () => new Response('not gzip', { status: 200 }),
     }));
 
-    await assert.rejects(fetcher.fetchAllCurated(), /Failed to inflate and parse/);
+    await assert.rejects(fetcher.fetchAllCurated(), /Failed to decompress and parse/);
   });
 
   test('downloads individual commands and command lists', async () => {

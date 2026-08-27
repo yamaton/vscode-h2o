@@ -1,11 +1,11 @@
 import { spawnSync } from 'child_process';
+import { gunzipSync } from 'node:zlib';
 import * as path from 'path';
 import type { Memento } from 'vscode';
 import type * as Vscode from 'vscode';
 import { Command } from './command';
 import fetch from 'node-fetch';
 import type { Response } from 'node-fetch';
-import * as pako from 'pako';
 
 let neverNotifiedError = true;
 
@@ -242,13 +242,13 @@ export class CachingFetcher {
     let commands: Command[] = [];
     try {
       const s = await response.buffer();
-      const decoded = pako.inflate(s, { to: 'string' });
+      const decoded = gunzipSync(s).toString('utf8');
       commands = JSON.parse(decoded) as Command[];
     } catch (err) {
       console.error("[fetchAllCurated] Error: ", err);
-      return Promise.reject("Failed to inflate and parse the content as JSON.");
+      return Promise.reject("Failed to decompress and parse the content as JSON.");
     }
-    console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Command #:", commands.length);
+    console.log("[CacheFetcher.fetchAllCurated] Done decompressing and parsing. Command #:", commands.length);
 
     const updates: Promise<void>[] = [];
     for (const cmd of commands) {

@@ -1,9 +1,9 @@
 import * as assert from 'assert';
+import { gzipSync } from 'node:zlib';
 import * as vscode from 'vscode';
 import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { Response } from 'node-fetch';
-import * as pako from 'pako';
 import {
 	disposeParserResources,
 	getContextCommandName,
@@ -55,7 +55,7 @@ async function activateExtension(): Promise<vscode.Extension<unknown>> {
 		description: 'x'.repeat(4096),
 		options: [],
 	}));
-	const body = Buffer.from(pako.gzip(JSON.stringify(commands)));
+	const body = gzipSync(JSON.stringify(commands));
 
 	CachingFetcher.prototype.startInitialCuratedFetch = function startInitialCuratedFetch(kind = 'general'): Promise<void> {
 		const internals = this as unknown as {
