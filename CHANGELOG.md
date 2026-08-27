@@ -6,6 +6,7 @@
 - Update the bundled H2O scanner to the pinned and verified v0.6.0 release.
 - Use a POSIX `sh` wrapper so the bundled scanner works in minimal Linux environments such as Alpine.
 - Keep extension activation responsive while common command specifications download in the background.
+- Batch curated Memento writes and coordinate initial cache availability before local help fallback.
 - Add a 10-second timeout to remote specification requests and wait for cache writes and bulk removals to finish.
 - Add automated unit, integration, native-binary, VSIX-content, dependency, and Marketplace release checks.
 - Reorganize the README as a landing page with detailed coverage, platform, security, management, and troubleshooting documentation below the introduction.

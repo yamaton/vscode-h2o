@@ -21,12 +21,12 @@ class FakeMemento implements Memento {
   }
 
   public async update(key: string, value: unknown): Promise<void> {
-    await this.beforeUpdate();
     if (value === undefined) {
       this.values.delete(key);
     } else {
       this.values.set(key, value);
     }
+    await this.beforeUpdate();
   }
 }
 
@@ -81,7 +81,7 @@ suite('CachingFetcher', () => {
     await Promise.resolve();
 
     assert.strictEqual(settled, false);
-    assert.strictEqual(memento.get(CachingFetcher.getKey('git')), undefined);
+    assert.deepStrictEqual(memento.get(CachingFetcher.getKey('git')), local);
 
     releaseUpdate();
     assert.deepStrictEqual(await pendingFetch, local);
@@ -107,6 +107,106 @@ suite('CachingFetcher', () => {
 
     assert.deepStrictEqual(memento.get(CachingFetcher.getKey('git')), existing);
     assert.deepStrictEqual(memento.get(CachingFetcher.getKey('npm')), command('npm', 'remote'));
+  });
+
+  test('starts all curated cache writes before waiting for persistence', async () => {
+    let releaseUpdates!: () => void;
+    const updateGate = new Promise<void>(resolve => {
+      releaseUpdates = resolve;
+    });
+    let updateCalls = 0;
+    const memento = new FakeMemento(async () => {
+      updateCalls += 1;
+      await updateGate;
+    });
+    const commands = [command('git', 'remote'), command('npm', 'remote')];
+    const fetcher = new CachingFetcher(memento, dependencies({
+      fetch: async () => responseWithGzip(commands),
+    }));
+
+    const pending = fetcher.fetchAllCurated();
+    await new Promise<void>(resolve => setImmediate(resolve));
+
+    assert.strictEqual(updateCalls, 2);
+    assert.deepStrictEqual(memento.get(CachingFetcher.getKey('git')), commands[0]);
+    assert.deepStrictEqual(memento.get(CachingFetcher.getKey('npm')), commands[1]);
+
+    releaseUpdates();
+    await pending;
+  });
+
+  test('uses initial curated data without falling back to H2O while persistence finishes', async () => {
+    let releaseResponse!: (response: Response) => void;
+    const response = new Promise<Response>(resolve => {
+      releaseResponse = resolve;
+    });
+    let releaseUpdate!: () => void;
+    const updateGate = new Promise<void>(resolve => {
+      releaseUpdate = resolve;
+    });
+    const memento = new FakeMemento(() => updateGate);
+    let localCalls = 0;
+    const fetcher = new CachingFetcher(memento, dependencies({
+      fetch: async () => response,
+      runLocalCommand: () => {
+        localCalls += 1;
+        return command('git', 'local');
+      },
+    }));
+
+    const initialFetch = fetcher.startInitialCuratedFetch();
+    let initialSettled = false;
+    void initialFetch.then(() => {
+      initialSettled = true;
+    });
+    const commandFetch = fetcher.fetch('git');
+    await Promise.resolve();
+    assert.strictEqual(localCalls, 0);
+
+    const curated = command('git', 'curated');
+    releaseResponse(responseWithGzip([curated]));
+    assert.deepStrictEqual(await commandFetch, curated);
+    assert.strictEqual(localCalls, 0);
+    assert.strictEqual(initialSettled, false);
+
+    releaseUpdate();
+    await initialFetch;
+  });
+
+  test('falls back to H2O after the initial curated request fails', async () => {
+    let localCalls = 0;
+    const local = command('git', 'local');
+    const fetcher = new CachingFetcher(new FakeMemento(), dependencies({
+      fetch: async () => { throw new Error('offline'); },
+      runLocalCommand: () => {
+        localCalls += 1;
+        return local;
+      },
+    }));
+
+    const initialFetch = fetcher.startInitialCuratedFetch();
+    const handledFailure = initialFetch.catch(() => undefined);
+
+    assert.deepStrictEqual(await fetcher.fetch('git'), local);
+    await handledFailure;
+    assert.strictEqual(localCalls, 1);
+  });
+
+  test('does not restore a command removed during the initial download', async () => {
+    let releaseResponse!: (response: Response) => void;
+    const response = new Promise<Response>(resolve => {
+      releaseResponse = resolve;
+    });
+    const fetcher = new CachingFetcher(new FakeMemento(), dependencies({
+      fetch: async () => response,
+    }));
+
+    const initialFetch = fetcher.startInitialCuratedFetch();
+    await fetcher.unset('git');
+    releaseResponse(responseWithGzip([command('git', 'curated')]));
+    await initialFetch;
+
+    assert.deepStrictEqual(fetcher.getList(), []);
   });
 
   test('replaces curated entries when forcing an update', async () => {

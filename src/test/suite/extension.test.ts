@@ -243,6 +243,45 @@ async function verifyProviderTreeOwnership(parser: Parser): Promise<void> {
 	}
 }
 
+async function verifyCompletionRefreshesCommandList(): Promise<void> {
+	const originalFetch = CachingFetcher.prototype.fetch;
+	const originalGetList = CachingFetcher.prototype.getList;
+	const fetchStarted = deferred<void>();
+	const releaseFetch = deferred<void>();
+	let commandListAvailable = false;
+
+	CachingFetcher.prototype.getList = function getList(): string[] {
+		return commandListAvailable ? ['git'] : [];
+	};
+	CachingFetcher.prototype.fetch = async function fetch(): Promise<Command> {
+		fetchStarted.resolve();
+		await releaseFetch.promise;
+		commandListAvailable = true;
+		throw new Error('controlled command lookup failure');
+	};
+
+	try {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'gi',
+		});
+		const completion = vscode.commands.executeCommand<vscode.CompletionList>(
+			'vscode.executeCompletionItemProvider',
+			document.uri,
+			new vscode.Position(0, 2),
+		);
+		await withTimeout(fetchStarted.promise, 5000);
+		releaseFetch.resolve();
+		const completionList = await withTimeout(completion, 5000);
+
+		assert.ok(completionList.items.some(item => completionLabel(item) === 'git'));
+	} finally {
+		releaseFetch.resolve();
+		CachingFetcher.prototype.fetch = originalFetch;
+		CachingFetcher.prototype.getList = originalGetList;
+	}
+}
+
 async function verifyCommandContext(parser: Parser): Promise<void> {
 	const content = [
 		'git status; npm test | grep ok',
@@ -382,6 +421,7 @@ export async function runExtensionTests(): Promise<void> {
 		await verifyIncrementalParsing(parser);
 		await verifyUnrelatedLanguagesAreIgnored(parser);
 		await verifyProviderTreeOwnership(parser);
+		await verifyCompletionRefreshesCommandList();
 	} finally {
 		parser.delete();
 	}

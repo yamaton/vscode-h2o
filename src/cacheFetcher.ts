@@ -106,6 +106,9 @@ export class CachingFetcher {
   static readonly commandListKey = 'h2oFetcher.registered.all';
 
   private readonly dependencies: CachingFetcherDependencies;
+  private readonly removedNames = new Set<string>();
+  private initialCuratedAvailability: Promise<void> | undefined;
+  private initialCuratedCompletion: Promise<void> | undefined;
 
   constructor(
     private memento: Memento,
@@ -143,6 +146,12 @@ export class CachingFetcher {
   // Update Memento record and the name list
   // Pass undefined to remove the value.
   private async updateCache(name: string, command: Command | undefined, logging: boolean = false): Promise<void> {
+    if (command) {
+      this.removedNames.delete(name);
+    } else {
+      this.removedNames.add(name);
+    }
+
     if (logging) {
       console.log(`[CacheFetcher.update] Updating ${name}...`);
       const t0 = new Date();
@@ -164,10 +173,19 @@ export class CachingFetcher {
       return Promise.reject(`Command name too short: ${name}`);
     }
 
-    const cached = this.getCache(name);
+    let cached = this.getCache(name);
     if (cached) {
       console.log('[CacheFetcher.fetch] Fetching from cache:', name);
       return cached as Command;
+    }
+
+    if (this.initialCuratedAvailability) {
+      await this.initialCuratedAvailability;
+      cached = this.getCache(name);
+      if (cached) {
+        console.log('[CacheFetcher.fetch] Fetching from newly available curated cache:', name);
+        return cached;
+      }
     }
 
     console.log('[CacheFetcher.fetch] Fetching from H2O:', name);
@@ -191,8 +209,31 @@ export class CachingFetcher {
   }
 
 
+  public startInitialCuratedFetch(kind = 'general'): Promise<void> {
+    if (this.initialCuratedCompletion) {
+      return this.initialCuratedCompletion;
+    }
+
+    let markAvailable!: () => void;
+    this.initialCuratedAvailability = new Promise<void>(resolve => {
+      markAvailable = resolve;
+    });
+    const completion = this.fetchAllCuratedInternal(kind, false, markAvailable);
+    void completion.then(markAvailable, markAvailable);
+    this.initialCuratedCompletion = completion;
+    return completion;
+  }
+
   // Download the package bundle `kind` and load them to cache
   public async fetchAllCurated(kind = 'general', isForcing = false): Promise<void> {
+    return this.fetchAllCuratedInternal(kind, isForcing);
+  }
+
+  private async fetchAllCuratedInternal(
+    kind: string,
+    isForcing: boolean,
+    markAvailable?: () => void,
+  ): Promise<void> {
     console.log("[CacheFetcher.fetchAllCurated] Started running...");
     const url = `https://github.com/yamaton/h2o-curated-data/raw/main/${kind}.json.gz`;
     const response = await this.fetchResponse(url);
@@ -209,11 +250,14 @@ export class CachingFetcher {
     }
     console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Command #:", commands.length);
 
+    const updates: Promise<void>[] = [];
     for (const cmd of commands) {
-      if (isForcing || this.getCache(cmd.name) === undefined) {
-        await this.updateCache(cmd.name, cmd, false);
+      if (isForcing || (!this.removedNames.has(cmd.name) && this.getCache(cmd.name) === undefined)) {
+        updates.push(this.updateCache(cmd.name, cmd, false));
       }
     }
+    markAvailable?.();
+    await Promise.all(updates);
   }
 
 

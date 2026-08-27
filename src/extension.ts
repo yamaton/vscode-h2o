@@ -35,7 +35,8 @@ export async function activate(context: vscode.ExtensionContext) {
   const trees: TreeCache = {};
   const fetcher = new CachingFetcher(context.globalState);
   await fetcher.init();
-  void fetcher.fetchAllCurated("general").catch(() => {
+  const initialCuratedFetch = fetcher.startInitialCuratedFetch("general");
+  void initialCuratedFetch.catch(() => {
     console.warn("Failed in fetch.fetchAllCurated().");
   });
 
@@ -54,12 +55,6 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         const tree = trees[document.uri.toString()];
         return withTreeCopy(tree, async requestTree => {
-          const commandList = fetcher.getList();
-          let compCommands: vscode.CompletionItem[] = [];
-          if (!!commandList) {
-            compCommands = commandList.map((s) => new vscode.CompletionItem(s));
-          }
-
           // this is an ugly hack to get current Node
           const p = walkbackIfNeeded(document, requestTree.rootNode, position);
           const isCursorTouchingWord = (p === position);
@@ -92,8 +87,9 @@ export async function activate(context: vscode.ExtensionContext) {
           } catch (e) {
             const currentNode = getCurrentNode(requestTree.rootNode, position);
             const currentWord = currentNode.text;
+            const compCommands = fetcher.getList().map(name => new vscode.CompletionItem(name));
             console.info(`[Completion] currentWord = ${currentWord}`);
-            if (!!compCommands && p === position && currentWord.length >= 2) {
+            if (p === position && currentWord.length >= 2) {
               console.info("[Completion] Only command completion is available (2)");
               let compItems = compCommands.filter(cmd => isPrefixOf(currentWord, getLabelString(cmd.label)));
               compItems.forEach(compItem => {
@@ -296,6 +292,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Command Explorer
   const commandListProvider = new CommandListProvider(fetcher);
+  void initialCuratedFetch.then(() => commandListProvider.refresh(), () => undefined);
   vscode.window.registerTreeDataProvider('registeredCommands', commandListProvider);
   vscode.commands.registerCommand('registeredCommands.refreshEntry', () =>
     commandListProvider.refresh()
