@@ -178,7 +178,7 @@
         "typescript": "^5.9.3"
     },
     "dependencies": {
-        "node-fetch": "^2.6.6",
+        "node-fetch": "^3.3.2",
         "web-tree-sitter": "^0.20.8"
     }
 }
