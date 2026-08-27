@@ -285,6 +285,15 @@ async function verifyProviderTreeOwnership(parser: Parser): Promise<void> {
 		activeFetch.result.resolve(commandForProviderRace());
 		const hovers = await withTimeout(hover, 5000);
 		assert.ok(hoverText(hovers).includes('VSCODE_H2O_RACE_DESCRIPTION'));
+		const trustedMarkdown = hovers
+			.flatMap(result => result.contents)
+			.find((content): content is vscode.MarkdownString =>
+				typeof content !== 'string' && 'isTrusted' in content
+			);
+		assert.ok(trustedMarkdown, 'the root command hover must contain trusted Markdown');
+		assert.deepStrictEqual(trustedMarkdown.isTrusted, {
+			enabledCommands: ['h2o.clearCache'],
+		});
 		assert.strictEqual(copyDeleteCounts[1](), 1);
 
 		activeFetch = { started: deferred<void>(), result: deferred<Command>() };

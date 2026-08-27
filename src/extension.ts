@@ -133,7 +133,9 @@ export async function activate(context: vscode.ExtensionContext) {
               const usageText = formatUsage(thisCmd.usage);
               const descText = (thisCmd.description !== thisCmd.name && !tldrText) ? formatDescription(thisCmd.description) : "";
               const msg = new vscode.MarkdownString(`\`${name}\`${descText}${usageText}${tldrText}\n\n[Reset](${clearCacheCommandUri})`);
-              msg.isTrusted = true;
+              msg.isTrusted = {
+                enabledCommands: ['h2o.clearCache'],
+              };
               return new vscode.Hover(msg);
             } else if (cmdSeq.length > 1 && cmdSeq.some((cmd) => cmd.name === currentWord)) {
               // Display a subcommand
