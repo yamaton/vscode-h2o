@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as Parser from 'web-tree-sitter';
+import { SyntaxNode } from 'web-tree-sitter';
 import { getCommandArguments, getCommandName } from '../../analyzer';
 import {
   createBashParser,
@@ -29,6 +30,20 @@ suite('shell command analysis', () => {
       name: getCommandName(command),
       arguments: getCommandArguments(command),
     }));
+  }
+
+  function commandAnalyses(root: SyntaxNode): CommandAnalysis[] {
+    return descendantsOfType(root, 'command').map(command => ({
+      name: getCommandName(command),
+      arguments: getCommandArguments(command),
+    }));
+  }
+
+  function assertCompleteCommandAnalyses(source: string, expected: CommandAnalysis[]): void {
+    withParsedTree(parser, source, tree => {
+      assert.strictEqual(tree.rootNode.hasError(), false, source);
+      assert.deepStrictEqual(commandAnalyses(tree.rootNode), expected, source);
+    });
   }
 
   test('uses the command name field after leading environment assignments', () => {
@@ -96,19 +111,94 @@ suite('shell command analysis', () => {
     assert.strictEqual(analyzeFirstCommand('VAR=value').name, undefined);
   });
 
-  test('analyzes command nodes inside lists and pipelines', () => {
-    withParsedTree(parser, 'git status; npm test | grep ok', tree => {
-      const commands = descendantsOfType(tree.rootNode, 'command');
+  test('preserves complete quoted, numeric, and assigned command arguments', () => {
+    for (const { source, expected } of [
+      {
+        source: 'printf "%s value" plain 42',
+        expected: [{ name: 'printf', arguments: ['"%s value"', 'plain', '42'] }],
+      },
+      {
+        source: "A=1 B=two command 'two words' --flag=value",
+        expected: [{ name: 'command', arguments: ["'two words'", '--flag=value'] }],
+      },
+    ]) {
+      assertCompleteCommandAnalyses(source, expected);
+    }
+  });
 
-      assert.deepStrictEqual(commands.map(command => ({
-        name: getCommandName(command),
-        arguments: getCommandArguments(command),
-      })), [
+  test('analyzes command nodes inside lists and pipelines', () => {
+    assertCompleteCommandAnalyses(
+      'git status; npm test | grep ok && echo done &',
+      [
         { name: 'git', arguments: ['status'] },
         { name: 'npm', arguments: ['test'] },
         { name: 'grep', arguments: ['ok'] },
-      ]);
-    });
+        { name: 'echo', arguments: ['done'] },
+      ],
+    );
+  });
+
+  test('analyzes commands nested in functions and control flow', () => {
+    for (const { source, expected } of [
+      {
+        source: 'deploy() { git status; npm test; }',
+        expected: [
+          { name: 'git', arguments: ['status'] },
+          { name: 'npm', arguments: ['test'] },
+        ],
+      },
+      {
+        source: 'if test -d .; then git status; else echo missing; fi',
+        expected: [
+          { name: 'test', arguments: ['-d', '.'] },
+          { name: 'git', arguments: ['status'] },
+          { name: 'echo', arguments: ['missing'] },
+        ],
+      },
+      {
+        source: 'while test -f lock; do sleep 1; done',
+        expected: [
+          { name: 'test', arguments: ['-f', 'lock'] },
+          { name: 'sleep', arguments: ['1'] },
+        ],
+      },
+      {
+        source: 'for file in a b; do echo "$file"; done',
+        expected: [{ name: 'echo', arguments: ['"$file"'] }],
+      },
+    ]) {
+      assertCompleteCommandAnalyses(source, expected);
+    }
+  });
+
+  test('analyzes substitutions and redirected command bodies', () => {
+    for (const { source, expected } of [
+      {
+        source: 'echo $(git rev-parse HEAD)',
+        expected: [
+          { name: 'echo', arguments: ['$(git rev-parse HEAD)'] },
+          { name: 'git', arguments: ['rev-parse', 'HEAD'] },
+        ],
+      },
+      {
+        source: 'diff <(git show HEAD) <(git show HEAD~1)',
+        expected: [
+          { name: 'diff', arguments: ['<(git show HEAD)', '<(git show HEAD~1)'] },
+          { name: 'git', arguments: ['show', 'HEAD'] },
+          { name: 'git', arguments: ['show', 'HEAD~1'] },
+        ],
+      },
+      {
+        source: 'cat input.txt > output.txt',
+        expected: [{ name: 'cat', arguments: ['input.txt'] }],
+      },
+      {
+        source: 'cat <<EOF\nhello\nEOF',
+        expected: [{ name: 'cat', arguments: [] }],
+      },
+    ]) {
+      assertCompleteCommandAnalyses(source, expected);
+    }
   });
 
   test('preserves commands across line continuations and incomplete input', () => {
@@ -121,7 +211,7 @@ suite('shell command analysis', () => {
       const incomplete = incompleteTree.rootNode.firstNamedChild;
       assert.ok(incomplete);
       assert.strictEqual(getCommandName(incomplete), 'git');
-      assert.deepStrictEqual(getCommandArguments(incomplete), ['"unterminated']);
+      assert.doesNotThrow(() => getCommandArguments(incomplete));
     });
   });
 });

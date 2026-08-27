@@ -15,8 +15,10 @@ import {
 import type { TreeCache } from '../../extension';
 import { CachingFetcher, CachingFetcherDependencies } from '../../cacheFetcher';
 import type { Command } from '../../command';
+import { withParsedTree } from '../parserTestUtils';
 
 const extensionId = 'tetradresearch.vscode-h2o';
+const cursorMarker = '<|cursor|>';
 
 interface InitialCuratedProbe {
 	completion: Promise<void>;
@@ -132,6 +134,52 @@ async function verifyCommandHandlers(): Promise<void> {
 		new vscode.TreeItem('__vscode_h2o_integration_missing__'),
 	);
 	await vscode.commands.executeCommand('h2o.loadCommand', ' ');
+}
+
+interface MarkedSource {
+	content: string;
+	offset: number;
+}
+
+function extractCursor(markedContent: string): MarkedSource {
+	const offset = markedContent.indexOf(cursorMarker);
+	assert.notStrictEqual(offset, -1, 'A cursor marker is required');
+	assert.strictEqual(
+		markedContent.indexOf(cursorMarker, offset + cursorMarker.length),
+		-1,
+		'Only one cursor marker is allowed',
+	);
+	return {
+		content: markedContent.slice(0, offset) + markedContent.slice(offset + cursorMarker.length),
+		offset,
+	};
+}
+
+interface CommandContextObservation {
+	commandName: string | undefined;
+	currentNodeText: string;
+	currentNodeType: string;
+	moved: boolean;
+}
+
+async function observeCommandContext(
+	parser: Parser,
+	markedContent: string,
+	walkback: boolean,
+): Promise<CommandContextObservation> {
+	const { content, offset } = extractCursor(markedContent);
+	const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+	return withParsedTree(parser, content, tree => {
+		const cursor = document.positionAt(offset);
+		const position = walkback ? walkbackIfNeeded(document, tree.rootNode, cursor) : cursor;
+		const currentNode = getCurrentNode(tree.rootNode, position);
+		return {
+			commandName: getContextCommandName(tree.rootNode, position),
+			currentNodeText: currentNode.text,
+			currentNodeType: currentNode.type,
+			moved: !position.isEqual(cursor),
+		};
+	});
 }
 
 interface NodeSnapshot {
@@ -369,37 +417,145 @@ async function verifyCompletionRefreshesCommandList(): Promise<void> {
 }
 
 async function verifyCommandContext(parser: Parser): Promise<void> {
-	const content = [
-		'git status; npm test | grep ok',
-		'git \\',
-		'  --flag',
-		'echo ',
-		'git "unterminated',
-	].join('\n');
-	const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
-	const tree = parser.parse(document.getText());
-	const root = tree.rootNode;
+	const cases: Array<{
+		description: string;
+		markedContent: string;
+		expectedCommandName: string | undefined;
+		expectedNodeText?: string;
+		expectedNodeType?: string;
+	}> = [
+		{
+			description: 'command name',
+			markedContent: `g${cursorMarker}it status`,
+			expectedCommandName: 'git',
+			expectedNodeText: 'git',
+		},
+		{
+			description: 'command argument',
+			markedContent: `git status${cursorMarker}`,
+			expectedCommandName: 'git',
+			expectedNodeText: 'status',
+		},
+		{
+			description: 'argument end before a semicolon',
+			markedContent: `git status${cursorMarker}; npm test`,
+			expectedCommandName: 'git',
+			expectedNodeText: 'status',
+		},
+		{
+			description: 'command after a semicolon',
+			markedContent: `git status; np${cursorMarker}m test`,
+			expectedCommandName: 'npm',
+		},
+		{
+			description: 'command inside a pipeline',
+			markedContent: `npm test | gr${cursorMarker}ep ok`,
+			expectedCommandName: 'grep',
+		},
+		{
+			description: 'quoted argument',
+			markedContent: `printf "%s ${cursorMarker}value" done`,
+			expectedCommandName: 'printf',
+		},
+		{
+			description: 'command after environment assignments',
+			markedContent: `A=1 B=two gi${cursorMarker}t status`,
+			expectedCommandName: 'git',
+		},
+		{
+			description: 'function body',
+			markedContent: `deploy() { gi${cursorMarker}t status; }`,
+			expectedCommandName: 'git',
+		},
+		{
+			description: 'command substitution inside a string',
+			markedContent: `echo "$(gi${cursorMarker}t status)"`,
+			expectedCommandName: 'git',
+		},
+		{
+			description: 'process substitution',
+			markedContent: `diff <(gi${cursorMarker}t show HEAD) file`,
+			expectedCommandName: 'git',
+		},
+		{
+			description: 'if body',
+			markedContent: `if true; then gi${cursorMarker}t status; fi`,
+			expectedCommandName: 'git',
+		},
+		{
+			description: 'while body',
+			markedContent: `while true; do sle${cursorMarker}ep 1; done`,
+			expectedCommandName: 'sleep',
+		},
+		{
+			description: 'redirected command body',
+			markedContent: `cat inp${cursorMarker}ut.txt > output.txt`,
+			expectedCommandName: 'cat',
+		},
+		{
+			description: 'semicolon boundary',
+			markedContent: `git status;${cursorMarker} npm test`,
+			expectedCommandName: undefined,
+			expectedNodeType: ';',
+		},
+	];
 
-	assert.strictEqual(getCurrentNode(root, new vscode.Position(0, 1)).text, 'git');
-	assert.strictEqual(getCurrentNode(root, new vscode.Position(0, 10)).text, 'status');
-	assert.strictEqual(getCurrentNode(root, new vscode.Position(0, 11)).type, ';');
-	assert.strictEqual(getContextCommandName(root, new vscode.Position(0, 13)), 'npm');
-	assert.strictEqual(getContextCommandName(root, new vscode.Position(0, 24)), 'grep');
-	assert.strictEqual(getContextCommandName(root, new vscode.Position(2, 8)), 'git');
+	for (const contextCase of cases) {
+		const observation = await observeCommandContext(parser, contextCase.markedContent, false);
+		assert.strictEqual(observation.commandName, contextCase.expectedCommandName, contextCase.description);
+		if (contextCase.expectedNodeText !== undefined) {
+			assert.strictEqual(observation.currentNodeText, contextCase.expectedNodeText, contextCase.description);
+		}
+		if (contextCase.expectedNodeType !== undefined) {
+			assert.strictEqual(observation.currentNodeType, contextCase.expectedNodeType, contextCase.description);
+		}
+	}
+}
 
-	const afterEchoSpace = new vscode.Position(3, 5);
-	const walkedEchoPosition = walkbackIfNeeded(document, root, afterEchoSpace);
-	assert.deepStrictEqual(walkedEchoPosition, new vscode.Position(3, 4));
-	assert.strictEqual(getContextCommandName(root, walkedEchoPosition), 'echo');
+async function verifyWalkbackCommandContext(parser: Parser): Promise<void> {
+	const cases: Array<{
+		description: string;
+		markedContent: string;
+		expectedCommandName: string | undefined;
+		expectedNodeType?: string;
+		expectedMoved?: boolean;
+	}> = [
+		{
+			description: 'trailing spaces',
+			markedContent: `echo   ${cursorMarker}`,
+			expectedCommandName: 'echo',
+			expectedMoved: true,
+		},
+		{
+			description: 'line continuation',
+			markedContent: `git \\\n  ${cursorMarker}`,
+			expectedCommandName: 'git',
+			expectedMoved: true,
+		},
+		{
+			description: 'incomplete quote',
+			markedContent: `git "unterminated${cursorMarker}`,
+			expectedCommandName: 'git',
+		},
+		{
+			description: 'trailing space after a semicolon',
+			markedContent: `git status;  ${cursorMarker}`,
+			expectedCommandName: undefined,
+			expectedNodeType: ';',
+			expectedMoved: true,
+		},
+	];
 
-	const afterSemicolon = new vscode.Position(0, 11);
-	assert.strictEqual(walkbackIfNeeded(document, root, afterSemicolon), afterSemicolon);
-
-	const incompleteQuoteEnd = new vscode.Position(4, 17);
-	const walkedIncompletePosition = walkbackIfNeeded(document, root, incompleteQuoteEnd);
-	assert.strictEqual(getContextCommandName(root, walkedIncompletePosition), 'git');
-
-	tree.delete();
+	for (const contextCase of cases) {
+		const observation = await observeCommandContext(parser, contextCase.markedContent, true);
+		assert.strictEqual(observation.commandName, contextCase.expectedCommandName, contextCase.description);
+		if (contextCase.expectedNodeType !== undefined) {
+			assert.strictEqual(observation.currentNodeType, contextCase.expectedNodeType, contextCase.description);
+		}
+		if (contextCase.expectedMoved !== undefined) {
+			assert.strictEqual(observation.moved, contextCase.expectedMoved, contextCase.description);
+		}
+	}
 }
 
 async function verifyIterativeWalkback(parser: Parser): Promise<void> {
@@ -686,6 +842,9 @@ suite('Parser and provider behavior', () => {
 	});
 
 	test('resolves command context', async () => verifyCommandContext(parser));
+	test('walks back to command context at incomplete and boundary positions', async () => {
+		await verifyWalkbackCommandContext(parser);
+	});
 	test('iterates without changing walkback results', async () => verifyIterativeWalkback(parser));
 	test('keeps incremental trees equivalent to fresh parses', async () => verifyIncrementalParsing(parser));
 	test('uses pre-edit coordinates for incremental tree edits', async () => verifyIncrementalEditCoordinates(parser));
