@@ -10,7 +10,9 @@ import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription 
 
 const supportedLanguages = ['shellscript', 'bitbake'];
 
-async function initializeParser(): Promise<Parser> {
+export type TreeCache = { [uri: string]: Parser.Tree };
+
+export async function initializeParser(): Promise<Parser> {
   await Parser.init();
   const parser = new Parser;
   const path = `${__dirname}/../tree-sitter-bash.wasm`;
@@ -19,9 +21,18 @@ async function initializeParser(): Promise<Parser> {
   return parser;
 }
 
+async function withTreeCopy<T>(tree: Parser.Tree, operation: (copy: Parser.Tree) => Promise<T>): Promise<T> {
+  const copy = tree.copy();
+  try {
+    return await operation(copy);
+  } finally {
+    copy.delete();
+  }
+}
+
 export async function activate(context: vscode.ExtensionContext) {
   const parser = await initializeParser();
-  const trees: { [uri: string]: Parser.Tree } = {};
+  const trees: TreeCache = {};
   const fetcher = new CachingFetcher(context.globalState);
   await fetcher.init();
   void fetcher.fetchAllCurated("general").catch(() => {
@@ -42,56 +53,58 @@ export async function activate(context: vscode.ExtensionContext) {
           trees[document.uri.toString()] = parser.parse(document.getText());
         }
         const tree = trees[document.uri.toString()];
-        const commandList = fetcher.getList();
-        let compCommands: vscode.CompletionItem[] = [];
-        if (!!commandList) {
-          compCommands = commandList.map((s) => new vscode.CompletionItem(s));
-        }
+        return withTreeCopy(tree, async requestTree => {
+          const commandList = fetcher.getList();
+          let compCommands: vscode.CompletionItem[] = [];
+          if (!!commandList) {
+            compCommands = commandList.map((s) => new vscode.CompletionItem(s));
+          }
 
-        // this is an ugly hack to get current Node
-        const p = walkbackIfNeeded(document, tree.rootNode, position);
-        const isCursorTouchingWord = (p === position);
-        console.log(`[Completion] isCursorTouchingWord: ${isCursorTouchingWord}`);
+          // this is an ugly hack to get current Node
+          const p = walkbackIfNeeded(document, requestTree.rootNode, position);
+          const isCursorTouchingWord = (p === position);
+          console.log(`[Completion] isCursorTouchingWord: ${isCursorTouchingWord}`);
 
-        try {
-          const cmdSeq = await getContextCmdSeq(tree.rootNode, p, fetcher);
-          if (!!cmdSeq && cmdSeq.length) {
-            const deepestCmd = cmdSeq[cmdSeq.length - 1];
-            const compSubcommands = getCompletionsSubcommands(deepestCmd);
-            let compOptions = getCompletionsOptions(document, tree.rootNode, p, cmdSeq);
-            let compItems = [
-              ...compSubcommands,
-              ...compOptions,
-            ];
+          try {
+            const cmdSeq = await getContextCmdSeq(requestTree.rootNode, p, fetcher);
+            if (!!cmdSeq && cmdSeq.length) {
+              const deepestCmd = cmdSeq[cmdSeq.length - 1];
+              const compSubcommands = getCompletionsSubcommands(deepestCmd);
+              let compOptions = getCompletionsOptions(document, requestTree.rootNode, p, cmdSeq);
+              let compItems = [
+                ...compSubcommands,
+                ...compOptions,
+              ];
 
-            if (isCursorTouchingWord) {
-              const currentNode = getCurrentNode(tree.rootNode, position);
-              const currentWord = currentNode.text;
-              compItems = compItems.filter(compItem => isPrefixOf(currentWord, getLabelString(compItem.label)));
+              if (isCursorTouchingWord) {
+                const currentNode = getCurrentNode(requestTree.rootNode, position);
+                const currentWord = currentNode.text;
+                compItems = compItems.filter(compItem => isPrefixOf(currentWord, getLabelString(compItem.label)));
+                compItems.forEach(compItem => {
+                  compItem.range = range(currentNode);
+                });
+                console.info(`[Completion] currentWord: ${currentWord}`);
+              }
+              return compItems;
+            } else {
+              throw new Error("unknown command");
+            }
+          } catch (e) {
+            const currentNode = getCurrentNode(requestTree.rootNode, position);
+            const currentWord = currentNode.text;
+            console.info(`[Completion] currentWord = ${currentWord}`);
+            if (!!compCommands && p === position && currentWord.length >= 2) {
+              console.info("[Completion] Only command completion is available (2)");
+              let compItems = compCommands.filter(cmd => isPrefixOf(currentWord, getLabelString(cmd.label)));
               compItems.forEach(compItem => {
                 compItem.range = range(currentNode);
               });
-              console.info(`[Completion] currentWord: ${currentWord}`);
+              return compItems;
             }
-            return compItems;
-          } else {
-            throw new Error("unknown command");
+            console.warn("[Completion] No completion item is available (1)", e);
+            return Promise.reject("Error: No completion item is available");
           }
-        } catch (e) {
-          const currentNode = getCurrentNode(tree.rootNode, position);
-          const currentWord = currentNode.text;
-          console.info(`[Completion] currentWord = ${currentWord}`);
-          if (!!compCommands && p === position && currentWord.length >= 2) {
-            console.info("[Completion] Only command completion is available (2)");
-            let compItems = compCommands.filter(cmd => isPrefixOf(currentWord, getLabelString(cmd.label)));
-            compItems.forEach(compItem => {
-              compItem.range = range(currentNode);
-            });
-            return compItems;
-          }
-          console.warn("[Completion] No completion item is available (1)", e);
-          return Promise.reject("Error: No completion item is available");
-        }
+        });
       }
     },
     ' ',  // triggerCharacter
@@ -110,74 +123,56 @@ export async function activate(context: vscode.ExtensionContext) {
         trees[document.uri.toString()] = parser.parse(document.getText());
       }
       const tree = trees[document.uri.toString()];
-
-      const currentWord = getCurrentNode(tree.rootNode, position).text;
-      try {
-        const cmdSeq = await getContextCmdSeq(tree.rootNode, position, fetcher);
-        if (!!cmdSeq && cmdSeq.length) {
-          const name = cmdSeq[0].name;
-          if (currentWord === name) {
-            // Display root-level command
-            const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
-            const thisCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
-            const tldrText = formatTldr(thisCmd.tldr);
-            const usageText = formatUsage(thisCmd.usage);
-            const descText = (thisCmd.description !== thisCmd.name && !tldrText) ? formatDescription(thisCmd.description) : "";
-            const msg = new vscode.MarkdownString(`\`${name}\`${descText}${usageText}${tldrText}\n\n[Reset](${clearCacheCommandUri})`);
-            msg.isTrusted = true;
-            return new vscode.Hover(msg);
-          } else if (cmdSeq.length > 1 && cmdSeq.some((cmd) => cmd.name === currentWord)) {
-            // Display a subcommand
-            const thatCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
-            const nameSeq: string[] = [];
-            for (const cmd of cmdSeq) {
-              if (cmd.name !== currentWord) {
-                nameSeq.push(cmd.name);
-              } else {
-                break;
+      return withTreeCopy(tree, async requestTree => {
+        const currentWord = getCurrentNode(requestTree.rootNode, position).text;
+        try {
+          const cmdSeq = await getContextCmdSeq(requestTree.rootNode, position, fetcher);
+          if (!!cmdSeq && cmdSeq.length) {
+            const name = cmdSeq[0].name;
+            if (currentWord === name) {
+              // Display root-level command
+              const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
+              const thisCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
+              const tldrText = formatTldr(thisCmd.tldr);
+              const usageText = formatUsage(thisCmd.usage);
+              const descText = (thisCmd.description !== thisCmd.name && !tldrText) ? formatDescription(thisCmd.description) : "";
+              const msg = new vscode.MarkdownString(`\`${name}\`${descText}${usageText}${tldrText}\n\n[Reset](${clearCacheCommandUri})`);
+              msg.isTrusted = true;
+              return new vscode.Hover(msg);
+            } else if (cmdSeq.length > 1 && cmdSeq.some((cmd) => cmd.name === currentWord)) {
+              // Display a subcommand
+              const thatCmd = cmdSeq.find((cmd) => cmd.name === currentWord)!;
+              const nameSeq: string[] = [];
+              for (const cmd of cmdSeq) {
+                if (cmd.name !== currentWord) {
+                  nameSeq.push(cmd.name);
+                } else {
+                  break;
+                }
               }
+              const cmdPrefixName = nameSeq.join(" ");
+              const usageText = formatUsage(thatCmd.usage);
+              const msg = `${cmdPrefixName} **${thatCmd.name}**\n\n${thatCmd.description}${usageText}`;
+              return new vscode.Hover(new vscode.MarkdownString(msg));
+            } else if (cmdSeq.length) {
+              const opts = getMatchingOption(currentWord, name, cmdSeq);
+              const msg = optsToMessage(opts);
+              return new vscode.Hover(new vscode.MarkdownString(msg));
+            } else {
+              return Promise.reject(`No hover is available for ${currentWord}`);
             }
-            const cmdPrefixName = nameSeq.join(" ");
-            const usageText = formatUsage(thatCmd.usage);
-            const msg = `${cmdPrefixName} **${thatCmd.name}**\n\n${thatCmd.description}${usageText}`;
-            return new vscode.Hover(new vscode.MarkdownString(msg));
-          } else if (cmdSeq.length) {
-            const opts = getMatchingOption(currentWord, name, cmdSeq);
-            const msg = optsToMessage(opts);
-            return new vscode.Hover(new vscode.MarkdownString(msg));
-          } else {
-            return Promise.reject(`No hover is available for ${currentWord}`);
           }
+        } catch (e) {
+          console.log("[Hover] Error: ", e);
+          return Promise.reject("No hover is available");
         }
-      } catch (e) {
-        console.log("[Hover] Error: ", e);
-        return Promise.reject("No hover is available");
-      }
-      return undefined;
+        return undefined;
+      });
     }
   });
 
-  function updateTree(p: Parser, edit: vscode.TextDocumentChangeEvent) {
-    if (edit.document.isClosed || edit.contentChanges.length === 0) { return; }
-
-    const old = trees[edit.document.uri.toString()];
-    if (!!old) {
-      for (const e of edit.contentChanges) {
-        const startIndex = e.rangeOffset;
-        const oldEndIndex = e.rangeOffset + e.rangeLength;
-        const newEndIndex = e.rangeOffset + e.text.length;
-        const indices = [startIndex, oldEndIndex, newEndIndex];
-        const [startPosition, oldEndPosition, newEndPosition] = indices.map(i => asPoint(edit.document.positionAt(i)));
-        const delta = { startIndex, oldEndIndex, newEndIndex, startPosition, oldEndPosition, newEndPosition };
-        old.edit(delta);
-      }
-    }
-    const t = p.parse(edit.document.getText(), old);
-    trees[edit.document.uri.toString()] = t;
-  }
-
   function edit(edit: vscode.TextDocumentChangeEvent) {
-    updateTree(parser, edit);
+    updateTree(parser, trees, edit);
   }
 
   function close(document: vscode.TextDocument) {
@@ -325,6 +320,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(close));
   context.subscriptions.push(compprovider);
   context.subscriptions.push(hoverprovider);
+  context.subscriptions.push({ dispose: () => disposeParserResources(parser, trees) });
 
 }
 
@@ -368,7 +364,7 @@ function range(n: SyntaxNode): vscode.Range {
 // --------------- For Hovers and Completions ----------------------
 
 // Find the deepest node that contains the position in its range.
-function getCurrentNode(n: SyntaxNode, position: vscode.Position): SyntaxNode {
+export function getCurrentNode(n: SyntaxNode, position: vscode.Position): SyntaxNode {
   if (!(range(n).contains(position))) {
     console.error("Out of range!");
   }
@@ -386,7 +382,7 @@ function getCurrentNode(n: SyntaxNode, position: vscode.Position): SyntaxNode {
 // This is just a workround as you cannot reach command node if you start from
 // the position, say, after 'echo '
 // [FIXME] Do not rely on such an ugly hack
-function walkbackIfNeeded(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position): vscode.Position {
+export function walkbackIfNeeded(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position): vscode.Position {
   const thisNode = getCurrentNode(root, position);
   console.debug("[walkbackIfNeeded] thisNode.type: ", thisNode.type);
   if (thisNode.type === ';') {
@@ -406,6 +402,39 @@ function walkbackIfNeeded(document: vscode.TextDocument, root: SyntaxNode, posit
     }
   }
   return position;
+}
+
+export function updateTree(p: Parser, trees: TreeCache, edit: vscode.TextDocumentChangeEvent): void {
+  if (
+    edit.document.isClosed ||
+    edit.contentChanges.length === 0 ||
+    !supportedLanguages.includes(edit.document.languageId)
+  ) { return; }
+
+  const key = edit.document.uri.toString();
+  const old = trees[key];
+  if (!!old) {
+    for (const e of edit.contentChanges) {
+      const startIndex = e.rangeOffset;
+      const oldEndIndex = e.rangeOffset + e.rangeLength;
+      const newEndIndex = e.rangeOffset + e.text.length;
+      const indices = [startIndex, oldEndIndex, newEndIndex];
+      const [startPosition, oldEndPosition, newEndPosition] = indices.map(i => asPoint(edit.document.positionAt(i)));
+      const delta = { startIndex, oldEndIndex, newEndIndex, startPosition, oldEndPosition, newEndPosition };
+      old.edit(delta);
+    }
+  }
+  const t = p.parse(edit.document.getText(), old);
+  trees[key] = t;
+  old?.delete();
+}
+
+export function disposeParserResources(p: Pick<Parser, 'delete'>, trees: TreeCache): void {
+  for (const key of Object.keys(trees)) {
+    trees[key].delete();
+    delete trees[key];
+  }
+  p.delete();
 }
 
 
@@ -451,7 +480,7 @@ function unstackOption(name: string): string[] {
 }
 
 // Get command node inferred from the current position
-function _getContextCommandNode(root: SyntaxNode, position: vscode.Position): SyntaxNode | undefined {
+export function _getContextCommandNode(root: SyntaxNode, position: vscode.Position): SyntaxNode | undefined {
   let currentNode = getCurrentNode(root, position);
   if (currentNode.parent?.type === 'command_name') {
     currentNode = currentNode.parent;
@@ -463,7 +492,7 @@ function _getContextCommandNode(root: SyntaxNode, position: vscode.Position): Sy
 }
 
 // Get command name covering the position if exists
-function getContextCommandName(root: SyntaxNode, position: vscode.Position): string | undefined {
+export function getContextCommandName(root: SyntaxNode, position: vscode.Position): string | undefined {
   const commandNode = _getContextCommandNode(root, position);
   return getCommandName(commandNode);
 }
