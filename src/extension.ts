@@ -12,13 +12,37 @@ const supportedLanguages = ['shellscript', 'bitbake'];
 
 export type TreeCache = { [uri: string]: Parser.Tree };
 
-export async function initializeParser(): Promise<Parser> {
-  await Parser.init();
-  const parser = new Parser;
+export interface ParserInitializationDependencies {
+  init(): Promise<void>;
+  createParser(): Parser;
+  loadLanguage(wasmPath: string): Promise<Parser.Language>;
+}
+
+const defaultParserInitializationDependencies: ParserInitializationDependencies = {
+  init: () => Parser.init(),
+  createParser: () => new Parser(),
+  loadLanguage: wasmPath => Parser.Language.load(wasmPath),
+};
+
+export async function initializeParser(
+  dependencies: ParserInitializationDependencies = defaultParserInitializationDependencies,
+): Promise<Parser> {
+  await dependencies.init();
+  const parser = dependencies.createParser();
   const path = `${__dirname}/../tree-sitter-bash.wasm`;
-  const lang = await Parser.Language.load(path);
-  parser.setLanguage(lang);
-  return parser;
+
+  try {
+    const lang = await dependencies.loadLanguage(path);
+    parser.setLanguage(lang);
+    return parser;
+  } catch (error) {
+    try {
+      parser.delete();
+    } catch (cleanupError) {
+      console.error('[Parser] Failed to delete the parser after initialization failed:', cleanupError);
+    }
+    throw error;
+  }
 }
 
 async function withTreeCopy<T>(tree: Parser.Tree, operation: (copy: Parser.Tree) => Promise<T>): Promise<T> {
@@ -30,9 +54,30 @@ async function withTreeCopy<T>(tree: Parser.Tree, operation: (copy: Parser.Tree)
   }
 }
 
-export async function activate(context: vscode.ExtensionContext) {
-  const parser = await initializeParser();
-  const trees: TreeCache = {};
+export interface ActivationDependencies {
+  initializeParser(): Promise<Parser>;
+}
+
+const defaultActivationDependencies: ActivationDependencies = {
+  initializeParser: () => initializeParser(),
+};
+
+function disposeActivationRegistrations(disposables: vscode.Disposable[]): void {
+  for (let index = disposables.length - 1; index >= 0; index -= 1) {
+    try {
+      disposables[index].dispose();
+    } catch (error) {
+      console.error('[Activation] Failed to roll back a registration:', error);
+    }
+  }
+}
+
+async function registerExtension(
+  context: vscode.ExtensionContext,
+  parser: Parser,
+  trees: TreeCache,
+  activationRegistrations: vscode.Disposable[],
+): Promise<void> {
   const fetcher = new CachingFetcher(context.globalState);
   await fetcher.init();
   const initialCuratedFetch = fetcher.startInitialCuratedFetch("general");
@@ -105,6 +150,7 @@ export async function activate(context: vscode.ExtensionContext) {
     },
     ' ',  // triggerCharacter
   );
+  activationRegistrations.push(compprovider);
 
   const hoverprovider = vscode.languages.registerHoverProvider(supportedLanguages, {
     async provideHover(document, position, token) {
@@ -168,6 +214,7 @@ export async function activate(context: vscode.ExtensionContext) {
       });
     }
   });
+  activationRegistrations.push(hoverprovider);
 
   function edit(edit: vscode.TextDocumentChangeEvent) {
     updateTree(parser, trees, edit);
@@ -206,6 +253,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     return;
   });
+  activationRegistrations.push(loadCommand);
 
 
   // h2o.clearCache: Clear cache of the command `name`
@@ -231,6 +279,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }
     return;
   });
+  activationRegistrations.push(clearCacheCommand);
 
   // h2o.loadCommon: Download the package bundle "common"
   const invokeDownloadingCommon = vscode.commands.registerCommand('h2o.loadCommon', async () => {
@@ -251,6 +300,7 @@ export async function activate(context: vscode.ExtensionContext) {
     void vscode.window.showInformationMessage(msg);
     return;
   });
+  activationRegistrations.push(invokeDownloadingCommon);
 
 
   // h2o.loadBio: Download the command bundle "bio"
@@ -270,6 +320,7 @@ export async function activate(context: vscode.ExtensionContext) {
     void vscode.window.showInformationMessage(msg);
     return;
   });
+  activationRegistrations.push(invokeDownloadingBio);
 
 
   // h2o.removeBio: Remove the command bundle "bio"
@@ -290,37 +341,56 @@ export async function activate(context: vscode.ExtensionContext) {
     void vscode.window.showInformationMessage(msg);
     return;
   });
+  activationRegistrations.push(removeBio);
 
 
   // Command Explorer
   const commandListProvider = new CommandListProvider(fetcher);
   void initialCuratedFetch.then(() => commandListProvider.refresh(), () => undefined);
-  vscode.window.registerTreeDataProvider('registeredCommands', commandListProvider);
-  vscode.commands.registerCommand('registeredCommands.refreshEntry', () =>
-    commandListProvider.refresh()
+  activationRegistrations.push(
+    vscode.window.registerTreeDataProvider('registeredCommands', commandListProvider),
   );
+  activationRegistrations.push(vscode.commands.registerCommand('registeredCommands.refreshEntry', () =>
+    commandListProvider.refresh()
+  ));
 
-  vscode.commands.registerCommand('registeredCommands.removeEntry', async (item: vscode.TreeItem) => {
+  activationRegistrations.push(vscode.commands.registerCommand('registeredCommands.removeEntry', async (item: vscode.TreeItem) => {
     if (!!item && !!item.label) {
       const name = item.label as string;
       console.log(`[registeredCommands.removeEntry] Remove ${name}`);
       await fetcher.unset(name);
       commandListProvider.refresh();
     }
-  });
+  }));
 
 
-  context.subscriptions.push(clearCacheCommand);
-  context.subscriptions.push(loadCommand);
-  context.subscriptions.push(invokeDownloadingCommon);
-  context.subscriptions.push(invokeDownloadingBio);
-  context.subscriptions.push(removeBio);
-  context.subscriptions.push(vscode.workspace.onDidChangeTextDocument(edit));
-  context.subscriptions.push(vscode.workspace.onDidCloseTextDocument(close));
-  context.subscriptions.push(compprovider);
-  context.subscriptions.push(hoverprovider);
-  context.subscriptions.push({ dispose: () => disposeParserResources(parser, trees) });
+  activationRegistrations.push(vscode.workspace.onDidChangeTextDocument(edit));
+  activationRegistrations.push(vscode.workspace.onDidCloseTextDocument(close));
+  context.subscriptions.push(
+    ...activationRegistrations,
+    { dispose: () => disposeParserResources(parser, trees) },
+  );
+}
 
+export async function activate(
+  context: vscode.ExtensionContext,
+  dependencies: ActivationDependencies = defaultActivationDependencies,
+): Promise<void> {
+  const parser = await dependencies.initializeParser();
+  const trees: TreeCache = {};
+  const activationRegistrations: vscode.Disposable[] = [];
+
+  try {
+    await registerExtension(context, parser, trees, activationRegistrations);
+  } catch (error) {
+    disposeActivationRegistrations(activationRegistrations);
+    try {
+      disposeParserResources(parser, trees);
+    } catch (cleanupError) {
+      console.error('[Activation] Failed to clean up parser resources:', cleanupError);
+    }
+    throw error;
+  }
 }
 
 
@@ -458,11 +528,34 @@ export function updateTree(p: Parser, trees: TreeCache, edit: vscode.TextDocumen
 }
 
 export function disposeParserResources(p: Pick<Parser, 'delete'>, trees: TreeCache): void {
+  let firstError: unknown;
+  let failed = false;
+
   for (const key of Object.keys(trees)) {
-    trees[key].delete();
-    delete trees[key];
+    try {
+      trees[key].delete();
+    } catch (error) {
+      if (!failed) {
+        firstError = error;
+        failed = true;
+      }
+    } finally {
+      delete trees[key];
+    }
   }
-  p.delete();
+
+  try {
+    p.delete();
+  } catch (error) {
+    if (!failed) {
+      firstError = error;
+      failed = true;
+    }
+  }
+
+  if (failed) {
+    throw firstError;
+  }
 }
 
 

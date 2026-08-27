@@ -5,6 +5,7 @@ import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { Response } from 'node-fetch';
 import {
+	activate,
 	disposeParserResources,
 	getContextCommandName,
 	getCurrentNode,
@@ -812,6 +813,125 @@ async function verifyParserResourceDisposal(): Promise<void> {
 	assert.deepStrictEqual(Object.keys(trees), []);
 }
 
+async function verifyFailedParserInitializationDisposesParser(): Promise<void> {
+	for (const failurePoint of ['load', 'setLanguage'] as const) {
+		const expectedError = new Error(`controlled ${failurePoint} failure`);
+		let parserDeleteCount = 0;
+		const parser = {
+			delete: () => {
+				parserDeleteCount += 1;
+			},
+			setLanguage: () => {
+				if (failurePoint === 'setLanguage') {
+					throw expectedError;
+				}
+			},
+		} as unknown as Parser;
+
+		await assert.rejects(
+			initializeParser({
+				init: async () => undefined,
+				createParser: () => parser,
+				loadLanguage: async () => {
+					if (failurePoint === 'load') {
+						throw expectedError;
+					}
+					return {} as Parser.Language;
+				},
+			}),
+			error => error === expectedError,
+		);
+		assert.strictEqual(parserDeleteCount, 1, failurePoint);
+	}
+}
+
+async function verifyFailedActivationDisposesParser(): Promise<void> {
+	const expectedError = new Error('controlled activation failure');
+	let parserDeleteCount = 0;
+	const disposalOrder: string[] = [];
+	const parser = {
+		delete: () => {
+			parserDeleteCount += 1;
+		},
+	} as unknown as Parser;
+	const context = {
+		globalState: {},
+		subscriptions: [],
+	} as unknown as vscode.ExtensionContext;
+	const languages = vscode.languages as unknown as {
+		registerCompletionItemProvider: typeof vscode.languages.registerCompletionItemProvider;
+		registerHoverProvider: typeof vscode.languages.registerHoverProvider;
+	};
+	const commands = vscode.commands as unknown as {
+		registerCommand: typeof vscode.commands.registerCommand;
+	};
+	const originalInit = CachingFetcher.prototype.init;
+	const originalStartInitialCuratedFetch = CachingFetcher.prototype.startInitialCuratedFetch;
+	const originalRegisterCompletionItemProvider = languages.registerCompletionItemProvider;
+	const originalRegisterHoverProvider = languages.registerHoverProvider;
+	const originalRegisterCommand = commands.registerCommand;
+
+	CachingFetcher.prototype.init = async () => undefined;
+	CachingFetcher.prototype.startInitialCuratedFetch = async () => undefined;
+	languages.registerCompletionItemProvider = (() => ({
+		dispose: () => disposalOrder.push('completion'),
+	})) as typeof vscode.languages.registerCompletionItemProvider;
+	languages.registerHoverProvider = (() => ({
+		dispose: () => disposalOrder.push('hover'),
+	})) as typeof vscode.languages.registerHoverProvider;
+	commands.registerCommand = (() => {
+		throw expectedError;
+	}) as typeof vscode.commands.registerCommand;
+
+	try {
+		await assert.rejects(
+			activate(context, { initializeParser: async () => parser }),
+			error => error === expectedError,
+		);
+	} finally {
+		CachingFetcher.prototype.init = originalInit;
+		CachingFetcher.prototype.startInitialCuratedFetch = originalStartInitialCuratedFetch;
+		languages.registerCompletionItemProvider = originalRegisterCompletionItemProvider;
+		languages.registerHoverProvider = originalRegisterHoverProvider;
+		commands.registerCommand = originalRegisterCommand;
+	}
+
+	assert.deepStrictEqual(disposalOrder, ['hover', 'completion']);
+	assert.strictEqual(parserDeleteCount, 1);
+	assert.deepStrictEqual(context.subscriptions, []);
+}
+
+function verifyParserResourceDisposalContinuesAfterFailure(): void {
+	const expectedError = new Error('controlled tree deletion failure');
+	let secondTreeDeleteCount = 0;
+	let parserDeleteCount = 0;
+	const trees = {
+		first: {
+			delete: () => {
+				throw expectedError;
+			},
+		},
+		second: {
+			delete: () => {
+				secondTreeDeleteCount += 1;
+			},
+		},
+	} as unknown as TreeCache;
+	const parser = {
+		delete: () => {
+			parserDeleteCount += 1;
+		},
+	};
+
+	assert.throws(
+		() => disposeParserResources(parser, trees),
+		error => error === expectedError,
+	);
+	assert.strictEqual(secondTreeDeleteCount, 1);
+	assert.strictEqual(parserDeleteCount, 1);
+	assert.deepStrictEqual(Object.keys(trees), []);
+}
+
 suiteSetup(async () => {
 	await activateExtension();
 });
@@ -854,5 +974,8 @@ suite('Parser and provider behavior', () => {
 });
 
 suite('Parser resource disposal', () => {
+	test('deletes parsers after initialization fails', verifyFailedParserInitializationDisposesParser);
+	test('deletes parsers after activation fails', verifyFailedActivationDisposesParser);
 	test('deletes cached trees and the parser', verifyParserResourceDisposal);
+	test('continues parser cleanup after a tree deletion fails', verifyParserResourceDisposalContinuesAfterFailure);
 });
