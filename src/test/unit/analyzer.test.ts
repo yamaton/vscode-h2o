@@ -1,73 +1,75 @@
 import * as assert from 'assert';
-import * as path from 'path';
 import * as Parser from 'web-tree-sitter';
-import { SyntaxNode } from 'web-tree-sitter';
 import { getCommandArguments, getCommandName } from '../../analyzer';
+import {
+  createBashParser,
+  descendantsOfType,
+  withFirstNamedNode,
+  withParsedTree,
+} from '../parserTestUtils';
+
+interface CommandAnalysis {
+  name: string | undefined;
+  arguments: string[];
+}
 
 suite('shell command analysis', () => {
   let parser: Parser;
 
   suiteSetup(async () => {
-    await Parser.init();
-    parser = new Parser();
-    const wasmPath = path.resolve(__dirname, '../../../tree-sitter-bash.wasm');
-    parser.setLanguage(await Parser.Language.load(wasmPath));
+    parser = await createBashParser();
   });
 
   suiteTeardown(() => {
-    parser.delete();
+    parser?.delete();
   });
 
-  function parseFirstNode(source: string): SyntaxNode {
-    const node = parser.parse(source).rootNode.firstNamedChild;
-    assert.ok(node, `Expected a syntax node for: ${source}`);
-    return node;
-  }
-
-  function descendantsOfType(node: SyntaxNode, type: string): SyntaxNode[] {
-    const matches = node.type === type ? [node] : [];
-    return matches.concat(...node.children.map(child => descendantsOfType(child, type)));
+  function analyzeFirstCommand(source: string): CommandAnalysis {
+    return withFirstNamedNode(parser, source, command => ({
+      name: getCommandName(command),
+      arguments: getCommandArguments(command),
+    }));
   }
 
   test('uses the command name field after leading environment assignments', () => {
-    const command = parseFirstNode('VAR=value git status --short');
-    assert.strictEqual(getCommandName(command), 'git');
-    assert.deepStrictEqual(getCommandArguments(command), ['status', '--short']);
-    assert.strictEqual(getCommandName(parseFirstNode('A=1 B=2 npm test')), 'npm');
+    const analysis = analyzeFirstCommand('VAR=value git status --short');
+    assert.strictEqual(analysis.name, 'git');
+    assert.deepStrictEqual(analysis.arguments, ['status', '--short']);
+    assert.strictEqual(analyzeFirstCommand('A=1 B=2 npm test').name, 'npm');
   });
 
   test('preserves transparent sudo and nohup wrappers', () => {
-    assert.strictEqual(getCommandName(parseFirstNode('sudo git status')), 'git');
-    assert.strictEqual(getCommandName(parseFirstNode('VAR=value nohup npm test')), 'npm');
+    assert.strictEqual(analyzeFirstCommand('sudo git status').name, 'git');
+    assert.strictEqual(analyzeFirstCommand('VAR=value nohup npm test').name, 'npm');
   });
 
   test('uses an explicit separator to cross sudo options', () => {
-    const command = parseFirstNode('sudo -u root -- git status');
-    assert.strictEqual(getCommandName(command), 'git');
-    assert.deepStrictEqual(getCommandArguments(command), ['status']);
-    assert.strictEqual(getCommandName(parseFirstNode('sudo -- git status')), 'git');
-    assert.strictEqual(getCommandName(parseFirstNode('nohup -- npm test')), 'npm');
+    const analysis = analyzeFirstCommand('sudo -u root -- git status');
+    assert.strictEqual(analysis.name, 'git');
+    assert.deepStrictEqual(analysis.arguments, ['status']);
+    assert.strictEqual(analyzeFirstCommand('sudo -- git status').name, 'git');
+    assert.strictEqual(analyzeFirstCommand('nohup -- npm test').name, 'npm');
   });
 
   test('handles the common separated sudo user option', () => {
-    const command = parseFirstNode('sudo -u username git status');
-    assert.strictEqual(getCommandName(command), 'git');
-    assert.deepStrictEqual(getCommandArguments(command), ['status']);
+    const analysis = analyzeFirstCommand('sudo -u username git status');
+    assert.strictEqual(analysis.name, 'git');
+    assert.deepStrictEqual(analysis.arguments, ['status']);
 
-    const userMatchingSubcommand = parseFirstNode('sudo -u status git');
-    assert.strictEqual(getCommandName(userMatchingSubcommand), 'git');
-    assert.deepStrictEqual(getCommandArguments(userMatchingSubcommand), []);
+    const userMatchingSubcommand = analyzeFirstCommand('sudo -u status git');
+    assert.strictEqual(userMatchingSubcommand.name, 'git');
+    assert.deepStrictEqual(userMatchingSubcommand.arguments, []);
 
-    assert.strictEqual(getCommandName(parseFirstNode('sudo -u username')), undefined);
-    assert.strictEqual(getCommandName(parseFirstNode('sudo -u -- git')), undefined);
+    assert.strictEqual(analyzeFirstCommand('sudo -u username').name, undefined);
+    assert.strictEqual(analyzeFirstCommand('sudo -u -- git').name, undefined);
   });
 
   test('resolves nested wrappers and sudo environment assignments', () => {
-    assert.strictEqual(getCommandName(parseFirstNode('sudo VAR=value git status')), 'git');
-    assert.strictEqual(getCommandName(parseFirstNode('sudo nohup npm test')), 'npm');
-    const command = parseFirstNode('VAR=value nohup sudo -u root -- npm test');
-    assert.strictEqual(getCommandName(command), 'npm');
-    assert.deepStrictEqual(getCommandArguments(command), ['test']);
+    assert.strictEqual(analyzeFirstCommand('sudo VAR=value git status').name, 'git');
+    assert.strictEqual(analyzeFirstCommand('sudo nohup npm test').name, 'npm');
+    const analysis = analyzeFirstCommand('VAR=value nohup sudo -u root -- npm test');
+    assert.strictEqual(analysis.name, 'npm');
+    assert.deepStrictEqual(analysis.arguments, ['test']);
   });
 
   test('does not guess the wrapped command across sudo options without a separator', () => {
@@ -79,45 +81,47 @@ suite('shell command analysis', () => {
       'sudo --version anything',
       'sudo -k anything',
     ]) {
-      const command = parseFirstNode(source);
-      assert.strictEqual(getCommandName(command), undefined, source);
-      assert.deepStrictEqual(getCommandArguments(command), [], source);
+      const analysis = analyzeFirstCommand(source);
+      assert.strictEqual(analysis.name, undefined, source);
+      assert.deepStrictEqual(analysis.arguments, [], source);
     }
   });
 
   test('does not treat wrapper options or assignments as commands when no command follows', () => {
-    assert.strictEqual(getCommandName(parseFirstNode('sudo VAR=value')), undefined);
-    assert.strictEqual(getCommandName(parseFirstNode('nohup --help')), undefined);
+    assert.strictEqual(analyzeFirstCommand('sudo VAR=value').name, undefined);
+    assert.strictEqual(analyzeFirstCommand('nohup --help').name, undefined);
   });
 
   test('does not treat a standalone assignment as a command', () => {
-    assert.strictEqual(getCommandName(parseFirstNode('VAR=value')), undefined);
+    assert.strictEqual(analyzeFirstCommand('VAR=value').name, undefined);
   });
 
   test('analyzes command nodes inside lists and pipelines', () => {
-    const root = parser.parse('git status; npm test | grep ok').rootNode;
-    const commands = descendantsOfType(root, 'command');
+    withParsedTree(parser, 'git status; npm test | grep ok', tree => {
+      const commands = descendantsOfType(tree.rootNode, 'command');
 
-    assert.deepStrictEqual(commands.map(command => ({
-      name: getCommandName(command),
-      arguments: getCommandArguments(command),
-    })), [
-      { name: 'git', arguments: ['status'] },
-      { name: 'npm', arguments: ['test'] },
-      { name: 'grep', arguments: ['ok'] },
-    ]);
+      assert.deepStrictEqual(commands.map(command => ({
+        name: getCommandName(command),
+        arguments: getCommandArguments(command),
+      })), [
+        { name: 'git', arguments: ['status'] },
+        { name: 'npm', arguments: ['test'] },
+        { name: 'grep', arguments: ['ok'] },
+      ]);
+    });
   });
 
   test('preserves commands across line continuations and incomplete input', () => {
-    const continued = parseFirstNode('git \\\n  --flag');
-    assert.strictEqual(getCommandName(continued), 'git');
-    assert.deepStrictEqual(getCommandArguments(continued), ['--flag']);
+    const continued = analyzeFirstCommand('git \\\n  --flag');
+    assert.strictEqual(continued.name, 'git');
+    assert.deepStrictEqual(continued.arguments, ['--flag']);
 
-    const incompleteTree = parser.parse('git "unterminated');
-    assert.strictEqual(incompleteTree.rootNode.hasError(), true);
-    const incomplete = incompleteTree.rootNode.firstNamedChild;
-    assert.ok(incomplete);
-    assert.strictEqual(getCommandName(incomplete), 'git');
-    assert.deepStrictEqual(getCommandArguments(incomplete), ['"unterminated']);
+    withParsedTree(parser, 'git "unterminated', incompleteTree => {
+      assert.strictEqual(incompleteTree.rootNode.hasError(), true);
+      const incomplete = incompleteTree.rootNode.firstNamedChild;
+      assert.ok(incomplete);
+      assert.strictEqual(getCommandName(incomplete), 'git');
+      assert.deepStrictEqual(getCommandArguments(incomplete), ['"unterminated']);
+    });
   });
 });
