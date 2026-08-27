@@ -24,6 +24,20 @@ assert.match(wrapper, /^#!\/bin\/sh\n/, 'bin/wrap-h2o must use the POSIX sh inte
 const wrapperSyntax = spawnSync('/bin/sh', ['-n', wrapperPath], { encoding: 'utf8', timeout: 5000 });
 assert.strictEqual(wrapperSyntax.status, 0, `bin/wrap-h2o is not valid POSIX shell syntax: ${wrapperSyntax.stderr}`);
 
+const sandboxProfile = readFileSync(path.join(projectRoot, 'bin/profile.sb'), 'utf8');
+assert.strictEqual(
+  sandboxProfile,
+  `(version 1)
+(allow default)
+(deny file-write*)
+(allow file-write*
+    (literal "/dev/null")
+    (literal "/dev/full"))
+(deny network*)
+`,
+  'bin/profile.sb must restrict macOS write access to /dev/null and /dev/full',
+);
+
 const wrapperFixtureDir = mkdtempSync(path.join(tmpdir(), 'vscode-h2o-wrapper-'));
 try {
   const mockH2o = path.join(wrapperFixtureDir, 'mock h2o');

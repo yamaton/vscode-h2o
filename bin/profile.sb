@@ -1,5 +1,7 @@
 (version 1)
 (allow default)
 (deny file-write*)
-(deny file-write-data)
+(allow file-write*
+    (literal "/dev/null")
+    (literal "/dev/full"))
 (deny network*)
