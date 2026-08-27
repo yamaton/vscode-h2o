@@ -1,0 +1,40 @@
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      runtime-dependencies:
+        dependency-type: production
+        exclude-patterns:
+          - web-tree-sitter
+        update-types:
+          - minor
+          - patch
+      development-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Keep the API types aligned with the minimum supported VS Code version.
+      - dependency-name: "@types/vscode"
+      # Keep Node.js types aligned with the minimum supported VS Code runtime.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
