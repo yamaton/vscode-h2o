@@ -19,6 +19,15 @@ updates:
           - minor
           - patch
     ignore:
+      # node-fetch v3 is ESM-only and removes the v2 timeout option used here.
+      - dependency-name: node-fetch
+        update-types:
+          - version-update:semver-major
+      # Keep the parser on the compatible 0.20.x API; pre-1.0 bumps are breaking.
+      - dependency-name: web-tree-sitter
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-major
       # Keep the API types aligned with the minimum supported VS Code version.
       - dependency-name: "@types/vscode"
       # Keep Node.js types aligned with the minimum supported VS Code runtime.
