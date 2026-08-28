@@ -5,6 +5,7 @@ import {
   getCommandArguments,
   getCommandInvocationToPosition,
   getCommandName,
+  isCommandTokenNode,
 } from '../../analyzer';
 import {
   createBashParser,
@@ -210,6 +211,18 @@ suite('shell command analysis', () => {
         expected: [{ name: 'cat', arguments: ['input.txt'] }],
       },
       {
+        source: 'git 2> errors.log --owned-by-redirect',
+        expected: [{ name: 'git', arguments: [] }],
+      },
+      {
+        source: 'cat input.txt <<< payload trailing.txt',
+        expected: [{ name: 'cat', arguments: ['input.txt', 'trailing.txt'] }],
+      },
+      {
+        source: 'sudo <<< input git status',
+        expected: [{ name: 'git', arguments: ['status'] }],
+      },
+      {
         source: 'cat <<EOF\nhello\nEOF',
         expected: [{ name: 'cat', arguments: [] }],
       },
@@ -229,6 +242,28 @@ suite('shell command analysis', () => {
       assert.ok(incomplete);
       assert.strictEqual(getCommandName(incomplete), 'git');
       assert.doesNotThrow(() => getCommandArguments(incomplete));
+    });
+  });
+
+  test('identifies command tokens by grammar fields instead of concrete node types', () => {
+    withFirstNamedNode(parser, 'tool 42 "two words" a${value}b <<< input', command => {
+      const name = command.childForFieldName('name');
+      assert.ok(name?.firstNamedChild);
+      assert.strictEqual(isCommandTokenNode(name.firstNamedChild), true);
+
+      const arguments_ = command.childrenForFieldName('argument');
+      assert.deepStrictEqual(arguments_.map(argument => argument.type), [
+        'number',
+        'string',
+        'concatenation',
+      ]);
+      for (const argument of arguments_) {
+        assert.strictEqual(isCommandTokenNode(argument.firstNamedChild ?? argument), true);
+      }
+
+      const redirect = command.childForFieldName('redirect');
+      assert.ok(redirect?.lastNamedChild);
+      assert.strictEqual(isCommandTokenNode(redirect.lastNamedChild), false);
     });
   });
 

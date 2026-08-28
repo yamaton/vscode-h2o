@@ -3,40 +3,51 @@ import { Node, Point } from 'web-tree-sitter';
 const transparentCommandWrappers = new Set(['sudo', 'nohup']);
 const environmentAssignment = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
-function skipEnvironmentAssignments(node: Node | null): Node | null {
+type NextCommandArgument = (node: Node) => Node | null;
+
+function skipEnvironmentAssignments(
+  node: Node | null,
+  nextCommandArgument: NextCommandArgument,
+): Node | null {
   while (node && environmentAssignment.test(node.text)) {
-    node = node.nextNamedSibling;
+    node = nextCommandArgument(node);
   }
   return node;
 }
 
-function getSudoCommandNode(nameNode: Node): Node | null {
-  let node = skipEnvironmentAssignments(nameNode.nextNamedSibling);
+function getSudoCommandNode(
+  nameNode: Node,
+  nextCommandArgument: NextCommandArgument,
+): Node | null {
+  let node = skipEnvironmentAssignments(nextCommandArgument(nameNode), nextCommandArgument);
 
   if (node?.text === '-u') {
-    const user = node.nextNamedSibling;
+    const user = nextCommandArgument(node);
     if (!user || user.text.startsWith('-')) {
       return null;
     }
-    node = skipEnvironmentAssignments(user.nextNamedSibling);
+    node = skipEnvironmentAssignments(nextCommandArgument(user), nextCommandArgument);
   }
 
   if (node?.text.startsWith('-') && node.text !== '-') {
     // tree-sitter-bash cannot distinguish sudo option arguments, action modes,
     // and the wrapped command. Only cross an option list at an explicit boundary.
     while (node && node.text !== '--') {
-      node = node.nextNamedSibling;
+      node = nextCommandArgument(node);
     }
-    node = node?.nextNamedSibling ?? null;
+    node = node ? nextCommandArgument(node) : null;
   }
 
-  return skipEnvironmentAssignments(node);
+  return skipEnvironmentAssignments(node, nextCommandArgument);
 }
 
-function getNohupCommandNode(nameNode: Node): Node | null {
-  const node = nameNode.nextNamedSibling;
+function getNohupCommandNode(
+  nameNode: Node,
+  nextCommandArgument: NextCommandArgument,
+): Node | null {
+  const node = nextCommandArgument(nameNode);
   if (node?.text === '--') {
-    return node.nextNamedSibling;
+    return nextCommandArgument(node);
   }
   if (node?.text.startsWith('-')) {
     return null;
@@ -44,10 +55,15 @@ function getNohupCommandNode(nameNode: Node): Node | null {
   return node;
 }
 
-function getWrappedCommandNode(nameNode: Node): Node | null {
+function getWrappedCommandNode(
+  nameNode: Node,
+  nextCommandArgument: NextCommandArgument,
+): Node | null {
   let node: Node | null = nameNode;
   while (node && transparentCommandWrappers.has(node.text)) {
-    node = node.text === 'sudo' ? getSudoCommandNode(node) : getNohupCommandNode(node);
+    node = node.text === 'sudo'
+      ? getSudoCommandNode(node, nextCommandArgument)
+      : getNohupCommandNode(node, nextCommandArgument);
   }
   return node;
 }
@@ -73,21 +89,30 @@ function getCommandInvocation(commandNode: Node | null | undefined): CommandInvo
     return undefined;
   }
 
-  const commandNameNode = getWrappedCommandNode(nameNode);
+  const argumentNodes = commandNode.childrenForFieldName('argument');
+  const argumentIndexById = new Map(argumentNodes.map((node, index) => [node.id, index]));
+  const nextCommandArgument: NextCommandArgument = node => {
+    const index = argumentIndexById.get(node.id);
+    if (index !== undefined) {
+      return argumentNodes[index + 1] ?? null;
+    }
+    return node.equals(nameNode) ? argumentNodes[0] ?? null : null;
+  };
+
+  const commandNameNode = getWrappedCommandNode(nameNode, nextCommandArgument);
   if (!commandNameNode) {
     return undefined;
   }
 
-  const args: CommandWord[] = [];
-  let node = commandNameNode.nextNamedSibling;
-  while (node) {
-    args.push({
-      text: node.text,
-      startPosition: node.startPosition,
-      endPosition: node.endPosition,
-    });
-    node = node.nextNamedSibling;
-  }
+  const commandNameArgumentIndex = argumentIndexById.get(commandNameNode.id);
+  const firstArgumentIndex = commandNameArgumentIndex === undefined
+    ? 0
+    : commandNameArgumentIndex + 1;
+  const args: CommandWord[] = argumentNodes.slice(firstArgumentIndex).map(node => ({
+    text: node.text,
+    startPosition: node.startPosition,
+    endPosition: node.endPosition,
+  }));
   return {
     name: {
       text: commandNameNode.text,
@@ -96,6 +121,34 @@ function getCommandInvocation(commandNode: Node | null | undefined): CommandInvo
     },
     arguments: args,
   };
+}
+
+/**
+ * Returns whether a syntax node belongs to a command name or argument field.
+ * Concrete token node types are deliberately ignored because tree-sitter-bash
+ * refines them (for example, `word` into `number` or `concatenation`).
+ */
+export function isCommandTokenNode(node: Node): boolean {
+  let child = node;
+  let parent = child.parent;
+  while (parent) {
+    if (parent.type === 'command') {
+      if (parent.childForFieldName('name')?.equals(child)) {
+        return true;
+      }
+      return parent.childrenForFieldName('argument').some(argument => argument.equals(child));
+    }
+    if (
+      parent.type === 'command_substitution'
+      || parent.type === 'process_substitution'
+      || parent.type === 'subshell'
+    ) {
+      return false;
+    }
+    child = parent;
+    parent = child.parent;
+  }
+  return false;
 }
 
 function comparePoints(left: Point, right: Point): number {

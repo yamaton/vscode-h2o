@@ -9,6 +9,7 @@ import {
 	getContextCommandName,
 	getCurrentNode,
 	initializeParser,
+	isProviderSuppressedAtPosition,
 	updateTree,
 	walkbackIfNeeded,
 } from '../../extension';
@@ -675,15 +676,105 @@ async function verifyEditorFacingParserCompatibility(): Promise<void> {
 	try {
 		const unicodeOption = await optionCompletion('echo 😀あ; git --v');
 		assert.deepStrictEqual(unicodeOption.range, new vscode.Range(0, 14, 0, 17));
-
-		for (const incomplete of [
-			'git "unterminated',
-			'git \\\r\n  ',
-		]) {
-			await optionCompletion(incomplete);
-		}
 	} finally {
 		CachingFetcher.prototype.fetch = originalFetch;
+	}
+}
+
+async function verifyProviderSuppressionRegions(): Promise<void> {
+	const originalFetch = CachingFetcher.prototype.fetch;
+	const originalGetList = CachingFetcher.prototype.getList;
+	const commands = new Map<string, Command>([
+		['git', cursorEditCommand('git')],
+		['npm', cursorEditCommand('npm')],
+	]);
+	let fetchCount = 0;
+	let getListCount = 0;
+
+	CachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+		fetchCount += 1;
+		const command = commands.get(name);
+		assert.ok(command, `unexpected command lookup in provider suppression test: ${name}`);
+		return command;
+	};
+	CachingFetcher.prototype.getList = function getList(): string[] {
+		getListCount += 1;
+		return [...commands.keys()];
+	};
+
+	async function assertSuppressed(markedContent: string): Promise<void> {
+		const { content, offset } = extractCursor(markedContent);
+		const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+		const position = document.positionAt(offset);
+		const fetchCountBefore = fetchCount;
+		const getListCountBefore = getListCount;
+
+		const completion = await completionLabelsAt(document, position);
+		const hover = await hoverTextAt(document, position);
+		assert.ok(!completion.labels.includes('--cursor-git'), markedContent);
+		assert.ok(!completion.labels.includes('--cursor-npm'), markedContent);
+		assert.ok(!hover.includes('CURSOR_EDIT_'), markedContent);
+		assert.strictEqual(fetchCount, fetchCountBefore, markedContent);
+		assert.strictEqual(getListCount, getListCountBefore, markedContent);
+	}
+
+	try {
+		for (const markedContent of [
+			`git 2> errors${cursorMarker}.log --cursor-git`,
+			`git 2> errors.log ${cursorMarker}`,
+			`git <<< pay${cursorMarker}load --cursor-git`,
+			`cat <<EOF\nhel${cursorMarker}lo\nEOF`,
+			`cat <<EOF\nhello\nE${cursorMarker}OF`,
+			`git "unterminated${cursorMarker}`,
+			`if git; then${cursorMarker}`,
+		]) {
+			await assertSuppressed(markedContent);
+		}
+
+		for (const content of [
+			'git --cursor- 2> errors.log',
+			'git --cursor- <<< input',
+			'git --cursor- <<EOF\nbody\nEOF',
+		]) {
+			const beforeRedirect = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+			const optionEnd = content.indexOf(' --cursor-') + ' --cursor-'.length;
+			assert.ok(
+				(await completionLabelsAt(beforeRedirect, beforeRedirect.positionAt(optionEnd)))
+					.labels.includes('--cursor-git'),
+				content,
+			);
+			assert.match(
+				await hoverTextAt(beforeRedirect, new vscode.Position(0, 1)),
+				/CURSOR_EDIT_GIT_DESCRIPTION/,
+			);
+		}
+
+		const afterFileRedirect = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git 2> errors.log; npm --cursor-',
+		});
+		assert.ok((await completionLabelsAt(afterFileRedirect)).labels.includes('--cursor-npm'));
+		assert.match(
+			await hoverTextAt(afterFileRedirect, new vscode.Position(0, 20)),
+			/CURSOR_EDIT_NPM_DESCRIPTION/,
+		);
+
+		for (const content of [
+			'git <<< input ',
+			'git <<< input --cursor-',
+		]) {
+			const afterHerestring = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+			assert.ok((await completionLabelsAt(afterHerestring)).labels.includes('--cursor-git'), content);
+		}
+
+		const afterHeredoc = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'cat <<EOF\nbody\nEOF\nnpm --cursor-',
+		});
+		assert.ok((await completionLabelsAt(afterHeredoc)).labels.includes('--cursor-npm'));
+	} finally {
+		CachingFetcher.prototype.fetch = originalFetch;
+		CachingFetcher.prototype.getList = originalGetList;
 	}
 }
 
@@ -694,6 +785,15 @@ async function verifyCursorBehaviorAcrossEdits(parser: Parser): Promise<void> {
 		['git', cursorEditCommand('git')],
 		['npm', cursorEditCommand('npm')],
 		['docker', hierarchicalDockerCommand()],
+		['echo', {
+			name: 'echo',
+			description: 'CURSOR_EDIT_ECHO_DESCRIPTION',
+			options: [{
+				names: ['--cursor-echo'],
+				argument: '',
+				description: 'option for echo cursor/edit compatibility',
+			}],
+		}],
 	]);
 	const treeCaches: TreeCache[] = [];
 
@@ -747,6 +847,36 @@ async function verifyCursorBehaviorAcrossEdits(parser: Parser): Promise<void> {
 		}
 
 		return observation;
+	}
+
+	async function assertProviderSuppressed(
+		document: vscode.TextDocument,
+		trees: TreeCache,
+		cursor = document.positionAt(document.getText().length),
+	): Promise<vscode.Position> {
+		const cachedTree = trees[document.uri.toString()];
+		assert.ok(cachedTree);
+		const cachedPosition = walkbackIfNeeded(document, cachedTree.rootNode, cursor);
+		assert.strictEqual(
+			isProviderSuppressedAtPosition(cachedTree.rootNode, cachedPosition),
+			true,
+			document.getText(),
+		);
+
+		withParsedTree(parser, document.getText(), freshTree => {
+			const freshPosition = walkbackIfNeeded(document, freshTree.rootNode, cursor);
+			assert.deepStrictEqual(cachedPosition, freshPosition, document.getText());
+			assert.strictEqual(
+				isProviderSuppressedAtPosition(freshTree.rootNode, freshPosition),
+				true,
+				document.getText(),
+			);
+		});
+
+		const completion = await completionLabelsAt(document, cursor);
+		assert.ok(!completion.labels.some(label => label.startsWith('--cursor-')), document.getText());
+		assert.ok(!(await hoverTextAt(document, cursor)).includes('CURSOR_EDIT_'), document.getText());
+		return cachedPosition;
 	}
 
 	try {
@@ -817,6 +947,46 @@ async function verifyCursorBehaviorAcrossEdits(parser: Parser): Promise<void> {
 		await replaceSeparator('');
 		await assertOptionCompletion(separatorDocument, separatorTrees, 'git', new vscode.Range(0, 8, 0, 17));
 
+		const recoveryDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'if true; then git status; else echo missing; fi',
+		});
+		const recoveryTrees = createTreeCache(recoveryDocument);
+		let echoOffset = recoveryDocument.getText().indexOf('echo');
+		assert.ok(echoOffset >= 0);
+		assert.match(
+			await hoverTextAt(recoveryDocument, recoveryDocument.positionAt(echoOffset + 2)),
+			/CURSOR_EDIT_ECHO_DESCRIPTION/,
+		);
+
+		let recoveryEdit = new vscode.WorkspaceEdit();
+		recoveryEdit.insert(recoveryDocument.uri, new vscode.Position(0, 12), 'x');
+		await applyTrackedEdit(parser, recoveryTrees, recoveryDocument, recoveryEdit);
+		echoOffset = recoveryDocument.getText().indexOf('echo');
+		assert.ok(echoOffset >= 0);
+		await assertProviderSuppressed(
+			recoveryDocument,
+			recoveryTrees,
+			recoveryDocument.positionAt(echoOffset + 2),
+		);
+
+		recoveryEdit = new vscode.WorkspaceEdit();
+		recoveryEdit.delete(recoveryDocument.uri, new vscode.Range(0, 12, 0, 13));
+		await applyTrackedEdit(parser, recoveryTrees, recoveryDocument, recoveryEdit);
+		echoOffset = recoveryDocument.getText().indexOf('echo');
+		assert.ok(echoOffset >= 0);
+		assertCachedCursorMatchesFresh(
+			parser,
+			recoveryTrees,
+			recoveryDocument,
+			recoveryDocument.positionAt(echoOffset + 2),
+			false,
+		);
+		assert.match(
+			await hoverTextAt(recoveryDocument, recoveryDocument.positionAt(echoOffset + 2)),
+			/CURSOR_EDIT_ECHO_DESCRIPTION/,
+		);
+
 		const hierarchyDocument = await vscode.workspace.openTextDocument({
 			language: 'shellscript',
 			content: 'docker ru',
@@ -874,7 +1044,7 @@ async function verifyCursorBehaviorAcrossEdits(parser: Parser): Promise<void> {
 		let edit = new vscode.WorkspaceEdit();
 		edit.insert(incompleteDocument.uri, incompleteDocument.positionAt(incompleteDocument.getText().length), '"unterminated');
 		await applyTrackedEdit(parser, incompleteTrees, incompleteDocument, edit);
-		await assertOptionCompletion(incompleteDocument, incompleteTrees, 'git', undefined);
+		await assertProviderSuppressed(incompleteDocument, incompleteTrees);
 
 		edit = new vscode.WorkspaceEdit();
 		edit.insert(incompleteDocument.uri, incompleteDocument.positionAt(incompleteDocument.getText().length), '" ');
@@ -887,7 +1057,7 @@ async function verifyCursorBehaviorAcrossEdits(parser: Parser): Promise<void> {
 			incompleteDocument.positionAt(incompleteDocument.getText().length),
 		));
 		await applyTrackedEdit(parser, incompleteTrees, incompleteDocument, edit);
-		await assertOptionCompletion(incompleteDocument, incompleteTrees, 'git', undefined);
+		await assertProviderSuppressed(incompleteDocument, incompleteTrees);
 
 		edit = new vscode.WorkspaceEdit();
 		edit.replace(
@@ -910,9 +1080,9 @@ async function verifyCursorBehaviorAcrossEdits(parser: Parser): Promise<void> {
 			assert.deepStrictEqual(pipelineBoundary.currentNodeStart, { line: 0, character: 4 });
 			assert.deepStrictEqual(pipelineBoundary.currentNodeEnd, { line: 0, character: 5 });
 		}
-		const missingCommand = await assertOptionCompletion(incompleteDocument, incompleteTrees, 'git', undefined);
-		assert.strictEqual(missingCommand.resolvedPosition.character, 3);
-		assert.strictEqual(missingCommand.moved, true);
+		const missingCommandPosition = await assertProviderSuppressed(incompleteDocument, incompleteTrees);
+		assert.strictEqual(missingCommandPosition.character, 5);
+		assert.strictEqual(missingCommandPosition.isEqual(new vscode.Position(0, 8)), false);
 
 		edit = new vscode.WorkspaceEdit();
 		edit.insert(
@@ -963,7 +1133,7 @@ async function verifyCursorBehaviorAcrossEdits(parser: Parser): Promise<void> {
 			content: 'git \\\r\n  ',
 		});
 		const continuationTrees = createTreeCache(continuationDocument);
-		await assertOptionCompletion(continuationDocument, continuationTrees, 'git', undefined);
+		await assertProviderSuppressed(continuationDocument, continuationTrees);
 
 		edit = new vscode.WorkspaceEdit();
 		edit.delete(continuationDocument.uri, new vscode.Range(
@@ -978,7 +1148,7 @@ async function verifyCursorBehaviorAcrossEdits(parser: Parser): Promise<void> {
 		edit.insert(continuationDocument.uri, new vscode.Position(0, 4), '\\\r\n  ');
 		await applyTrackedEdit(parser, continuationTrees, continuationDocument, edit);
 		assert.strictEqual(continuationDocument.getText(), 'git \\\r\n  ');
-		await assertOptionCompletion(continuationDocument, continuationTrees, 'git', undefined);
+		await assertProviderSuppressed(continuationDocument, continuationTrees);
 	} finally {
 		for (const trees of treeCaches) {
 			for (const tree of Object.values(trees)) {
@@ -1213,13 +1383,33 @@ async function verifyWalkbackCommandContext(parser: Parser): Promise<void> {
 		{
 			description: 'line continuation',
 			markedContent: `git \\\n  ${cursorMarker}`,
-			expectedCommandName: 'git',
-			expectedMoved: true,
+			expectedCommandName: undefined,
+			expectedMoved: false,
 		},
 		{
 			description: 'incomplete quote',
 			markedContent: `git "unterminated${cursorMarker}`,
-			expectedCommandName: 'git',
+			expectedCommandName: undefined,
+			expectedMoved: false,
+		},
+		{
+			description: 'numeric argument subtype',
+			markedContent: `tool 42   ${cursorMarker}`,
+			expectedCommandName: 'tool',
+			expectedNodeType: 'number',
+			expectedMoved: true,
+		},
+		{
+			description: 'quoted argument subtype',
+			markedContent: `tool "two words"   ${cursorMarker}`,
+			expectedCommandName: 'tool',
+			expectedMoved: true,
+		},
+		{
+			description: 'concatenated argument subtype',
+			markedContent: `tool a\${value}b   ${cursorMarker}`,
+			expectedCommandName: 'tool',
+			expectedMoved: true,
 		},
 		{
 			description: 'trailing space after a semicolon',
@@ -1243,12 +1433,12 @@ async function verifyWalkbackCommandContext(parser: Parser): Promise<void> {
 }
 
 async function verifyIterativeWalkback(parser: Parser): Promise<void> {
-	for (const content of [
-		'tool alpha |   ',
-		'tool alpha |&   ',
-		'tool alpha &&   ',
-		'tool alpha ||   ',
-		'tool alpha &   ',
+	for (const { content, expectedCharacter, expectedCommandName } of [
+		{ content: 'tool alpha |   ', expectedCharacter: 12, expectedCommandName: undefined },
+		{ content: 'tool alpha |&   ', expectedCharacter: 13, expectedCommandName: undefined },
+		{ content: 'tool alpha &&   ', expectedCharacter: 13, expectedCommandName: undefined },
+		{ content: 'tool alpha ||   ', expectedCharacter: 13, expectedCommandName: undefined },
+		{ content: 'tool alpha &   ', expectedCharacter: 10, expectedCommandName: 'tool' },
 	]) {
 		const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
 		const tree = parseTree(parser, document.getText());
@@ -1258,8 +1448,8 @@ async function verifyIterativeWalkback(parser: Parser): Promise<void> {
 				tree.rootNode,
 				document.positionAt(content.length),
 			);
-			assert.deepStrictEqual(walked, new vscode.Position(0, 10));
-			assert.strictEqual(getContextCommandName(tree.rootNode, walked), 'tool');
+			assert.deepStrictEqual(walked, new vscode.Position(0, expectedCharacter));
+			assert.strictEqual(getContextCommandName(tree.rootNode, walked), expectedCommandName);
 		} finally {
 			tree.delete();
 		}
@@ -1733,7 +1923,8 @@ suite('Parser and provider behavior', () => {
 	});
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
 	test('refreshes command names after asynchronous lookup', verifyCompletionRefreshesCommandList);
-	test('preserves editor-facing ranges and incomplete-input completions', verifyEditorFacingParserCompatibility);
+	test('preserves editor-facing Unicode ranges', verifyEditorFacingParserCompatibility);
+	test('suppresses providers inside redirects and parser recovery regions', verifyProviderSuppressionRegions);
 	test('preserves cursor behavior across incremental edits', async () => {
 		await verifyCursorBehaviorAcrossEdits(parser);
 	});

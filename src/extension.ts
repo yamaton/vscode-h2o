@@ -15,6 +15,7 @@ import {
   CommandWord,
   getCommandInvocationToPosition,
   getCommandName,
+  isCommandTokenNode,
 } from './analyzer';
 import { loadLanguageOnce } from './parserLanguage';
 import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription } from './utils';
@@ -22,6 +23,11 @@ import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription 
 
 const supportedLanguages = ['shellscript', 'bitbake'];
 const nestedCommandScopeBoundaries = new Set(['command_substitution', 'process_substitution', 'subshell']);
+const providerSuppressedNodeTypes = new Set([
+  'file_redirect',
+  'herestring_redirect',
+  'heredoc_redirect',
+]);
 
 export type TreeCache = { [uri: string]: Tree };
 
@@ -135,8 +141,18 @@ async function registerExtension(
         }
         const tree = trees[document.uri.toString()];
         return withTreeCopy(tree, async requestTree => {
+          if (isProviderSuppressedAtPosition(requestTree.rootNode, position)) {
+            return [];
+          }
+
           // this is an ugly hack to get current Node
           const p = walkbackIfNeeded(document, requestTree.rootNode, position);
+          if (
+            isProviderSuppressedAtPosition(requestTree.rootNode, p)
+            && !isSafeHerestringWalkback(requestTree.rootNode, p)
+          ) {
+            return [];
+          }
           const isCursorTouchingWord = (p === position);
           console.log(`[Completion] isCursorTouchingWord: ${isCursorTouchingWord}`);
 
@@ -217,6 +233,9 @@ async function registerExtension(
       }
       const tree = trees[document.uri.toString()];
       return withTreeCopy(tree, async requestTree => {
+        if (isProviderSuppressedAtPosition(requestTree.rootNode, position)) {
+          return undefined;
+        }
         const currentWord = getCurrentNode(requestTree.rootNode, position).text;
         try {
           const commandContext = await getContextCommandResolution(requestTree.rootNode, position, fetcher);
@@ -524,6 +543,61 @@ export function getCurrentNode(n: Node, position: vscode.Position): Node {
   return n;
 }
 
+function positionsEqual(left: Point, right: vscode.Position): boolean {
+  return left.row === right.line && left.column === right.character;
+}
+
+function hasMissingNodeAtPosition(node: Node, position: vscode.Position): boolean {
+  if (!range(node).contains(position)) {
+    return false;
+  }
+  if (node.isMissing && positionsEqual(node.startPosition, position)) {
+    return true;
+  }
+  return node.children.some(child => hasMissingNodeAtPosition(child, position));
+}
+
+/**
+ * Provider error recovery is intentionally conservative: never interpret a
+ * redirect payload, heredoc body, parser ERROR, or inserted MISSING token as a
+ * command context. Callers may resume after a real shell boundary such as `;`.
+ */
+export function isProviderSuppressedAtPosition(root: Node, position: vscode.Position): boolean {
+  if (hasMissingNodeAtPosition(root, position)) {
+    return true;
+  }
+
+  let node: Node | null = getCurrentNode(root, position);
+  while (node) {
+    if (node.isError || node.isMissing || providerSuppressedNodeTypes.has(node.type)) {
+      return true;
+    }
+    node = node.parent;
+  }
+  return false;
+}
+
+function isSafeHerestringWalkback(root: Node, position: vscode.Position): boolean {
+  if (hasMissingNodeAtPosition(root, position)) {
+    return false;
+  }
+
+  let isInsideHerestring = false;
+  let node: Node | null = getCurrentNode(root, position);
+  while (node) {
+    if (node.isError || node.isMissing) {
+      return false;
+    }
+    if (node.type === 'herestring_redirect') {
+      isInsideHerestring = true;
+    } else if (providerSuppressedNodeTypes.has(node.type)) {
+      return false;
+    }
+    node = node.parent;
+  }
+  return isInsideHerestring;
+}
+
 
 // Moves the position left by one character IF position is contained only in the root-node range.
 // This is just a workround as you cannot reach command node if you start from
@@ -535,6 +609,12 @@ export function walkbackIfNeeded(document: vscode.TextDocument, root: Node, posi
 
   while (true) {
     const thisNode = getCurrentNode(root, currentPosition);
+    if (isProviderSuppressedAtPosition(root, currentPosition)) {
+      if (moveCount > 0) {
+        console.debug(`[walkbackIfNeeded] moved ${moveCount} time(s); stopped in a suppressed syntax region.`);
+      }
+      return currentPosition;
+    }
     if (thisNode.type === ';') {
       if (moveCount > 0) {
         console.debug(`[walkbackIfNeeded] moved ${moveCount} time(s); stopped at ${thisNode.type}.`);
@@ -542,11 +622,11 @@ export function walkbackIfNeeded(document: vscode.TextDocument, root: Node, posi
       return currentPosition;
     }
 
-    if (currentPosition.character > 0 && thisNode.type !== 'word') {
+    if (currentPosition.character > 0 && !isCommandTokenNode(thisNode)) {
       currentPosition = currentPosition.translate(0, -1);
       moveCount += 1;
       continue;
-    } else if (thisNode.type !== 'word' && currentPosition.character === 0 && currentPosition.line > 0) {
+    } else if (!isCommandTokenNode(thisNode) && currentPosition.character === 0 && currentPosition.line > 0) {
       const prevLineIndex = currentPosition.line - 1;
       const prevLine = document.lineAt(prevLineIndex);
       if (prevLine.text.trimEnd().endsWith('\\')) {
