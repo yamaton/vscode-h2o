@@ -1,7 +1,6 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import * as Parser from 'web-tree-sitter';
-import { SyntaxNode } from 'web-tree-sitter';
+import { Node, Parser, Point, Tree } from 'web-tree-sitter';
 import { loadLanguageOnce } from '../parserLanguage';
 
 export interface NodeSnapshot {
@@ -9,8 +8,8 @@ export interface NodeSnapshot {
   text: string;
   startIndex: number;
   endIndex: number;
-  startPosition: Parser.Point;
-  endPosition: Parser.Point;
+  startPosition: Point;
+  endPosition: Point;
   hasError: boolean;
   children: NodeSnapshot[];
 }
@@ -29,6 +28,14 @@ export async function createBashParser(): Promise<Parser> {
   }
 }
 
+export function parseTree(parser: Parser, source: string, oldTree?: Tree): Tree {
+  const tree = parser.parse(source, oldTree);
+  if (!tree) {
+    throw new Error('Tree-sitter parsing was cancelled.');
+  }
+  return tree;
+}
+
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
   if (value === null || (typeof value !== 'object' && typeof value !== 'function')) {
     return false;
@@ -40,17 +47,17 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 /**
  * Lends a Tree to an operation and deletes it after the result settles.
  *
- * The operation must not delete the Tree or return the Tree, a SyntaxNode,
+ * The operation must not delete the Tree or return the Tree, a Node,
  * a TreeCursor, or any other value whose lifetime is tied to the Tree.
  */
 export function withTree<T>(
-  tree: Parser.Tree,
-  operation: (tree: Parser.Tree) => PromiseLike<T>,
+  tree: Tree,
+  operation: (tree: Tree) => PromiseLike<T>,
 ): Promise<T>;
-export function withTree<T>(tree: Parser.Tree, operation: (tree: Parser.Tree) => T): T;
+export function withTree<T>(tree: Tree, operation: (tree: Tree) => T): T;
 export function withTree(
-  tree: Parser.Tree,
-  operation: (tree: Parser.Tree) => unknown,
+  tree: Tree,
+  operation: (tree: Tree) => unknown,
 ): unknown {
   let result: unknown;
 
@@ -87,19 +94,19 @@ export function withTree(
 export function withParsedTree<T>(
   parser: Parser,
   source: string,
-  operation: (tree: Parser.Tree) => PromiseLike<T>,
+  operation: (tree: Tree) => PromiseLike<T>,
 ): Promise<T>;
 export function withParsedTree<T>(
   parser: Parser,
   source: string,
-  operation: (tree: Parser.Tree) => T,
+  operation: (tree: Tree) => T,
 ): T;
 export function withParsedTree(
   parser: Parser,
   source: string,
-  operation: (tree: Parser.Tree) => unknown,
+  operation: (tree: Tree) => unknown,
 ): unknown {
-  return withTree(parser.parse(source), operation);
+  return withTree(parseTree(parser, source), operation);
 }
 
 /**
@@ -111,17 +118,17 @@ export function withParsedTree(
 export function withFirstNamedNode<T>(
   parser: Parser,
   source: string,
-  operation: (node: SyntaxNode) => PromiseLike<T>,
+  operation: (node: Node) => PromiseLike<T>,
 ): Promise<T>;
 export function withFirstNamedNode<T>(
   parser: Parser,
   source: string,
-  operation: (node: SyntaxNode) => T,
+  operation: (node: Node) => T,
 ): T;
 export function withFirstNamedNode(
   parser: Parser,
   source: string,
-  operation: (node: SyntaxNode) => unknown,
+  operation: (node: Node) => unknown,
 ): unknown {
   return withParsedTree(parser, source, tree => {
     const node = tree.rootNode.firstNamedChild;
@@ -131,13 +138,13 @@ export function withFirstNamedNode(
 }
 
 /** Returns Tree-backed nodes that must not outlive their Tree. */
-export function descendantsOfType(node: SyntaxNode, type: string): SyntaxNode[] {
+export function descendantsOfType(node: Node, type: string): Node[] {
   const matches = node.type === type ? [node] : [];
   return matches.concat(...node.children.map(child => descendantsOfType(child, type)));
 }
 
 /** Returns a Tree-independent snapshot of a node and all its descendants. */
-export function snapshotNode(node: SyntaxNode): NodeSnapshot {
+export function snapshotNode(node: Node): NodeSnapshot {
   return {
     type: node.type,
     text: node.text,
@@ -145,7 +152,7 @@ export function snapshotNode(node: SyntaxNode): NodeSnapshot {
     endIndex: node.endIndex,
     startPosition: node.startPosition,
     endPosition: node.endPosition,
-    hasError: node.hasError(),
+    hasError: node.hasError,
     children: node.children.map(snapshotNode),
   };
 }

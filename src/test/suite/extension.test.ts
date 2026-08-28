@@ -1,8 +1,7 @@
 import * as assert from 'assert';
 import { gzipSync } from 'node:zlib';
 import * as vscode from 'vscode';
-import * as Parser from 'web-tree-sitter';
-import { SyntaxNode } from 'web-tree-sitter';
+import { Edit, Language, Node, Parser, Point, Tree } from 'web-tree-sitter';
 import { Response } from 'node-fetch';
 import {
 	activate,
@@ -17,7 +16,7 @@ import type { TreeCache } from '../../extension';
 import { CachingFetcher, CachingFetcherDependencies } from '../../cacheFetcher';
 import type { CommandCacheStorage } from '../../cacheStorage';
 import type { Command } from '../../command';
-import { withParsedTree } from '../parserTestUtils';
+import { parseTree, withParsedTree } from '../parserTestUtils';
 
 const extensionId = 'tetradresearch.vscode-h2o';
 const cursorMarker = '<|cursor|>';
@@ -173,7 +172,7 @@ interface CommandContextObservation {
 
 function observeCommandContextInTree(
 	document: vscode.TextDocument,
-	root: SyntaxNode,
+	root: Node,
 	cursor: vscode.Position,
 	walkback: boolean,
 ): CommandContextObservation {
@@ -214,12 +213,12 @@ interface NodeSnapshot {
 	text: string;
 	startIndex: number;
 	endIndex: number;
-	startPosition: Parser.Point;
-	endPosition: Parser.Point;
+	startPosition: Point;
+	endPosition: Point;
 	children: NodeSnapshot[];
 }
 
-function snapshot(node: SyntaxNode): NodeSnapshot {
+function snapshot(node: Node): NodeSnapshot {
 	return {
 		type: node.type,
 		text: node.text,
@@ -247,7 +246,7 @@ function assertCachedCursorMatchesFresh(
 	return cached;
 }
 
-function trackDeletion(tree: Parser.Tree): () => number {
+function trackDeletion(tree: Tree): () => number {
 	let count = 0;
 	const originalDelete = tree.delete.bind(tree);
 	tree.delete = () => {
@@ -257,11 +256,23 @@ function trackDeletion(tree: Parser.Tree): () => number {
 	return () => count;
 }
 
-function trackEdits(tree: Parser.Tree): Parser.Edit[] {
-	const edits: Parser.Edit[] = [];
+type EditSnapshot = Pick<
+	Edit,
+	'startIndex' | 'oldEndIndex' | 'newEndIndex' | 'startPosition' | 'oldEndPosition' | 'newEndPosition'
+>;
+
+function trackEdits(tree: Tree): EditSnapshot[] {
+	const edits: EditSnapshot[] = [];
 	const originalEdit = tree.edit.bind(tree);
 	tree.edit = (delta) => {
-		edits.push(delta);
+		edits.push({
+			startIndex: delta.startIndex,
+			oldEndIndex: delta.oldEndIndex,
+			newEndIndex: delta.newEndIndex,
+			startPosition: delta.startPosition,
+			oldEndPosition: delta.oldEndPosition,
+			newEndPosition: delta.newEndPosition,
+		});
 		return originalEdit(delta);
 	};
 	return edits;
@@ -497,27 +508,27 @@ async function hoverTextAt(document: vscode.TextDocument, position: vscode.Posit
 }
 
 async function verifyProviderTreeOwnership(parser: Parser): Promise<void> {
-	const sampleTree = parser.parse('git');
+	const sampleTree = parseTree(parser, 'git');
 	const treePrototype = Object.getPrototypeOf(sampleTree) as {
-		copy(this: Parser.Tree): Parser.Tree;
-		delete(this: Parser.Tree): void;
+		copy(this: Tree): Tree;
+		delete(this: Tree): void;
 	};
 	const originalCopy = treePrototype.copy;
 	const originalDelete = treePrototype.delete;
 	const originalFetch = CachingFetcher.prototype.fetch;
 	const copyDeleteCounts: Array<() => number> = [];
-	const requestTrees = new WeakSet<Parser.Tree>();
+	const requestTrees = new WeakSet<Tree>();
 	let cacheDeleteCount = 0;
 	let activeFetch: DeferredFetch | undefined;
 	sampleTree.delete();
 
-	treePrototype.delete = function deleteTree(this: Parser.Tree): void {
+	treePrototype.delete = function deleteTree(this: Tree): void {
 		if (!requestTrees.has(this)) {
 			cacheDeleteCount += 1;
 		}
 		originalDelete.call(this);
 	};
-	treePrototype.copy = function copy(this: Parser.Tree): Parser.Tree {
+	treePrototype.copy = function copy(this: Tree): Tree {
 		const requestTree = originalCopy.call(this);
 		requestTrees.add(requestTree);
 		copyDeleteCounts.push(trackDeletion(requestTree));
@@ -697,7 +708,7 @@ async function verifyCursorBehaviorAcrossEdits(parser: Parser): Promise<void> {
 
 	function createTreeCache(document: vscode.TextDocument): TreeCache {
 		const trees: TreeCache = {
-			[document.uri.toString()]: parser.parse(document.getText()),
+			[document.uri.toString()]: parseTree(parser, document.getText()),
 		};
 		treeCaches.push(trees);
 		return trees;
@@ -1134,9 +1145,21 @@ async function verifyCommandContext(parser: Parser): Promise<void> {
 			expectedCommandName: 'git',
 		},
 		{
+			description: 'command substitution separator boundary',
+			markedContent: `echo "$(git status;${cursorMarker} npm test)"`,
+			expectedCommandName: undefined,
+			expectedNodeType: ';',
+		},
+		{
 			description: 'process substitution',
 			markedContent: `diff <(gi${cursorMarker}t show HEAD) file`,
 			expectedCommandName: 'git',
+		},
+		{
+			description: 'process substitution separator boundary',
+			markedContent: `diff <(git status;${cursorMarker} npm test) file`,
+			expectedCommandName: undefined,
+			expectedNodeType: ';',
 		},
 		{
 			description: 'if body',
@@ -1228,7 +1251,7 @@ async function verifyIterativeWalkback(parser: Parser): Promise<void> {
 		'tool alpha &   ',
 	]) {
 		const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
-		const tree = parser.parse(document.getText());
+		const tree = parseTree(parser, document.getText());
 		try {
 			const walked = walkbackIfNeeded(
 				document,
@@ -1244,7 +1267,7 @@ async function verifyIterativeWalkback(parser: Parser): Promise<void> {
 
 	const content = `tool alpha ${' '.repeat(20_000)}`;
 	const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
-	const tree = parser.parse(document.getText());
+	const tree = parseTree(parser, document.getText());
 	try {
 		const walked = walkbackIfNeeded(
 			document,
@@ -1285,7 +1308,7 @@ async function verifyIncrementalParsing(parser: Parser): Promise<void> {
 		content: 'git status\necho ok',
 	});
 	const key = document.uri.toString();
-	const trees: TreeCache = { [key]: parser.parse(document.getText()) };
+	const trees: TreeCache = { [key]: parseTree(parser, document.getText()) };
 
 	const firstTree = trees[key];
 	const firstTreeDeleteCount = trackDeletion(firstTree);
@@ -1296,7 +1319,7 @@ async function verifyIncrementalParsing(parser: Parser): Promise<void> {
 	assert.strictEqual(firstTreeDeleteCount(), 1);
 	assert.notStrictEqual(trees[key], firstTree);
 
-	let fresh = parser.parse(document.getText());
+	let fresh = parseTree(parser, document.getText());
 	assert.deepStrictEqual(snapshot(trees[key].rootNode), snapshot(fresh.rootNode));
 	fresh.delete();
 
@@ -1309,7 +1332,7 @@ async function verifyIncrementalParsing(parser: Parser): Promise<void> {
 	assert.strictEqual(secondTreeDeleteCount(), 1);
 	assert.notStrictEqual(trees[key], secondTree);
 
-	fresh = parser.parse(document.getText());
+	fresh = parseTree(parser, document.getText());
 	assert.deepStrictEqual(snapshot(trees[key].rootNode), snapshot(fresh.rootNode));
 	fresh.delete();
 	trees[key].delete();
@@ -1321,7 +1344,7 @@ async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
 		content: 'git status\necho ok',
 	});
 	const shorteningKey = shorteningDocument.uri.toString();
-	const shorteningTree = parser.parse(shorteningDocument.getText());
+	const shorteningTree = parseTree(parser, shorteningDocument.getText());
 	const shorteningEdits = trackEdits(shorteningTree);
 	const shorteningTrees: TreeCache = { [shorteningKey]: shorteningTree };
 	const shortening = new vscode.WorkspaceEdit();
@@ -1339,7 +1362,7 @@ async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
 		oldEndPosition: { row: 0, column: 10 },
 		newEndPosition: { row: 0, column: 6 },
 	}]);
-	let fresh = parser.parse(shorteningDocument.getText());
+	let fresh = parseTree(parser, shorteningDocument.getText());
 	assert.deepStrictEqual(snapshot(shorteningTrees[shorteningKey].rootNode), snapshot(fresh.rootNode));
 	fresh.delete();
 	shorteningTrees[shorteningKey].delete();
@@ -1349,7 +1372,7 @@ async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
 		content: 'git status\necho keep\nnpm test',
 	});
 	const multipleKey = multipleDocument.uri.toString();
-	const multipleTree = parser.parse(multipleDocument.getText());
+	const multipleTree = parseTree(parser, multipleDocument.getText());
 	const multipleEdits = trackEdits(multipleTree);
 	const multipleTrees: TreeCache = { [multipleKey]: multipleTree };
 	const multiple = new vscode.WorkspaceEdit();
@@ -1394,7 +1417,7 @@ async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
 			newEndPosition: { row: 1, column: 9 },
 		},
 	]);
-	fresh = parser.parse(multipleDocument.getText());
+	fresh = parseTree(parser, multipleDocument.getText());
 	assert.deepStrictEqual(snapshot(multipleTrees[multipleKey].rootNode), snapshot(fresh.rootNode));
 	fresh.delete();
 	multipleTrees[multipleKey].delete();
@@ -1404,7 +1427,7 @@ async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
 		content: 'echo 😀あ\r\ngit status',
 	});
 	const unicodeKey = unicodeDocument.uri.toString();
-	const unicodeTree = parser.parse(unicodeDocument.getText());
+	const unicodeTree = parseTree(parser, unicodeDocument.getText());
 	const unicodeEdits = trackEdits(unicodeTree);
 	const unicodeTrees: TreeCache = { [unicodeKey]: unicodeTree };
 	const unicode = new vscode.WorkspaceEdit();
@@ -1430,7 +1453,7 @@ async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
 			newEndPosition: { row: 0, column: 8 },
 		},
 	]);
-	fresh = parser.parse(unicodeDocument.getText());
+	fresh = parseTree(parser, unicodeDocument.getText());
 	assert.deepStrictEqual(snapshot(unicodeTrees[unicodeKey].rootNode), snapshot(fresh.rootNode));
 	fresh.delete();
 	unicodeTrees[unicodeKey].delete();
@@ -1459,7 +1482,7 @@ async function verifyIncrementalBoundaryEdits(parser: Parser): Promise<void> {
 		content: initialText,
 	});
 	const key = document.uri.toString();
-	const populatedTree = parser.parse(document.getText());
+	const populatedTree = parseTree(parser, document.getText());
 	const trees: TreeCache = { [key]: populatedTree };
 	const populatedEdits = trackEdits(populatedTree);
 	const populatedDeleteCount = trackDeletion(populatedTree);
@@ -1477,7 +1500,7 @@ async function verifyIncrementalBoundaryEdits(parser: Parser): Promise<void> {
 	}]);
 	assert.strictEqual(populatedDeleteCount(), 1);
 	assert.strictEqual(trees[key].rootNode.text, '');
-	const freshEmpty = parser.parse(document.getText());
+	const freshEmpty = parseTree(parser, document.getText());
 	assert.deepStrictEqual(snapshot(trees[key].rootNode), snapshot(freshEmpty.rootNode));
 	freshEmpty.delete();
 
@@ -1500,7 +1523,7 @@ async function verifyIncrementalBoundaryEdits(parser: Parser): Promise<void> {
 		newEndPosition: { row: 1, column: 10 },
 	}]);
 
-	const fresh = parser.parse(document.getText());
+	const fresh = parseTree(parser, document.getText());
 	assert.deepStrictEqual(snapshot(trees[key].rootNode), snapshot(fresh.rootNode));
 	fresh.delete();
 	trees[key].delete();
@@ -1523,8 +1546,8 @@ async function verifyUnrelatedLanguagesAreIgnored(parser: Parser): Promise<void>
 async function verifyParserResourceDisposal(): Promise<void> {
 	const parser = await initializeParser();
 	const trees: TreeCache = {
-		first: parser.parse('echo first'),
-		second: parser.parse('echo second'),
+		first: parseTree(parser, 'echo first'),
+		second: parseTree(parser, 'echo second'),
 	};
 	const firstDeleteCount = trackDeletion(trees.first);
 	const secondDeleteCount = trackDeletion(trees.second);
@@ -1566,7 +1589,7 @@ async function verifyFailedParserInitializationDisposesParser(): Promise<void> {
 					if (failurePoint === 'load') {
 						throw expectedError;
 					}
-					return {} as Parser.Language;
+					return {} as Language;
 				},
 			}),
 			error => error === expectedError,
@@ -1699,7 +1722,7 @@ suite('Parser and provider behavior', () => {
 		const otherParser = await initializeParser();
 		try {
 			assert.notStrictEqual(otherParser, parser);
-			assert.strictEqual(otherParser.getLanguage(), parser.getLanguage());
+			assert.strictEqual(otherParser.language, parser.language);
 		} finally {
 			otherParser.delete();
 		}

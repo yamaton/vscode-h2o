@@ -1,15 +1,15 @@
 import * as assert from 'assert';
 import * as path from 'path';
-import * as Parser from 'web-tree-sitter';
+import { Language } from 'web-tree-sitter';
 import { createCachedLanguageLoader } from '../../parserLanguage';
 
 suite('parser language loading', () => {
   test('coalesces equivalent sequential and concurrent paths', async () => {
     const loadedPaths: string[] = [];
-    const languages: Parser.Language[] = [];
+    const languages: Language[] = [];
     const loadLanguage = createCachedLanguageLoader(async wasmPath => {
       loadedPaths.push(wasmPath);
-      const language = {} as Parser.Language;
+      const language = {} as Language;
       languages.push(language);
       return language;
     });

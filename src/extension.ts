@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
-import * as Parser from 'web-tree-sitter';
-import { SyntaxNode } from 'web-tree-sitter';
+import { Edit, Language, Node, Parser, Point, Tree } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
 import { GzipCommandCacheStorage } from './cacheStorage';
 import { Option, Command } from './command';
@@ -22,13 +21,22 @@ import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription 
 
 
 const supportedLanguages = ['shellscript', 'bitbake'];
+const nestedCommandScopeBoundaries = new Set(['command_substitution', 'process_substitution', 'subshell']);
 
-export type TreeCache = { [uri: string]: Parser.Tree };
+export type TreeCache = { [uri: string]: Tree };
+
+function parseTree(parser: Parser, source: string, oldTree?: Tree): Tree {
+  const tree = parser.parse(source, oldTree);
+  if (!tree) {
+    throw new Error('[Parser] Parsing was cancelled.');
+  }
+  return tree;
+}
 
 export interface ParserInitializationDependencies {
   init(): Promise<void>;
   createParser(): Parser;
-  loadLanguage(wasmPath: string): Promise<Parser.Language>;
+  loadLanguage(wasmPath: string): Promise<Language>;
 }
 
 const defaultParserInitializationDependencies: ParserInitializationDependencies = {
@@ -58,7 +66,7 @@ export async function initializeParser(
   }
 }
 
-async function withTreeCopy<T>(tree: Parser.Tree, operation: (copy: Parser.Tree) => Promise<T>): Promise<T> {
+async function withTreeCopy<T>(tree: Tree, operation: (copy: Tree) => Promise<T>): Promise<T> {
   const copy = tree.copy();
   try {
     return await operation(copy);
@@ -123,7 +131,7 @@ async function registerExtension(
         }
         if (!trees[document.uri.toString()]) {
           console.log("[Completion] Creating tree");
-          trees[document.uri.toString()] = parser.parse(document.getText());
+          trees[document.uri.toString()] = parseTree(parser, document.getText());
         }
         const tree = trees[document.uri.toString()];
         return withTreeCopy(tree, async requestTree => {
@@ -205,7 +213,7 @@ async function registerExtension(
 
       if (!trees[document.uri.toString()]) {
         console.log("[Hover] Creating tree");
-        trees[document.uri.toString()] = parser.parse(document.getText());
+        trees[document.uri.toString()] = parseTree(parser, document.getText());
       }
       const tree = trees[document.uri.toString()];
       return withTreeCopy(tree, async requestTree => {
@@ -441,12 +449,12 @@ export async function activate(
 }
 
 
-// Convert: vscode.Position -> Parser.Point
-function asPoint(p: vscode.Position): Parser.Point {
+// Convert: vscode.Position -> Point
+function asPoint(p: vscode.Position): Point {
   return { row: p.line, column: p.character };
 }
 
-function advancePoint(start: Parser.Point, text: string): Parser.Point {
+function advancePoint(start: Point, text: string): Point {
   let row = start.row;
   let column = start.column;
   for (let index = 0; index < text.length; index += 1) {
@@ -481,7 +489,7 @@ function optsToMessage(opts: Option[]): string {
 
 // --------------- Helper ----------------------
 
-function range(n: SyntaxNode): vscode.Range {
+function range(n: Node): vscode.Range {
   return new vscode.Range(
     n.startPosition.row,
     n.startPosition.column,
@@ -503,7 +511,7 @@ function rangeOfWord(word: CommandWord): vscode.Range {
 // --------------- For Hovers and Completions ----------------------
 
 // Find the deepest node that contains the position in its range.
-export function getCurrentNode(n: SyntaxNode, position: vscode.Position): SyntaxNode {
+export function getCurrentNode(n: Node, position: vscode.Position): Node {
   if (!(range(n).contains(position))) {
     console.error("Out of range!");
   }
@@ -521,7 +529,7 @@ export function getCurrentNode(n: SyntaxNode, position: vscode.Position): Syntax
 // This is just a workround as you cannot reach command node if you start from
 // the position, say, after 'echo '
 // [FIXME] Do not rely on such an ugly hack
-export function walkbackIfNeeded(document: vscode.TextDocument, root: SyntaxNode, position: vscode.Position): vscode.Position {
+export function walkbackIfNeeded(document: vscode.TextDocument, root: Node, position: vscode.Position): vscode.Position {
   let currentPosition = position;
   let moveCount = 0;
 
@@ -574,11 +582,11 @@ export function updateTree(p: Parser, trees: TreeCache, edit: vscode.TextDocumen
       const startPosition = asPoint(e.range.start);
       const oldEndPosition = asPoint(e.range.end);
       const newEndPosition = advancePoint(startPosition, e.text);
-      const delta = { startIndex, oldEndIndex, newEndIndex, startPosition, oldEndPosition, newEndPosition };
+      const delta = new Edit({ startIndex, oldEndIndex, newEndIndex, startPosition, oldEndPosition, newEndPosition });
       old.edit(delta);
     }
   }
-  const t = p.parse(edit.document.getText(), old);
+  const t = parseTree(p, edit.document.getText(), old);
   trees[key] = t;
   old?.delete();
 }
@@ -657,26 +665,29 @@ function unstackOption(name: string): string[] {
 }
 
 // Get command node inferred from the current position
-export function _getContextCommandNode(root: SyntaxNode, position: vscode.Position): SyntaxNode | undefined {
-  let currentNode = getCurrentNode(root, position);
-  if (currentNode.parent?.type === 'command_name') {
+export function _getContextCommandNode(root: Node, position: vscode.Position): Node | undefined {
+  let currentNode: Node | null = getCurrentNode(root, position);
+  while (currentNode) {
+    if (currentNode.type === 'command') {
+      return currentNode;
+    }
+    if (nestedCommandScopeBoundaries.has(currentNode.type)) {
+      return undefined;
+    }
     currentNode = currentNode.parent;
-  }
-  if (currentNode.parent?.type === 'command') {
-    return currentNode.parent;
   }
   return undefined;
 }
 
 // Get command name covering the position if exists
-export function getContextCommandName(root: SyntaxNode, position: vscode.Position): string | undefined {
+export function getContextCommandName(root: Node, position: vscode.Position): string | undefined {
   const commandNode = _getContextCommandNode(root, position);
   return getCommandName(commandNode);
 }
 
 // Get command and subcommand inferred from the current position
 async function getContextCommandResolution(
-  root: SyntaxNode,
+  root: Node,
   position: vscode.Position,
   fetcher: CachingFetcher,
   includeArgumentAtPosition = true,
@@ -706,7 +717,7 @@ async function getContextCommandResolution(
 
 // Get command arguments as string[]
 function getContextCmdArgs(
-  root: SyntaxNode,
+  root: Node,
   position: vscode.Position,
   includeArgumentAtPosition: boolean,
 ): string[] {
@@ -747,7 +758,7 @@ function getCompletionsSubcommands(deepestCmd: Command): vscode.CompletionItem[]
 
 // Get option completion
 function getCompletionsOptions(
-  root: SyntaxNode,
+  root: Node,
   position: vscode.Position,
   cmdSeq: Command[],
   includeArgumentAtPosition: boolean,

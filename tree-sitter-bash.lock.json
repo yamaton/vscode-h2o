@@ -2,11 +2,12 @@
   "schemaVersion": 1,
   "language": "bash",
   "file": "tree-sitter-bash.wasm",
-  "languageAbiVersion": 13,
-  "wasmSize": 438455,
-  "wasmSha256": "1a320e387f265e029d4d3a314ee33388c34033fe433d4bde562809997b6d889e",
+  "languageAbiVersion": 15,
+  "wasmSize": 1358224,
+  "wasmSha256": "8292919c88a0f7d3fb31d0cd0253ca5a9531bc1ede82b0537f2c63dd8abe6a7a",
   "provenance": {
-    "status": "legacy-unresolved",
-    "introducedByCommit": "9b68c5de4f3a21a1e98c3e38a86802fc2eaffbe3"
+    "status": "pinned-upstream",
+    "repository": "tree-sitter/tree-sitter-bash",
+    "revision": "a06c2e4415e9bc0346c6b86d401879ffb44058f7"
   }
 }

@@ -36,8 +36,8 @@ invalidProvenance.provenance.status = 'unknown';
 assert.throws(() => validateGrammarLock(invalidProvenance), /unsupported provenance/);
 
 const invalidCommit = clonedLock();
-invalidCommit.provenance.introducedByCommit = '9b68c5d';
-assert.throws(() => validateGrammarLock(invalidCommit), /invalid introducing commit/);
+invalidCommit.provenance.revision = 'a06c2e4';
+assert.throws(() => validateGrammarLock(invalidCommit), /invalid revision/);
 
 const truncated = wasm.subarray(0, wasm.length - 1);
 assert.throws(() => verifyGrammarArtifact(truncated, lock), /unexpected size/);
@@ -51,20 +51,12 @@ wrongDigest[wrongDigest.length - 1] ^= 0xff;
 assert.throws(() => verifyGrammarArtifact(wrongDigest, lock), /SHA-256 verification/);
 
 assert.throws(
-  () => verifyGrammarLanguageVersion({ version: lock.languageAbiVersion + 1 }, lock),
+  () => verifyGrammarLanguageVersion({ abiVersion: lock.languageAbiVersion + 1 }, lock),
   /unexpected tree-sitter language ABI version/,
 );
 
 const runtimeEvents = [];
 class ControlledParser {
-  static Language = {
-    load: async content => {
-      assert.strictEqual(content, wasm);
-      runtimeEvents.push('load');
-      return { version: lock.languageAbiVersion };
-    },
-  };
-
   static async init() {
     runtimeEvents.push('init');
   }
@@ -74,7 +66,7 @@ class ControlledParser {
   }
 
   setLanguage(language) {
-    assert.strictEqual(language.version, lock.languageAbiVersion);
+    assert.strictEqual(language.abiVersion, lock.languageAbiVersion);
     runtimeEvents.push('set-language');
   }
 
@@ -94,7 +86,17 @@ class ControlledParser {
     runtimeEvents.push('delete-parser');
   }
 }
-await verifyGrammarRuntimeCompatibility(wasm, lock, lock.file, ControlledParser);
+const controlledRuntime = {
+  Parser: ControlledParser,
+  Language: {
+    load: async content => {
+      assert.strictEqual(content, wasm);
+      runtimeEvents.push('load');
+      return { abiVersion: lock.languageAbiVersion };
+    },
+  },
+};
+await verifyGrammarRuntimeCompatibility(wasm, lock, lock.file, controlledRuntime);
 assert.deepStrictEqual(runtimeEvents, [
   'init',
   'load',
@@ -114,7 +116,10 @@ class IncompatibleParser extends ControlledParser {
 }
 runtimeEvents.length = 0;
 await assert.rejects(
-  verifyGrammarRuntimeCompatibility(wasm, lock, lock.file, IncompatibleParser),
+  verifyGrammarRuntimeCompatibility(wasm, lock, lock.file, {
+    ...controlledRuntime,
+    Parser: IncompatibleParser,
+  }),
   error => error === incompatibleLanguage,
 );
 assert.deepStrictEqual(runtimeEvents, [

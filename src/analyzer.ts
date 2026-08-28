@@ -1,17 +1,16 @@
-import * as Parser from 'web-tree-sitter';
-import { SyntaxNode } from 'web-tree-sitter';
+import { Node, Point } from 'web-tree-sitter';
 
 const transparentCommandWrappers = new Set(['sudo', 'nohup']);
 const environmentAssignment = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
-function skipEnvironmentAssignments(node: SyntaxNode | null): SyntaxNode | null {
+function skipEnvironmentAssignments(node: Node | null): Node | null {
   while (node && environmentAssignment.test(node.text)) {
     node = node.nextNamedSibling;
   }
   return node;
 }
 
-function getSudoCommandNode(nameNode: SyntaxNode): SyntaxNode | null {
+function getSudoCommandNode(nameNode: Node): Node | null {
   let node = skipEnvironmentAssignments(nameNode.nextNamedSibling);
 
   if (node?.text === '-u') {
@@ -34,7 +33,7 @@ function getSudoCommandNode(nameNode: SyntaxNode): SyntaxNode | null {
   return skipEnvironmentAssignments(node);
 }
 
-function getNohupCommandNode(nameNode: SyntaxNode): SyntaxNode | null {
+function getNohupCommandNode(nameNode: Node): Node | null {
   const node = nameNode.nextNamedSibling;
   if (node?.text === '--') {
     return node.nextNamedSibling;
@@ -45,8 +44,8 @@ function getNohupCommandNode(nameNode: SyntaxNode): SyntaxNode | null {
   return node;
 }
 
-function getWrappedCommandNode(nameNode: SyntaxNode): SyntaxNode | null {
-  let node: SyntaxNode | null = nameNode;
+function getWrappedCommandNode(nameNode: Node): Node | null {
+  let node: Node | null = nameNode;
   while (node && transparentCommandWrappers.has(node.text)) {
     node = node.text === 'sudo' ? getSudoCommandNode(node) : getNohupCommandNode(node);
   }
@@ -55,8 +54,8 @@ function getWrappedCommandNode(nameNode: SyntaxNode): SyntaxNode | null {
 
 export interface CommandWord {
   text: string;
-  startPosition: Parser.Point;
-  endPosition: Parser.Point;
+  startPosition: Point;
+  endPosition: Point;
 }
 
 export interface CommandInvocation {
@@ -64,7 +63,7 @@ export interface CommandInvocation {
   arguments: CommandWord[];
 }
 
-function getCommandInvocation(commandNode: SyntaxNode | null | undefined): CommandInvocation | undefined {
+function getCommandInvocation(commandNode: Node | null | undefined): CommandInvocation | undefined {
   if (commandNode?.type !== 'command') {
     return undefined;
   }
@@ -99,15 +98,15 @@ function getCommandInvocation(commandNode: SyntaxNode | null | undefined): Comma
   };
 }
 
-function comparePoints(left: Parser.Point, right: Parser.Point): number {
+function comparePoints(left: Point, right: Point): number {
   return left.row === right.row ? left.column - right.column : left.row - right.row;
 }
 
-export function getCommandName(commandNode: SyntaxNode | null | undefined): string | undefined {
+export function getCommandName(commandNode: Node | null | undefined): string | undefined {
   return getCommandInvocation(commandNode)?.name.text;
 }
 
-export function getCommandArguments(commandNode: SyntaxNode | null | undefined): string[] {
+export function getCommandArguments(commandNode: Node | null | undefined): string[] {
   return getCommandInvocation(commandNode)?.arguments.map(argument => argument.text) ?? [];
 }
 
@@ -116,8 +115,8 @@ export function getCommandArguments(commandNode: SyntaxNode | null | undefined):
  * excludes the argument being edited, while a hover request includes it.
  */
 export function getCommandInvocationToPosition(
-  commandNode: SyntaxNode | null | undefined,
-  position: Parser.Point,
+  commandNode: Node | null | undefined,
+  position: Point,
   includeArgumentAtPosition: boolean,
 ): CommandInvocation | undefined {
   const invocation = getCommandInvocation(commandNode);

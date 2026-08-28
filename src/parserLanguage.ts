@@ -1,7 +1,7 @@
 import * as path from 'path';
-import * as Parser from 'web-tree-sitter';
+import { Language, Parser } from 'web-tree-sitter';
 
-export type LanguageLoader = (wasmPath: string) => Promise<Parser.Language>;
+export type LanguageLoader = (wasmPath: string) => Promise<Language>;
 
 /**
  * Coalesces language loads by canonical path for the lifetime of this process.
@@ -11,7 +11,7 @@ export type LanguageLoader = (wasmPath: string) => Promise<Parser.Language>;
  * only add more process-lifetime allocations.
  */
 export function createCachedLanguageLoader(loadLanguage: LanguageLoader): LanguageLoader {
-  const languageLoads = new Map<string, Promise<Parser.Language>>();
+  const languageLoads = new Map<string, Promise<Language>>();
 
   return wasmPath => {
     const canonicalPath = path.resolve(wasmPath);
@@ -28,5 +28,5 @@ export function createCachedLanguageLoader(loadLanguage: LanguageLoader): Langua
 
 export const loadLanguageOnce = createCachedLanguageLoader(async wasmPath => {
   await Parser.init();
-  return Parser.Language.load(wasmPath);
+  return Language.load(wasmPath);
 });

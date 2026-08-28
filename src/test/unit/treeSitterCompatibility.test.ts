@@ -1,7 +1,8 @@
 import * as assert from 'assert';
-import * as Parser from 'web-tree-sitter';
+import { Edit, Parser } from 'web-tree-sitter';
 import {
   createBashParser,
+  parseTree,
   snapshotNode,
   withParsedTree,
   withTree,
@@ -66,16 +67,17 @@ suite('web-tree-sitter compatibility', () => {
 
   test('keeps incomplete and multiline input available to editor features', () => {
     withParsedTree(parser, 'git \\\n  --flag', multiline => {
-      assert.strictEqual(multiline.rootNode.hasError(), false);
+      assert.strictEqual(multiline.rootNode.hasError, false);
       assert.deepStrictEqual(multiline.rootNode.endPosition, { row: 1, column: 8 });
       assert.strictEqual(multiline.rootNode.firstNamedChild?.childForFieldName('name')?.text, 'git');
       assert.strictEqual(multiline.rootNode.firstNamedChild?.lastNamedChild?.text, '--flag');
     });
 
     withParsedTree(parser, 'git "unterminated', incomplete => {
-      assert.strictEqual(incomplete.rootNode.hasError(), true);
+      assert.strictEqual(incomplete.rootNode.hasError, true);
       assert.strictEqual(incomplete.rootNode.firstNamedChild?.childForFieldName('name')?.text, 'git');
-      assert.strictEqual(incomplete.rootNode.firstNamedChild?.lastNamedChild?.text, '"unterminated');
+      assert.strictEqual(incomplete.rootNode.lastNamedChild?.type, 'ERROR');
+      assert.strictEqual(incomplete.rootNode.lastNamedChild?.text, '"unterminated');
     });
   });
 
@@ -84,19 +86,19 @@ suite('web-tree-sitter compatibility', () => {
     const updated = 'git log --oneline\necho ok';
 
     withParsedTree(parser, original, editedTree => {
-      editedTree.edit({
+      editedTree.edit(new Edit({
         startIndex: 4,
         oldEndIndex: 10,
         newEndIndex: 17,
         startPosition: { row: 0, column: 4 },
         oldEndPosition: { row: 0, column: 10 },
         newEndPosition: { row: 0, column: 17 },
-      });
+      }));
 
       assert.strictEqual(editedTree.rootNode.endIndex, updated.length);
       assert.deepStrictEqual(editedTree.rootNode.endPosition, { row: 1, column: 7 });
 
-      withTree(parser.parse(updated, editedTree), incremental => {
+      withTree(parseTree(parser, updated, editedTree), incremental => {
         withParsedTree(parser, updated, fresh => {
           assert.deepStrictEqual(snapshotNode(incremental.rootNode), snapshotNode(fresh.rootNode));
         });

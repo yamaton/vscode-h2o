@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import Parser from 'web-tree-sitter';
+import { Language, Parser } from 'web-tree-sitter';
+
+const defaultParserRuntime = { Language, Parser };
 
 const sha1Pattern = /^[0-9a-f]{40}$/;
 const sha256Pattern = /^[0-9a-f]{64}$/;
@@ -83,7 +85,7 @@ export function verifyGrammarArtifact(content, lock, description = lock.file) {
 
 export function verifyGrammarLanguageVersion(language, lock, description = lock.file) {
   assert.strictEqual(
-    language.version,
+    language.abiVersion,
     lock.languageAbiVersion,
     `${description} has an unexpected tree-sitter language ABI version`,
   );
@@ -93,13 +95,13 @@ export async function verifyGrammarRuntimeCompatibility(
   content,
   lock,
   description = lock.file,
-  parserRuntime = Parser,
+  parserRuntime = defaultParserRuntime,
 ) {
-  await parserRuntime.init();
+  await parserRuntime.Parser.init();
   const language = await parserRuntime.Language.load(content);
   verifyGrammarLanguageVersion(language, lock, description);
 
-  const parser = new parserRuntime();
+  const parser = new parserRuntime.Parser();
   let tree;
   try {
     parser.setLanguage(language);

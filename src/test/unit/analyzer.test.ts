@@ -1,6 +1,5 @@
 import * as assert from 'assert';
-import * as Parser from 'web-tree-sitter';
-import { SyntaxNode } from 'web-tree-sitter';
+import { Node, Parser, Point } from 'web-tree-sitter';
 import {
   CommandWord,
   getCommandArguments,
@@ -24,8 +23,8 @@ function wordTexts(words: readonly CommandWord[]): string[] {
 }
 
 function invocationArgumentTexts(
-  command: SyntaxNode,
-  position: Parser.Point,
+  command: Node,
+  position: Point,
   includeArgumentAtPosition: boolean,
 ): string[] {
   const invocation = getCommandInvocationToPosition(command, position, includeArgumentAtPosition);
@@ -50,7 +49,7 @@ suite('shell command analysis', () => {
     }));
   }
 
-  function commandAnalyses(root: SyntaxNode): CommandAnalysis[] {
+  function commandAnalyses(root: Node): CommandAnalysis[] {
     return descendantsOfType(root, 'command').map(command => ({
       name: getCommandName(command),
       arguments: getCommandArguments(command),
@@ -59,7 +58,7 @@ suite('shell command analysis', () => {
 
   function assertCompleteCommandAnalyses(source: string, expected: CommandAnalysis[]): void {
     withParsedTree(parser, source, tree => {
-      assert.strictEqual(tree.rootNode.hasError(), false, source);
+      assert.strictEqual(tree.rootNode.hasError, false, source);
       assert.deepStrictEqual(commandAnalyses(tree.rootNode), expected, source);
     });
   }
@@ -225,7 +224,7 @@ suite('shell command analysis', () => {
     assert.deepStrictEqual(continued.arguments, ['--flag']);
 
     withParsedTree(parser, 'git "unterminated', incompleteTree => {
-      assert.strictEqual(incompleteTree.rootNode.hasError(), true);
+      assert.strictEqual(incompleteTree.rootNode.hasError, true);
       const incomplete = incompleteTree.rootNode.firstNamedChild;
       assert.ok(incomplete);
       assert.strictEqual(getCommandName(incomplete), 'git');

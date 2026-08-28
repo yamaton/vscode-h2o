@@ -164,6 +164,7 @@
         "publish:marketplace": "node scripts/publish-marketplace.mjs"
     },
     "devDependencies": {
+        "@types/emscripten": "^1.41.5",
         "@types/mocha": "^10.0.10",
         "@types/node": "22.15.35",
         "@types/node-fetch": "^2.6.12",
@@ -179,6 +180,6 @@
     },
     "dependencies": {
         "node-fetch": "^2.6.6",
-        "web-tree-sitter": "^0.20.8"
+        "web-tree-sitter": "^0.26.13"
     }
 }

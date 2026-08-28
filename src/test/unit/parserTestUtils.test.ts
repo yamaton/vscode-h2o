@@ -1,8 +1,8 @@
 import * as assert from 'assert';
-import * as Parser from 'web-tree-sitter';
+import { Parser, Tree } from 'web-tree-sitter';
 import { createBashParser, withParsedTree } from '../parserTestUtils';
 
-function trackDeletion(tree: Parser.Tree): () => number {
+function trackDeletion(tree: Tree): () => number {
   let count = 0;
   const originalDelete = tree.delete.bind(tree);
   tree.delete = () => {
@@ -30,7 +30,7 @@ suite('parser test utilities', () => {
     try {
       [first, second] = await Promise.all([createBashParser(), createBashParser()]);
       assert.notStrictEqual(first, second);
-      assert.strictEqual(first.getLanguage(), second.getLanguage());
+      assert.strictEqual(first.language, second.language);
 
       first.delete();
       first = undefined;
