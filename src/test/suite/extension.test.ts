@@ -550,6 +550,43 @@ async function verifyCompletionRefreshesCommandList(): Promise<void> {
 	}
 }
 
+async function verifyEditorFacingParserCompatibility(): Promise<void> {
+	const originalFetch = CachingFetcher.prototype.fetch;
+	CachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+		assert.strictEqual(name, 'git');
+		return commandForProviderRace();
+	};
+
+	async function optionCompletion(content: string): Promise<vscode.CompletionItem> {
+		const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+		const completion = await withTimeout(
+			vscode.commands.executeCommand<vscode.CompletionList>(
+				'vscode.executeCompletionItemProvider',
+				document.uri,
+				document.positionAt(content.length),
+			),
+			5000,
+		);
+		const option = completion.items.find(item => completionLabel(item) === '--vscode-h2o-race');
+		assert.ok(option, content);
+		return option;
+	}
+
+	try {
+		const unicodeOption = await optionCompletion('echo 😀あ; git --v');
+		assert.deepStrictEqual(unicodeOption.range, new vscode.Range(0, 14, 0, 17));
+
+		for (const incomplete of [
+			'git "unterminated',
+			'git \\\r\n  ',
+		]) {
+			await optionCompletion(incomplete);
+		}
+	} finally {
+		CachingFetcher.prototype.fetch = originalFetch;
+	}
+}
+
 async function verifyHierarchicalCommandResolution(): Promise<void> {
 	const originalFetch = CachingFetcher.prototype.fetch;
 	CachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
@@ -1007,6 +1044,76 @@ async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
 	unicodeTrees[unicodeKey].delete();
 }
 
+async function verifyIncrementalBoundaryEdits(parser: Parser): Promise<void> {
+	const emptyDocument = await vscode.workspace.openTextDocument({
+		language: 'shellscript',
+		content: '',
+	});
+	const emptyKey = emptyDocument.uri.toString();
+	const emptyTrees: TreeCache = {};
+	const initialInsertion = new vscode.WorkspaceEdit();
+	initialInsertion.insert(emptyDocument.uri, new vscode.Position(0, 0), 'echo ok');
+	const initialEvent = await captureDocumentChange(
+		emptyDocument,
+		() => vscode.workspace.applyEdit(initialInsertion),
+	);
+	updateTree(parser, emptyTrees, initialEvent);
+	assert.strictEqual(emptyTrees[emptyKey].rootNode.text, emptyDocument.getText());
+	emptyTrees[emptyKey].delete();
+
+	const initialText = 'echo ok\r\n';
+	const document = await vscode.workspace.openTextDocument({
+		language: 'shellscript',
+		content: initialText,
+	});
+	const key = document.uri.toString();
+	const populatedTree = parser.parse(document.getText());
+	const trees: TreeCache = { [key]: populatedTree };
+	const populatedEdits = trackEdits(populatedTree);
+	const populatedDeleteCount = trackDeletion(populatedTree);
+	const deletion = new vscode.WorkspaceEdit();
+	deletion.delete(document.uri, new vscode.Range(new vscode.Position(0, 0), document.positionAt(initialText.length)));
+	const deletionEvent = await captureDocumentChange(document, () => vscode.workspace.applyEdit(deletion));
+	updateTree(parser, trees, deletionEvent);
+	assert.deepStrictEqual(populatedEdits, [{
+		startIndex: 0,
+		oldEndIndex: initialText.length,
+		newEndIndex: 0,
+		startPosition: { row: 0, column: 0 },
+		oldEndPosition: { row: 1, column: 0 },
+		newEndPosition: { row: 0, column: 0 },
+	}]);
+	assert.strictEqual(populatedDeleteCount(), 1);
+	assert.strictEqual(trees[key].rootNode.text, '');
+	const freshEmpty = parser.parse(document.getText());
+	assert.deepStrictEqual(snapshot(trees[key].rootNode), snapshot(freshEmpty.rootNode));
+	freshEmpty.delete();
+
+	const emptyTree = trees[key];
+	const emptyEdits = trackEdits(emptyTree);
+	const unicodeText = 'echo 😀\r\ngit status';
+	const unicodeInsertion = new vscode.WorkspaceEdit();
+	unicodeInsertion.insert(document.uri, new vscode.Position(0, 0), unicodeText);
+	const unicodeEvent = await captureDocumentChange(
+		document,
+		() => vscode.workspace.applyEdit(unicodeInsertion),
+	);
+	updateTree(parser, trees, unicodeEvent);
+	assert.deepStrictEqual(emptyEdits, [{
+		startIndex: 0,
+		oldEndIndex: 0,
+		newEndIndex: unicodeText.length,
+		startPosition: { row: 0, column: 0 },
+		oldEndPosition: { row: 0, column: 0 },
+		newEndPosition: { row: 1, column: 10 },
+	}]);
+
+	const fresh = parser.parse(document.getText());
+	assert.deepStrictEqual(snapshot(trees[key].rootNode), snapshot(fresh.rootNode));
+	fresh.delete();
+	trees[key].delete();
+}
+
 async function verifyUnrelatedLanguagesAreIgnored(parser: Parser): Promise<void> {
 	const document = await vscode.workspace.openTextDocument({
 		language: 'typescript',
@@ -1192,6 +1299,9 @@ suite('Parser and provider behavior', () => {
 	test('iterates without changing walkback results', async () => verifyIterativeWalkback(parser));
 	test('keeps incremental trees equivalent to fresh parses', async () => verifyIncrementalParsing(parser));
 	test('uses pre-edit coordinates for incremental tree edits', async () => verifyIncrementalEditCoordinates(parser));
+	test('handles empty, whole-document, CRLF, and Unicode edits', async () => {
+		await verifyIncrementalBoundaryEdits(parser);
+	});
 	test('ignores edits in unrelated languages', async () => verifyUnrelatedLanguagesAreIgnored(parser));
 	test('reuses the loaded language across parser initialization', async () => {
 		const otherParser = await initializeParser();
@@ -1208,6 +1318,7 @@ suite('Parser and provider behavior', () => {
 	});
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
 	test('refreshes command names after asynchronous lookup', verifyCompletionRefreshesCommandList);
+	test('preserves editor-facing ranges and incomplete-input completions', verifyEditorFacingParserCompatibility);
 	test('resolves command specs strictly through their hierarchy', verifyHierarchicalCommandResolution);
 });
 

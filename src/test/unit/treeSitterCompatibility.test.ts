@@ -42,6 +42,28 @@ suite('web-tree-sitter compatibility', () => {
     });
   });
 
+  test('reports JavaScript UTF-16 offsets for editor-facing node ranges', () => {
+    const source = 'echo 😀あ\r\ngit --flag';
+    withParsedTree(parser, source, tree => {
+      const firstCommand = tree.rootNode.firstNamedChild;
+      const unicodeArgument = firstCommand?.childForFieldName('name')?.nextNamedSibling;
+      assert.ok(unicodeArgument);
+      assert.strictEqual(unicodeArgument.text, '😀あ');
+      assert.strictEqual(unicodeArgument.startIndex, 5);
+      assert.strictEqual(unicodeArgument.endIndex, 8);
+      assert.deepStrictEqual(unicodeArgument.startPosition, { row: 0, column: 5 });
+      assert.deepStrictEqual(unicodeArgument.endPosition, { row: 0, column: 8 });
+
+      const secondCommand = firstCommand?.nextNamedSibling;
+      assert.ok(secondCommand);
+      assert.strictEqual(secondCommand.childForFieldName('name')?.text, 'git');
+      assert.strictEqual(secondCommand.startIndex, 10);
+      assert.deepStrictEqual(secondCommand.startPosition, { row: 1, column: 0 });
+      assert.strictEqual(tree.rootNode.endIndex, source.length);
+      assert.deepStrictEqual(tree.rootNode.endPosition, { row: 1, column: 10 });
+    });
+  });
+
   test('keeps incomplete and multiline input available to editor features', () => {
     withParsedTree(parser, 'git \\\n  --flag', multiline => {
       assert.strictEqual(multiline.rootNode.hasError(), false);

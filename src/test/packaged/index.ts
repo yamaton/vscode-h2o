@@ -1,6 +1,7 @@
 import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import type { Command } from '../../command';
 
 const extensionId = 'tetradresearch.vscode-h2o';
 
@@ -43,5 +44,42 @@ export async function run(): Promise<void> {
 	const commands = new Set(await vscode.commands.getCommands(true));
 	for (const command of ['h2o.clearCache', 'h2o.loadCommand', 'registeredCommands.refreshEntry']) {
 		assert.ok(commands.has(command), `${command} must be registered by the packaged extension`);
+	}
+
+	const originalFetch = packagedCachingFetcher.prototype.fetch;
+	packagedCachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+		assert.strictEqual(name, 'git');
+		return {
+			name: 'git',
+			description: 'packaged parser smoke fixture',
+			options: [{
+				names: ['--vscode-h2o-packaged-smoke'],
+				argument: '',
+				description: 'packaged parser smoke option',
+			}],
+		};
+	};
+	try {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git --v',
+		});
+		const completion = await withTimeout(
+			vscode.commands.executeCommand<vscode.CompletionList>(
+				'vscode.executeCompletionItemProvider',
+				document.uri,
+				document.positionAt(document.getText().length),
+			),
+			10000,
+		);
+		assert.ok(
+			completion.items.some(item =>
+				(typeof item.label === 'string' ? item.label : item.label.label)
+				=== '--vscode-h2o-packaged-smoke'
+			),
+			'the installed VSIX must parse a shell document and provide an option completion',
+		);
+	} finally {
+		packagedCachingFetcher.prototype.fetch = originalFetch;
 	}
 }
