@@ -93,12 +93,17 @@ export type ProviderSuppressionReason =
   | 'herestring_redirect'
   | 'heredoc_redirect';
 
-export interface CursorDebugPosition {
+export interface DebugPosition {
   line: number;
   character: number;
 }
 
-export interface CursorDebugNode {
+export interface DebugLocation extends DebugPosition {
+  offset: number;
+  lineText: string;
+}
+
+export interface DebugNode {
   id: number;
   type: string;
   grammarType: string;
@@ -114,129 +119,131 @@ export interface CursorDebugNode {
   parseState: number;
   nextParseState: number;
   commandToken: boolean;
-  start: CursorDebugPosition & { index: number };
-  end: CursorDebugPosition & { index: number };
+  start: DebugPosition & { index: number };
+  end: DebugPosition & { index: number };
   text: string;
 }
 
-export interface CursorDebugInvocation {
-  name: CursorDebugWord;
-  arguments: CursorDebugWord[];
+export interface DebugInvocation {
+  name: DebugWord;
+  arguments: DebugWord[];
 }
 
-export interface CursorDebugWord {
+export interface DebugWord {
   text: string;
-  start: CursorDebugPosition;
-  end: CursorDebugPosition;
+  start: DebugPosition;
+  end: DebugPosition;
 }
 
-export interface CursorDebugResolution {
+export interface DebugResolution {
   path: string[];
   steps: Array<{
     command: string;
     source: string;
     sourceRange: {
-      start: CursorDebugPosition;
-      end: CursorDebugPosition;
+      start: DebugPosition;
+      end: DebugPosition;
     };
     matchedBy: 'canonical' | 'alias';
   }>;
   stopReason: CommandPathResolution['stopReason'] | null;
 }
 
-export interface CursorDebugProviderDecision {
+export interface DebugProviderDecision {
   enabled: boolean;
-  requestedPosition: CursorDebugPosition;
-  resolvedPosition: CursorDebugPosition;
+  requestedPosition: DebugPosition;
+  resolvedPosition: DebugPosition;
   moved: boolean;
   walkbackUnchanged: boolean;
   includeArgumentAtPosition: boolean;
   resumedAfterHerestring: boolean;
   requestSuppressionReasons: ProviderSuppressionReason[];
   resolvedSuppressionReasons: ProviderSuppressionReason[];
-  resolvedNode: CursorDebugNode;
-  commandNode: CursorDebugNode | null;
-  invocation: CursorDebugInvocation | null;
-  resolution: CursorDebugResolution | null;
+  resolvedNode: DebugNode;
+  commandNode: DebugNode | null;
+  invocation: DebugInvocation | null;
+  resolution: DebugResolution | null;
   lookupError: string | null;
 }
 
-export interface CursorDebugTreeReport {
-  root: CursorDebugNode;
-  currentNode: CursorDebugNode;
-  ancestors: CursorDebugNode[];
-  completion: CursorDebugProviderDecision;
-  hover: CursorDebugProviderDecision;
+export interface DebugTreeReport {
+  root: DebugNode;
+  currentNode: DebugNode;
+  ancestors: DebugNode[];
+  completion: DebugProviderDecision;
+  hover: DebugProviderDecision;
 }
 
-export interface CursorDebugReport {
+export interface CaretDebugReport {
   generatedAt: string;
   document: {
     uri: string;
     languageId: string;
     version: number;
   };
-  cursor: CursorDebugPosition & {
-    offset: number;
-    lineText: string;
-  };
-  cached: CursorDebugTreeReport;
-  fresh: CursorDebugTreeReport;
+  caret: DebugLocation;
+  cached: DebugTreeReport;
+  fresh: DebugTreeReport;
   comparison: {
-    syntaxAtCursorEquivalent: boolean;
+    syntaxAtCaretEquivalent: boolean;
     completionEquivalent: boolean;
     hoverEquivalent: boolean;
   };
 }
 
-export interface LiveCursorDebugNode {
+export interface LiveDebugNode {
   type: string;
   fieldName: string | null;
   commandToken: boolean;
   text: string;
   error: boolean;
   missing: boolean;
-  start: CursorDebugPosition & { index: number };
-  end: CursorDebugPosition & { index: number };
+  start: DebugPosition & { index: number };
+  end: DebugPosition & { index: number };
 }
 
-export interface LiveCursorDebugProviderDecision {
+export interface LiveDebugProviderDecision {
   enabled: boolean;
-  resolvedPosition: CursorDebugPosition;
+  resolvedPosition: DebugPosition;
   moved: boolean;
   walkbackUnchanged: boolean;
   includeArgumentAtPosition: boolean;
   resumedAfterHerestring: boolean;
   requestSuppressionReasons: ProviderSuppressionReason[];
   resolvedSuppressionReasons: ProviderSuppressionReason[];
-  resolvedNode: LiveCursorDebugNode;
-  invocation: CursorDebugInvocation | null;
-  resolution: CursorDebugResolution | null;
+  resolvedNode: LiveDebugNode;
+  invocation: DebugInvocation | null;
+  resolution: DebugResolution | null;
   lookupError: string | null;
 }
 
-export interface LiveCursorDebugSnapshot {
-  document: CursorDebugReport['document'];
-  caret: CursorDebugReport['cursor'];
-  caretNode: LiveCursorDebugNode;
-  cursor: CursorDebugReport['cursor'] | null;
-  cursorNode: LiveCursorDebugNode | null;
-  completion: LiveCursorDebugProviderDecision;
-  hover: LiveCursorDebugProviderDecision | null;
+/**
+ * A caret is the editor insertion point used by completion. A cursor is the
+ * pointer position delivered to the hover provider. Provider decisions may
+ * resolve either request to a separate position.
+ */
+export interface LiveEditorDebugSnapshot {
+  document: CaretDebugReport['document'];
+  caret: DebugLocation;
+  caretNode: LiveDebugNode;
+  cursor: DebugLocation | null;
+  cursorNode: LiveDebugNode | null;
+  completion: LiveDebugProviderDecision;
+  hover: LiveDebugProviderDecision | null;
 }
 
-export interface LiveCursorDebugToggleResult {
+export interface LiveEditorDebugToggleResult {
   enabled: boolean;
-  snapshot?: LiveCursorDebugSnapshot;
+  snapshot?: LiveEditorDebugSnapshot;
 }
 
-export interface LiveCursorDebugState {
+export interface LiveEditorDebugState {
   enabled: boolean;
   updateSequence: number;
-  snapshot?: LiveCursorDebugSnapshot;
+  snapshot?: LiveEditorDebugSnapshot;
 }
 
-interface CompletionCursorDecision {
+interface ProviderPositionDecision {
   enabled: boolean;
   position: vscode.Position;
   walkbackUnchanged: boolean;
@@ -293,7 +300,7 @@ async function registerExtension(
   const compprovider = vscode.languages.registerCompletionItemProvider(
     supportedLanguages,
     {
-      async provideCompletionItems(document, position, token, context) {
+      async provideCompletionItems(document, caret, token, context) {
         if (!parser) {
           console.error("[Completion] Parser is unavailable!");
           return Promise.reject("Parser unavailable!");
@@ -304,24 +311,24 @@ async function registerExtension(
         }
         const tree = trees[document.uri.toString()];
         return withTreeCopy(tree, async requestTree => {
-          const cursorDecision = getCompletionCursorDecision(
+          const caretDecision = getCompletionCaretDecision(
             document,
             requestTree.rootNode,
-            position,
+            caret,
           );
-          if (!cursorDecision.enabled) {
+          if (!caretDecision.enabled) {
             return [];
           }
 
-          const p = cursorDecision.position;
-          const isCursorTouchingWord = cursorDecision.walkbackUnchanged;
-          console.log(`[Completion] isCursorTouchingWord: ${isCursorTouchingWord}`);
+          const resolvedPosition = caretDecision.position;
+          const isCaretTouchingWord = caretDecision.walkbackUnchanged;
+          console.log(`[Completion] isCaretTouchingWord: ${isCaretTouchingWord}`);
 
           try {
-            const includeCurrentArgument = !isCursorTouchingWord;
+            const includeCurrentArgument = !isCaretTouchingWord;
             const commandContext = await getContextCommandResolution(
               requestTree.rootNode,
-              p,
+              resolvedPosition,
               fetcher,
               includeCurrentArgument,
             );
@@ -335,7 +342,7 @@ async function registerExtension(
                 ? []
                 : getCompletionsOptions(
                   requestTree.rootNode,
-                  p,
+                  resolvedPosition,
                   cmdSeq,
                   includeCurrentArgument,
                 );
@@ -344,8 +351,8 @@ async function registerExtension(
                 ...compOptions,
               ];
 
-              if (isCursorTouchingWord) {
-                const currentNode = getCurrentNode(requestTree.rootNode, position);
+              if (isCaretTouchingWord) {
+                const currentNode = getCurrentNode(requestTree.rootNode, caret);
                 const currentWord = currentNode.text;
                 compItems = compItems.filter(compItem => isPrefixOf(currentWord, getLabelString(compItem.label)));
                 compItems.forEach(compItem => {
@@ -358,11 +365,11 @@ async function registerExtension(
               throw new Error("unknown command");
             }
           } catch (e) {
-            const currentNode = getCurrentNode(requestTree.rootNode, position);
+            const currentNode = getCurrentNode(requestTree.rootNode, caret);
             const currentWord = currentNode.text;
             const compCommands = fetcher.getList().map(name => new vscode.CompletionItem(name));
             console.info(`[Completion] currentWord = ${currentWord}`);
-            if (p === position && currentWord.length >= 2) {
+            if (resolvedPosition === caret && currentWord.length >= 2) {
               console.info("[Completion] Only command completion is available (2)");
               let compItems = compCommands.filter(cmd => isPrefixOf(currentWord, getLabelString(cmd.label)));
               compItems.forEach(compItem => {
@@ -381,8 +388,8 @@ async function registerExtension(
   activationRegistrations.push(compprovider);
 
   const hoverprovider = vscode.languages.registerHoverProvider(supportedLanguages, {
-    async provideHover(document, position, token) {
-      trackLiveHoverCursor(document, position);
+    async provideHover(document, cursor, token) {
+      trackLiveHoverCursor(document, cursor);
 
       if (!parser) {
         console.error("[Hover] Parser is unavailable!");
@@ -395,20 +402,20 @@ async function registerExtension(
       }
       const tree = trees[document.uri.toString()];
       return withTreeCopy(tree, async requestTree => {
-        if (isProviderSuppressedAtPosition(requestTree.rootNode, position)) {
+        if (isProviderSuppressedAtPosition(requestTree.rootNode, cursor)) {
           return undefined;
         }
-        const currentWord = getCurrentNode(requestTree.rootNode, position).text;
+        const currentWord = getCurrentNode(requestTree.rootNode, cursor).text;
         try {
-          const commandContext = await getContextCommandResolution(requestTree.rootNode, position, fetcher);
+          const commandContext = await getContextCommandResolution(requestTree.rootNode, cursor, fetcher);
           const cmdSeq = commandContext.resolution.path;
           if (!!cmdSeq && cmdSeq.length) {
             const name = cmdSeq[0].name;
             const subcommandStepIndex = commandContext.resolution.steps.findIndex(
-              step => rangeOfWord(step.source).contains(position),
+              step => rangeOfWord(step.source).contains(cursor),
             );
             const subcommandStep = commandContext.resolution.steps[subcommandStepIndex];
-            if (rangeOfWord(commandContext.invocation.name).contains(position)) {
+            if (rangeOfWord(commandContext.invocation.name).contains(cursor)) {
               // Display root-level command
               const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
               const thisCmd = cmdSeq[0];
@@ -453,26 +460,26 @@ async function registerExtension(
   activationRegistrations.push(hoverprovider);
 
   let debugOutputChannel: vscode.OutputChannel | undefined;
-  const inspectCursorContext = vscode.commands.registerCommand(
-    'h2o.inspectCursorContext',
-    async (): Promise<CursorDebugReport | undefined> => {
+  const inspectCaretContext = vscode.commands.registerCommand(
+    'h2o.inspectCaretContext',
+    async (): Promise<CaretDebugReport | undefined> => {
       const editor = vscode.window.activeTextEditor;
       if (!editor || !supportedLanguages.includes(editor.document.languageId)) {
         void vscode.window.showInformationMessage(
-          '[Shell Completion] Open a Shell Script or BitBake editor to inspect cursor context.',
+          '[Shell Completion] Open a Shell Script or BitBake editor to inspect caret context.',
         );
         return undefined;
       }
 
       const source = editor.document.getText();
-      const cursor = editor.selection.active;
-      const cursorOffset = editor.document.offsetAt(cursor);
+      const caret = editor.selection.active;
+      const caretOffset = editor.document.offsetAt(caret);
       const key = editor.document.uri.toString();
       if (!trees[key]) {
         trees[key] = parseTree(parser, source);
       }
 
-      const report = await createCursorDebugReport(
+      const report = await createCaretDebugReport(
         parser,
         trees[key],
         fetcher,
@@ -482,13 +489,13 @@ async function registerExtension(
           version: editor.document.version,
         },
         source,
-        cursor,
-        cursorOffset,
+        caret,
+        caretOffset,
       );
 
       debugOutputChannel ??= vscode.window.createOutputChannel('Shell Completion Debug');
       debugOutputChannel.appendLine(
-        `=== Cursor Context: ${report.document.uri} @ ${report.cursor.line + 1}:${report.cursor.character + 1} ===`,
+        `=== Caret Context: ${report.document.uri} @ ${report.caret.line + 1}:${report.caret.character + 1} ===`,
       );
       debugOutputChannel.appendLine(JSON.stringify(report, null, 2));
       debugOutputChannel.appendLine('');
@@ -496,14 +503,14 @@ async function registerExtension(
       return report;
     },
   );
-  activationRegistrations.push(inspectCursorContext);
+  activationRegistrations.push(inspectCaretContext);
   activationRegistrations.push({
     dispose: () => debugOutputChannel?.dispose(),
   });
 
   let liveDebugEnabled = false;
   let liveDebugUpdateSequence = 0;
-  let liveDebugLatestSnapshot: LiveCursorDebugSnapshot | undefined;
+  let liveDebugLatestSnapshot: LiveEditorDebugSnapshot | undefined;
   let liveDebugCursor: {
     documentUri: string;
     documentVersion: number;
@@ -518,25 +525,25 @@ async function registerExtension(
     return liveDebugOutputChannel;
   }
 
-  function trackLiveHoverCursor(document: vscode.TextDocument, position: vscode.Position): void {
+  function trackLiveHoverCursor(document: vscode.TextDocument, cursor: vscode.Position): void {
     if (!liveDebugEnabled) {
       return;
     }
     liveDebugCursor = {
       documentUri: document.uri.toString(),
       documentVersion: document.version,
-      position,
+      position: cursor,
     };
     scheduleLiveDebug();
   }
 
-  async function refreshLiveDebug(revision: number): Promise<LiveCursorDebugSnapshot | undefined> {
+  async function refreshLiveDebug(revision: number): Promise<LiveEditorDebugSnapshot | undefined> {
     const editor = vscode.window.activeTextEditor;
     const output = getLiveDebugOutputChannel();
     if (!editor || !supportedLanguages.includes(editor.document.languageId)) {
       if (liveDebugEnabled && revision === liveDebugRevision) {
         output.clear();
-        output.appendLine('Open a Shell Script or BitBake editor to inspect live cursor context.');
+        output.appendLine('Open a Shell Script or BitBake editor to inspect live caret/cursor context.');
       }
       return undefined;
     }
@@ -554,7 +561,7 @@ async function registerExtension(
       trees[key] = parseTree(parser, source);
     }
 
-    const snapshot = await createLiveCursorDebugSnapshot(
+    const snapshot = await createLiveEditorDebugSnapshot(
       trees[key],
       fetcher,
       {
@@ -607,7 +614,7 @@ async function registerExtension(
     return snapshot;
   }
 
-  function runLiveDebugNow(): Promise<LiveCursorDebugSnapshot | undefined> {
+  function runLiveDebugNow(): Promise<LiveEditorDebugSnapshot | undefined> {
     if (liveDebugTimer) {
       clearTimeout(liveDebugTimer);
       liveDebugTimer = undefined;
@@ -630,15 +637,15 @@ async function registerExtension(
         if (liveDebugEnabled && revision === liveDebugRevision) {
           const output = getLiveDebugOutputChannel();
           output.clear();
-          output.appendLine(`Live cursor inspection failed: ${debugError(error)}`);
+          output.appendLine(`Live caret/cursor inspection failed: ${debugError(error)}`);
         }
       });
     }, 80);
   }
 
-  const toggleLiveCursorContext = vscode.commands.registerCommand(
-    'h2o.toggleLiveCursorContext',
-    async (requestedState?: boolean): Promise<LiveCursorDebugToggleResult> => {
+  const toggleLiveCaretAndCursorContext = vscode.commands.registerCommand(
+    'h2o.toggleLiveCaretAndCursorContext',
+    async (requestedState?: boolean): Promise<LiveEditorDebugToggleResult> => {
       const nextState = requestedState ?? !liveDebugEnabled;
       liveDebugEnabled = nextState;
       const output = getLiveDebugOutputChannel();
@@ -656,15 +663,15 @@ async function registerExtension(
           liveDebugTimer = undefined;
         }
         output.clear();
-        output.appendLine('Live cursor context inspection is disabled.');
+        output.appendLine('Live caret/cursor context inspection is disabled.');
         return { enabled: false };
       }
     },
   );
-  activationRegistrations.push(toggleLiveCursorContext);
+  activationRegistrations.push(toggleLiveCaretAndCursorContext);
   activationRegistrations.push(vscode.commands.registerCommand(
-    'h2o.getLiveCursorContextState',
-    (): LiveCursorDebugState => ({
+    'h2o.getLiveCaretAndCursorContextState',
+    (): LiveEditorDebugState => ({
       enabled: liveDebugEnabled,
       updateSequence: liveDebugUpdateSequence,
       snapshot: liveDebugLatestSnapshot,
@@ -1002,16 +1009,16 @@ function isSafeHerestringWalkback(root: Node, position: vscode.Position): boolea
   return reasons.length === 1 && reasons[0] === 'herestring_redirect';
 }
 
-function getCompletionCursorDecision(
+function getCompletionCaretDecision(
   document: LineTextProvider,
   root: Node,
-  position: vscode.Position,
-): CompletionCursorDecision {
-  const requestSuppressionReasons = getProviderSuppressionReasons(root, position);
+  caret: vscode.Position,
+): ProviderPositionDecision {
+  const requestSuppressionReasons = getProviderSuppressionReasons(root, caret);
   if (requestSuppressionReasons.length > 0) {
     return {
       enabled: false,
-      position,
+      position: caret,
       walkbackUnchanged: true,
       resumedAfterHerestring: false,
       requestSuppressionReasons,
@@ -1019,24 +1026,24 @@ function getCompletionCursorDecision(
     };
   }
 
-  const resolvedPosition = walkbackIfNeeded(document, root, position);
+  const resolvedPosition = walkbackCompletionCaretIfNeeded(document, root, caret);
   const resolvedSuppressionReasons = getProviderSuppressionReasons(root, resolvedPosition);
   const resumedAfterHerestring = isSafeHerestringWalkback(root, resolvedPosition);
   return {
     enabled: resolvedSuppressionReasons.length === 0 || resumedAfterHerestring,
     position: resolvedPosition,
-    walkbackUnchanged: resolvedPosition === position,
+    walkbackUnchanged: resolvedPosition === caret,
     resumedAfterHerestring,
     requestSuppressionReasons,
     resolvedSuppressionReasons,
   };
 }
 
-function getHoverCursorDecision(root: Node, position: vscode.Position): CompletionCursorDecision {
-  const suppressionReasons = getProviderSuppressionReasons(root, position);
+function getHoverCursorDecision(root: Node, cursor: vscode.Position): ProviderPositionDecision {
+  const suppressionReasons = getProviderSuppressionReasons(root, cursor);
   return {
     enabled: suppressionReasons.length === 0,
-    position,
+    position: cursor,
     walkbackUnchanged: true,
     resumedAfterHerestring: false,
     requestSuppressionReasons: suppressionReasons,
@@ -1045,25 +1052,29 @@ function getHoverCursorDecision(root: Node, position: vscode.Position): Completi
 }
 
 
-// Moves the position left by one character IF position is contained only in the root-node range.
-// This is just a workround as you cannot reach command node if you start from
-// the position, say, after 'echo '
+// Moves the completion caret left by one character IF it is contained only in
+// the root-node range. This is just a workaround as you cannot reach a command
+// node if you start from the caret, say, after 'echo '.
 // [FIXME] Do not rely on such an ugly hack
-export function walkbackIfNeeded(document: LineTextProvider, root: Node, position: vscode.Position): vscode.Position {
-  let currentPosition = position;
+export function walkbackCompletionCaretIfNeeded(
+  document: LineTextProvider,
+  root: Node,
+  caret: vscode.Position,
+): vscode.Position {
+  let currentPosition = caret;
   let moveCount = 0;
 
   while (true) {
     const thisNode = getCurrentNode(root, currentPosition);
     if (isProviderSuppressedAtPosition(root, currentPosition)) {
       if (moveCount > 0) {
-        console.debug(`[walkbackIfNeeded] moved ${moveCount} time(s); stopped in a suppressed syntax region.`);
+        console.debug(`[walkbackCompletionCaretIfNeeded] moved ${moveCount} time(s); stopped in a suppressed syntax region.`);
       }
       return currentPosition;
     }
     if (thisNode.type === ';') {
       if (moveCount > 0) {
-        console.debug(`[walkbackIfNeeded] moved ${moveCount} time(s); stopped at ${thisNode.type}.`);
+        console.debug(`[walkbackCompletionCaretIfNeeded] moved ${moveCount} time(s); stopped at ${thisNode.type}.`);
       }
       return currentPosition;
     }
@@ -1083,13 +1094,13 @@ export function walkbackIfNeeded(document: LineTextProvider, root: Node, positio
       }
     }
     if (moveCount > 0) {
-      console.debug(`[walkbackIfNeeded] moved ${moveCount} time(s); stopped at ${thisNode.type}.`);
+      console.debug(`[walkbackCompletionCaretIfNeeded] moved ${moveCount} time(s); stopped at ${thisNode.type}.`);
     }
     return currentPosition;
   }
 }
 
-function debugPosition(point: Point | vscode.Position): CursorDebugPosition {
+function debugPosition(point: Point | vscode.Position): DebugPosition {
   return 'row' in point
     ? { line: point.row, character: point.column }
     : { line: point.line, character: point.character };
@@ -1115,7 +1126,7 @@ function debugText(text: string): string {
     : `${text.slice(0, maximumLength - 1)}…`;
 }
 
-function debugNode(node: Node): CursorDebugNode {
+function debugNode(node: Node): DebugNode {
   return {
     id: node.id,
     type: node.type,
@@ -1138,8 +1149,8 @@ function debugNode(node: Node): CursorDebugNode {
   };
 }
 
-function debugAncestors(node: Node): CursorDebugNode[] {
-  const ancestors: CursorDebugNode[] = [];
+function debugAncestors(node: Node): DebugNode[] {
+  const ancestors: DebugNode[] = [];
   let ancestor: Node | null = node;
   while (ancestor) {
     ancestors.push(debugNode(ancestor));
@@ -1148,7 +1159,7 @@ function debugAncestors(node: Node): CursorDebugNode[] {
   return ancestors;
 }
 
-function debugWord(word: CommandWord): CursorDebugWord {
+function debugWord(word: CommandWord): DebugWord {
   return {
     text: word.text,
     start: debugPosition(word.startPosition),
@@ -1156,7 +1167,7 @@ function debugWord(word: CommandWord): CursorDebugWord {
   };
 }
 
-function debugInvocation(invocation: CommandInvocation): CursorDebugInvocation {
+function debugInvocation(invocation: CommandInvocation): DebugInvocation {
   return {
     name: debugWord(invocation.name),
     arguments: invocation.arguments.map(debugWord),
@@ -1165,7 +1176,7 @@ function debugInvocation(invocation: CommandInvocation): CursorDebugInvocation {
 
 function debugResolution(
   resolution: CommandPathResolution<CommandWord>,
-): CursorDebugResolution {
+): DebugResolution {
   return {
     path: resolution.path.map(command => command.name),
     steps: resolution.steps.map(step => ({
@@ -1198,14 +1209,14 @@ function debugError(error: unknown): string {
 async function inspectProviderDecision(
   root: Node,
   requestedPosition: vscode.Position,
-  decision: CompletionCursorDecision,
+  decision: ProviderPositionDecision,
   fetcher: CachingFetcher,
   includeArgumentAtPosition: boolean,
-): Promise<CursorDebugProviderDecision> {
+): Promise<DebugProviderDecision> {
   const commandNode = decision.enabled
     ? _getContextCommandNode(root, decision.position)
     : undefined;
-  const report: CursorDebugProviderDecision = {
+  const report: DebugProviderDecision = {
     enabled: decision.enabled,
     requestedPosition: debugPosition(requestedPosition),
     resolvedPosition: debugPosition(decision.position),
@@ -1247,14 +1258,14 @@ async function inspectProviderDecision(
   return report;
 }
 
-async function inspectTreeCursor(
+async function inspectTreeAtPosition(
   document: LineTextProvider,
   root: Node,
   position: vscode.Position,
   fetcher: CachingFetcher,
-): Promise<CursorDebugTreeReport> {
+): Promise<DebugTreeReport> {
   const currentNode = getCurrentNode(root, position);
-  const completionDecision = getCompletionCursorDecision(document, root, position);
+  const completionDecision = getCompletionCaretDecision(document, root, position);
   const hoverDecision = getHoverCursorDecision(root, position);
 
   return {
@@ -1272,7 +1283,7 @@ async function inspectTreeCursor(
   };
 }
 
-function syntaxComparisonProjection(report: CursorDebugTreeReport): unknown {
+function syntaxComparisonProjection(report: DebugTreeReport): unknown {
   return report.ancestors.map(node => ({
     type: node.type,
     grammarType: node.grammarType,
@@ -1289,7 +1300,7 @@ function syntaxComparisonProjection(report: CursorDebugTreeReport): unknown {
   }));
 }
 
-function providerComparisonProjection(decision: CursorDebugProviderDecision): unknown {
+function providerComparisonProjection(decision: DebugProviderDecision): unknown {
   return {
     enabled: decision.enabled,
     requestedPosition: decision.requestedPosition,
@@ -1328,15 +1339,15 @@ function debugValuesEqual(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-async function createCursorDebugReport(
+async function createCaretDebugReport(
   parser: Parser,
   cachedTree: Tree,
   fetcher: CachingFetcher,
-  document: CursorDebugReport['document'],
+  document: CaretDebugReport['document'],
   source: string,
-  cursor: vscode.Position,
-  cursorOffset: number,
-): Promise<CursorDebugReport> {
+  caret: vscode.Position,
+  caretOffset: number,
+): Promise<CaretDebugReport> {
   const sourceLines = source.split(/\r\n|\r|\n/);
   const lineProvider: LineTextProvider = {
     lineAt: line => ({ text: sourceLines[line] ?? '' }),
@@ -1345,20 +1356,20 @@ async function createCursorDebugReport(
   return withTreeCopy(cachedTree, async cachedCopy => {
     const freshTree = parseTree(parser, source);
     try {
-      const cached = await inspectTreeCursor(lineProvider, cachedCopy.rootNode, cursor, fetcher);
-      const fresh = await inspectTreeCursor(lineProvider, freshTree.rootNode, cursor, fetcher);
+      const cached = await inspectTreeAtPosition(lineProvider, cachedCopy.rootNode, caret, fetcher);
+      const fresh = await inspectTreeAtPosition(lineProvider, freshTree.rootNode, caret, fetcher);
       return {
         generatedAt: new Date().toISOString(),
         document,
-        cursor: {
-          ...debugPosition(cursor),
-          offset: cursorOffset,
-          lineText: sourceLines[cursor.line] ?? '',
+        caret: {
+          ...debugPosition(caret),
+          offset: caretOffset,
+          lineText: sourceLines[caret.line] ?? '',
         },
         cached,
         fresh,
         comparison: {
-          syntaxAtCursorEquivalent: debugValuesEqual(
+          syntaxAtCaretEquivalent: debugValuesEqual(
             syntaxComparisonProjection(cached),
             syntaxComparisonProjection(fresh),
           ),
@@ -1378,7 +1389,7 @@ async function createCursorDebugReport(
   });
 }
 
-function liveDebugNode(node: CursorDebugNode): LiveCursorDebugNode {
+function liveDebugNode(node: DebugNode): LiveDebugNode {
   return {
     type: node.type,
     fieldName: node.fieldName,
@@ -1392,8 +1403,8 @@ function liveDebugNode(node: CursorDebugNode): LiveCursorDebugNode {
 }
 
 function liveProviderDecision(
-  decision: CursorDebugProviderDecision,
-): LiveCursorDebugProviderDecision {
+  decision: DebugProviderDecision,
+): LiveDebugProviderDecision {
   return {
     enabled: decision.enabled,
     resolvedPosition: decision.resolvedPosition,
@@ -1410,16 +1421,16 @@ function liveProviderDecision(
   };
 }
 
-async function createLiveCursorDebugSnapshot(
+async function createLiveEditorDebugSnapshot(
   cachedTree: Tree,
   fetcher: CachingFetcher,
-  document: CursorDebugReport['document'],
+  document: CaretDebugReport['document'],
   source: string,
   caret: vscode.Position,
   caretOffset: number,
   cursor?: vscode.Position,
   cursorOffset?: number,
-): Promise<LiveCursorDebugSnapshot> {
+): Promise<LiveEditorDebugSnapshot> {
   const sourceLines = source.split(/\r\n|\r|\n/);
   const lineProvider: LineTextProvider = {
     lineAt: line => ({ text: sourceLines[line] ?? '' }),
@@ -1428,7 +1439,7 @@ async function createLiveCursorDebugSnapshot(
   return withTreeCopy(cachedTree, async treeCopy => {
     const root = treeCopy.rootNode;
     const caretNode = getCurrentNode(root, caret);
-    const completionDecision = getCompletionCursorDecision(lineProvider, root, caret);
+    const completionDecision = getCompletionCaretDecision(lineProvider, root, caret);
     const completion = await inspectProviderDecision(
       root,
       caret,
@@ -1465,7 +1476,7 @@ async function createLiveCursorDebugSnapshot(
 
 function liveProviderPositionSummary(
   label: 'Completion' | 'Hover',
-  decision: LiveCursorDebugProviderDecision,
+  decision: LiveDebugProviderDecision,
 ): string {
   const position = decision.resolvedPosition;
   return `${label} resolved position: ${position.line + 1}:${position.character + 1}; moved=${decision.moved}; node=${decision.resolvedNode.type}; text=${JSON.stringify(decision.resolvedNode.text)}`;
@@ -1473,7 +1484,7 @@ function liveProviderPositionSummary(
 
 function liveProviderSummary(
   label: 'completion' | 'hover',
-  decision: LiveCursorDebugProviderDecision,
+  decision: LiveDebugProviderDecision,
 ): string {
   const suppressionReasons = decision.requestSuppressionReasons.length > 0
     ? decision.requestSuppressionReasons

@@ -267,7 +267,7 @@ suite('shell command analysis', () => {
     });
   });
 
-  test('limits command arguments to the cursor context', () => {
+  test('limits command arguments to the requested position', () => {
     withFirstNamedNode(parser, 'docker run build', command => {
       const insideRun = { row: 0, column: 8 };
       assert.deepStrictEqual(

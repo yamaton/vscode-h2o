@@ -164,7 +164,7 @@ export function getCommandArguments(commandNode: Node | null | undefined): strin
 }
 
 /**
- * Returns an invocation limited to the cursor context. A completion request
+ * Returns an invocation limited to the requested position. A completion request
  * excludes the argument being edited, while a hover request includes it.
  */
 export function getCommandInvocationToPosition(

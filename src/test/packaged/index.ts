@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { Command } from '../../command';
-import type { CursorDebugReport, LiveCursorDebugToggleResult } from '../../extension';
+import type { CaretDebugReport, LiveEditorDebugToggleResult } from '../../extension';
 
 const extensionId = 'tetradresearch.vscode-h2o';
 
@@ -45,9 +45,9 @@ export async function run(): Promise<void> {
 	const commands = new Set(await vscode.commands.getCommands(true));
 	for (const command of [
 		'h2o.clearCache',
-		'h2o.inspectCursorContext',
+		'h2o.inspectCaretContext',
 		'h2o.loadCommand',
-		'h2o.toggleLiveCursorContext',
+		'h2o.toggleLiveCaretAndCursorContext',
 		'registeredCommands.refreshEntry',
 	]) {
 		assert.ok(commands.has(command), `${command} must be registered by the packaged extension`);
@@ -72,13 +72,13 @@ export async function run(): Promise<void> {
 			content: 'git --v',
 		});
 		const editor = await vscode.window.showTextDocument(document, { preview: false });
-		const cursor = document.positionAt(document.getText().length);
-		editor.selection = new vscode.Selection(cursor, cursor);
+		const caret = document.positionAt(document.getText().length);
+		editor.selection = new vscode.Selection(caret, caret);
 		const completion = await withTimeout(
 			vscode.commands.executeCommand<vscode.CompletionList>(
 				'vscode.executeCompletionItemProvider',
 				document.uri,
-				cursor,
+				caret,
 			),
 			10000,
 		);
@@ -91,21 +91,21 @@ export async function run(): Promise<void> {
 		);
 
 		const debugReport = await withTimeout(
-			vscode.commands.executeCommand<CursorDebugReport>('h2o.inspectCursorContext'),
+			vscode.commands.executeCommand<CaretDebugReport>('h2o.inspectCaretContext'),
 			10000,
 		);
 		assert.strictEqual(debugReport.document.uri, document.uri.toString());
 		assert.strictEqual(debugReport.cached.completion.invocation?.name.text, 'git');
 		assert.deepStrictEqual(debugReport.cached.completion.resolution?.path, ['git']);
 		assert.deepStrictEqual(debugReport.comparison, {
-			syntaxAtCursorEquivalent: true,
+			syntaxAtCaretEquivalent: true,
 			completionEquivalent: true,
 			hoverEquivalent: true,
 		});
 
 		const liveDebug = await withTimeout(
-			vscode.commands.executeCommand<LiveCursorDebugToggleResult>(
-				'h2o.toggleLiveCursorContext',
+			vscode.commands.executeCommand<LiveEditorDebugToggleResult>(
+				'h2o.toggleLiveCaretAndCursorContext',
 				true,
 			),
 			10000,
@@ -113,7 +113,7 @@ export async function run(): Promise<void> {
 		assert.strictEqual(liveDebug.enabled, true);
 		assert.strictEqual(liveDebug.snapshot?.caretNode.type, 'word');
 		assert.ok(!('grammarType' in liveDebug.snapshot!.caretNode));
-		await vscode.commands.executeCommand('h2o.toggleLiveCursorContext', false);
+		await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
 	} finally {
 		packagedCachingFetcher.prototype.fetch = originalFetch;
 	}

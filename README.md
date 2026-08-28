@@ -55,14 +55,14 @@ The following commands are available from the Command Palette while a Shell Scri
 | **Shell Completion: Remove All Bioinformatics CLI Specs** | Remove the bioinformatics collection from the cache. |
 | **Shell Completion: Load Command Spec (experimental)** | Download one specification from the experimental collection. |
 | **Shell Completion: Remove Command Spec** | Remove one cached specification by name. |
-| **Shell Completion: Inspect Cursor Context** | Show parser and provider metadata for the active cursor in the **Shell Completion Debug** output channel. |
-| **Shell Completion: Toggle Live Cursor Context** | Continuously show the provider-critical cursor metadata in the **Shell Completion Live Debug** output channel. |
+| **Shell Completion: Inspect Caret Context** | Show parser and provider metadata for the active caret in the **Shell Completion Debug** output channel. |
+| **Shell Completion: Toggle Live Caret and Cursor Context** | Continuously show provider-critical caret and cursor metadata in the **Shell Completion Live Debug** output channel. |
 
 Loading, updating, or bulk-removing a collection requires an internet connection because the extension fetches its current bundle or command index.
 
-### Inspect Cursor Context
+### Inspect Caret Context
 
-For completion and hover debugging, place the cursor at the position to inspect and run **Shell Completion: Inspect Cursor Context**. The command writes a JSON report to the **Shell Completion Debug** output channel and also returns that report to programmatic command callers. It includes:
+For completion debugging, or to inspect how hover would resolve at the insertion point, place the caret at the position to inspect and run **Shell Completion: Inspect Caret Context**. The command writes a JSON report to the **Shell Completion Debug** output channel and also returns that report to programmatic command callers. It includes:
 
 * the tree-sitter node and ancestor chain, including grammar types, field names, ranges, error and missing-node flags, and parse states;
 * the completion walkback position and redirect or error-recovery suppression reasons;
@@ -71,7 +71,7 @@ For completion and hover debugging, place the cursor at the position to inspect 
 
 The inspection follows the normal provider lookup path, so inspecting a command may populate its regenerable command-specification cache.
 
-For a compact view that follows caret movement, document edits, and hover requests, run **Shell Completion: Toggle Live Cursor Context**. While enabled, the **Shell Completion Live Debug** output channel is replaced after each debounced update. Its header reports the editor caret and the latest cursor position that VS Code delivered to the hover provider as independent locations, followed by the completion and hover positions actually used for provider decisions. This makes both kinds of movement explicit: completion may walk back from the caret to recover command context, while hover is evaluated at the cursor rather than the caret. VS Code does not expose raw mouse-move events to extensions, so Cursor is shown as not observed until the first hover request and is refreshed on subsequent hover requests. The output contains only values used by completion or hover decisions: node type, text and command-field role; suppression and walkback state; command invocation; and subcommand resolution path, source ranges, aliases, and stop reason. Run the same command again to disable live inspection. Live inspection does not show grammar types, node IDs, or parse states because the providers do not consult them.
+For a compact view that follows caret movement, document edits, and hover requests, run **Shell Completion: Toggle Live Caret and Cursor Context**. While enabled, the **Shell Completion Live Debug** output channel is replaced after each debounced update. Its header reports the editor caret and the latest cursor position that VS Code delivered to the hover provider as independent locations, followed by the completion and hover positions actually used for provider decisions. This makes both kinds of movement explicit: completion may walk back from the caret to recover command context, while hover is evaluated at the cursor rather than the caret. VS Code does not expose raw mouse-move events to extensions, so Cursor is shown as not observed until the first hover request and is refreshed on subsequent hover requests. The output contains only values used by completion or hover decisions: node type, text and command-field role; suppression and walkback state; command invocation; and subcommand resolution path, source ranges, aliases, and stop reason. Run the same command again to disable live inspection. Live inspection does not show grammar types, node IDs, or parse states because the providers do not consult them.
 
 The H2O executable can also be selected with the `shellCompletion.h2oPath` setting. Its default value, `<bundled>`, uses the scanner packaged for the current platform.
 
@@ -91,7 +91,7 @@ Remote environments such as WSL use the platform of their VS Code Extension Host
 
 ## How It Works
 
-* [tree-sitter](https://tree-sitter.github.io/tree-sitter/) identifies the command, subcommand, and option at the cursor.
+* [tree-sitter](https://tree-sitter.github.io/tree-sitter/) identifies the command, subcommand, and option at the provider's requested position.
 * The extension first looks for a command specification in its in-memory cache, restored from a compressed snapshot in VS Code global storage. This on-disk cache is regenerable and is not synchronized through Settings Sync.
 * The common curated collection is downloaded in the background when the extension activates. Existing cached entries are preserved unless you explicitly reload the collection.
 * For an unknown command available in the local environment, the bundled [H2O](https://github.com/yamaton/h2o) scanner runs `<command> --help`, parses the output, and caches the result.

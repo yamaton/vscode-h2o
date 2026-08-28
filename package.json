@@ -61,12 +61,12 @@
                 "title": "Shell Completion: Load Command Spec (experimental)"
             },
             {
-                "command": "h2o.inspectCursorContext",
-                "title": "Shell Completion: Inspect Cursor Context"
+                "command": "h2o.inspectCaretContext",
+                "title": "Shell Completion: Inspect Caret Context"
             },
             {
-                "command": "h2o.toggleLiveCursorContext",
-                "title": "Shell Completion: Toggle Live Cursor Context"
+                "command": "h2o.toggleLiveCaretAndCursorContext",
+                "title": "Shell Completion: Toggle Live Caret and Cursor Context"
             },
             {
                 "command": "registeredCommands.refreshEntry",
@@ -102,11 +102,11 @@
                     "when": "editorLangId == shellscript || editorLangId == bitbake"
                 },
                 {
-                    "command": "h2o.inspectCursorContext",
+                    "command": "h2o.inspectCaretContext",
                     "when": "editorLangId == shellscript || editorLangId == bitbake"
                 },
                 {
-                    "command": "h2o.toggleLiveCursorContext",
+                    "command": "h2o.toggleLiveCaretAndCursorContext",
                     "when": "editorLangId == shellscript || editorLangId == bitbake"
                 }
             ],
