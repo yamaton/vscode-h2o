@@ -56,7 +56,8 @@ The following commands are available from the Command Palette while a Shell Scri
 | **Shell Completion: Load Command Spec (experimental)** | Download one specification from the experimental collection. |
 | **Shell Completion: Remove Command Spec** | Remove one cached specification by name. |
 | **Shell Completion: Inspect Caret Context** | Show parser and provider metadata for the active caret in the **Shell Completion Debug** output channel. |
-| **Shell Completion: Toggle Live Caret and Cursor Context** | Continuously show provider-critical caret and cursor metadata in the **Shell Completion Live Debug** output channel. |
+| **Shell Completion: Toggle Live Caret and Cursor Context** | Toggle the live Completion, Hover, and Tree-sitter debug views. |
+| **Shell Completion: Show Live Debug Views** | Open the **H2O Debug** panel, enabling live inspection if necessary. |
 
 Loading, updating, or bulk-removing a collection requires an internet connection because the extension fetches its current bundle or command index.
 
@@ -71,7 +72,13 @@ For completion debugging, or to inspect how hover would resolve at the insertion
 
 The inspection follows the normal provider lookup path, so inspecting a command may populate its regenerable command-specification cache.
 
-For a compact view that follows caret movement, document edits, and hover requests, run **Shell Completion: Toggle Live Caret and Cursor Context**. While enabled, the **Shell Completion Live Debug** output channel is replaced after each debounced update. Its header reports the editor caret and the latest cursor position that VS Code delivered to the hover provider as independent locations, followed by the completion and hover positions actually used for provider decisions. This makes both kinds of movement explicit: completion may walk back from the caret to recover command context, while hover is evaluated at the cursor rather than the caret. VS Code does not expose raw mouse-move events to extensions, so Cursor is shown as not observed until the first hover request and is refreshed on subsequent hover requests. The output contains only values used by completion or hover decisions: node type, text and command-field role; suppression and walkback state; command invocation; and subcommand resolution path, source ranges, aliases, and stop reason. Run the same command again to disable live inspection. Live inspection does not show grammar types, node IDs, or parse states because the providers do not consult them.
+For a compact view that follows caret movement, document edits, and hover requests, run **Shell Completion: Show Live Debug Views**. The **H2O Debug** panel separates the live information into three views:
+
+* **Completion** follows the editor caret and shows the provider decision, requested-to-resolved walkback, command path, resolver stop reason, and the item count returned by the latest actual completion request.
+* **Hover** follows the latest position VS Code delivered to the hover provider and shows the independent provider decision and whether an actual hover was returned. VS Code does not expose raw mouse-move events to extensions, so this view waits for the first hover request rather than pretending that the pointer is continuously observable.
+* **Tree-sitter** shows the current nodes and expandable ancestor chains for the caret and the latest hover cursor. Grammar type, field name, range, text, and exceptional flags are kept here instead of being mixed into the provider summaries.
+
+While live inspection is enabled, a single status bar item shows only the high-level state, for example `H2O C✓ H— TS:word`. `C` is completion, `H` is hover, and `TS` is the tree-sitter node at the caret. Click it to reveal the debug views. The view toolbar can pause and resume updates. Each view also has an **Open Debug Snapshot** action that opens its full current data as a read-only virtual JSON document for searching and copying; live JSON is no longer streamed through an Output channel. Run **Shell Completion: Toggle Live Caret and Cursor Context** to disable or re-enable the interface.
 
 The H2O executable can also be selected with the `shellCompletion.h2oPath` setting. Its default value, `<bundled>`, uses the scanner packaged for the current platform.
 

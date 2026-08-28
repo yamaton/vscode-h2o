@@ -69,6 +69,36 @@
                 "title": "Shell Completion: Toggle Live Caret and Cursor Context"
             },
             {
+                "command": "h2o.showLiveDebugViews",
+                "title": "Shell Completion: Show Live Debug Views",
+                "icon": "$(inspect)"
+            },
+            {
+                "command": "h2o.pauseLiveDebug",
+                "title": "Shell Completion: Pause Live Debug",
+                "icon": "$(debug-pause)"
+            },
+            {
+                "command": "h2o.resumeLiveDebug",
+                "title": "Shell Completion: Resume Live Debug",
+                "icon": "$(debug-start)"
+            },
+            {
+                "command": "h2o.openCompletionDebugSnapshot",
+                "title": "Shell Completion: Open Completion Debug Snapshot",
+                "icon": "$(json)"
+            },
+            {
+                "command": "h2o.openHoverDebugSnapshot",
+                "title": "Shell Completion: Open Hover Debug Snapshot",
+                "icon": "$(json)"
+            },
+            {
+                "command": "h2o.openTreeSitterDebugSnapshot",
+                "title": "Shell Completion: Open Tree-sitter Debug Snapshot",
+                "icon": "$(json)"
+            },
+            {
                 "command": "registeredCommands.refreshEntry",
                 "title": "Refresh",
                 "icon": "$(refresh)"
@@ -108,6 +138,10 @@
                 {
                     "command": "h2o.toggleLiveCaretAndCursorContext",
                     "when": "editorLangId == shellscript || editorLangId == bitbake"
+                },
+                {
+                    "command": "h2o.showLiveDebugViews",
+                    "when": "editorLangId == shellscript || editorLangId == bitbake"
                 }
             ],
             "view/title": [
@@ -115,6 +149,31 @@
                     "command": "registeredCommands.refreshEntry",
                     "when": "view == registeredCommands",
                     "group": "navigation"
+                },
+                {
+                    "command": "h2o.pauseLiveDebug",
+                    "when": "view =~ /h2o\\.debug\\.(completion|hover|treeSitter)/ && h2o.liveDebugEnabled && !h2o.liveDebugPaused",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "h2o.resumeLiveDebug",
+                    "when": "view =~ /h2o\\.debug\\.(completion|hover|treeSitter)/ && h2o.liveDebugEnabled && h2o.liveDebugPaused",
+                    "group": "navigation@1"
+                },
+                {
+                    "command": "h2o.openCompletionDebugSnapshot",
+                    "when": "view == h2o.debug.completion && h2o.liveDebugEnabled",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "h2o.openHoverDebugSnapshot",
+                    "when": "view == h2o.debug.hover && h2o.liveDebugEnabled",
+                    "group": "navigation@2"
+                },
+                {
+                    "command": "h2o.openTreeSitterDebugSnapshot",
+                    "when": "view == h2o.debug.treeSitter && h2o.liveDebugEnabled",
+                    "group": "navigation@2"
                 }
             ],
             "view/item/context": [
@@ -139,12 +198,38 @@
                 }
             }
         },
+        "viewsContainers": {
+            "panel": [
+                {
+                    "id": "h2oDebug",
+                    "title": "H2O Debug",
+                    "icon": "images/debug.svg"
+                }
+            ]
+        },
         "views": {
             "explorer": [
                 {
                     "id": "registeredCommands",
                     "name": "Shell Commands",
                     "visibility": "collapsed"
+                }
+            ],
+            "h2oDebug": [
+                {
+                    "id": "h2o.debug.completion",
+                    "name": "Completion",
+                    "visibility": "visible"
+                },
+                {
+                    "id": "h2o.debug.hover",
+                    "name": "Hover",
+                    "visibility": "visible"
+                },
+                {
+                    "id": "h2o.debug.treeSitter",
+                    "name": "Tree-sitter",
+                    "visibility": "visible"
                 }
             ]
         }

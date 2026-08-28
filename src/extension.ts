@@ -19,6 +19,14 @@ import {
 } from './analyzer';
 import { loadLanguageOnce } from './parserLanguage';
 import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription } from './utils';
+import {
+  debugDocumentScheme,
+  LiveDebugViewManager,
+  type LiveCompletionProviderTrace,
+  type LiveDebugPresentationState,
+  type LiveHoverProviderTrace,
+  type LiveProviderTraces,
+} from './debugView';
 
 
 const supportedLanguages = ['shellscript', 'bitbake'];
@@ -191,16 +199,7 @@ export interface CaretDebugReport {
   };
 }
 
-export interface LiveDebugNode {
-  type: string;
-  fieldName: string | null;
-  commandToken: boolean;
-  text: string;
-  error: boolean;
-  missing: boolean;
-  start: DebugPosition & { index: number };
-  end: DebugPosition & { index: number };
-}
+export type LiveDebugNode = DebugNode;
 
 export interface LiveDebugProviderDecision {
   enabled: boolean;
@@ -226,8 +225,10 @@ export interface LiveEditorDebugSnapshot {
   document: CaretDebugReport['document'];
   caret: DebugLocation;
   caretNode: LiveDebugNode;
+  caretAncestors: LiveDebugNode[];
   cursor: DebugLocation | null;
   cursorNode: LiveDebugNode | null;
+  cursorAncestors: LiveDebugNode[];
   completion: LiveDebugProviderDecision;
   hover: LiveDebugProviderDecision | null;
 }
@@ -239,8 +240,16 @@ export interface LiveEditorDebugToggleResult {
 
 export interface LiveEditorDebugState {
   enabled: boolean;
+  paused: boolean;
   updateSequence: number;
+  traces: LiveProviderTraces;
+  presentation: LiveDebugPresentationState;
   snapshot?: LiveEditorDebugSnapshot;
+}
+
+export interface LiveEditorDebugPauseResult {
+  enabled: boolean;
+  paused: boolean;
 }
 
 interface ProviderPositionDecision {
@@ -301,8 +310,12 @@ async function registerExtension(
     supportedLanguages,
     {
       async provideCompletionItems(document, caret, token, context) {
+        const liveTraceRequest = trackLiveCompletionRequest(document, caret);
         if (!parser) {
           console.error("[Completion] Parser is unavailable!");
+          trackLiveCompletionResult(liveTraceRequest, 'error', {
+            error: 'Parser unavailable!',
+          });
           return Promise.reject("Parser unavailable!");
         }
         if (!trees[document.uri.toString()]) {
@@ -317,6 +330,7 @@ async function registerExtension(
             caret,
           );
           if (!caretDecision.enabled) {
+            trackLiveCompletionResult(liveTraceRequest, 'suppressed', { itemCount: 0 });
             return [];
           }
 
@@ -360,6 +374,9 @@ async function registerExtension(
                 });
                 console.info(`[Completion] currentWord: ${currentWord}`);
               }
+              trackLiveCompletionResult(liveTraceRequest, 'items', {
+                itemCount: compItems.length,
+              });
               return compItems;
             } else {
               throw new Error("unknown command");
@@ -375,9 +392,17 @@ async function registerExtension(
               compItems.forEach(compItem => {
                 compItem.range = range(currentNode);
               });
+              trackLiveCompletionResult(liveTraceRequest, 'items', {
+                itemCount: compItems.length,
+                fallback: true,
+                error: debugError(e),
+              });
               return compItems;
             }
             console.warn("[Completion] No completion item is available (1)", e);
+            trackLiveCompletionResult(liveTraceRequest, 'error', {
+              error: debugError(e),
+            });
             return Promise.reject("Error: No completion item is available");
           }
         });
@@ -389,10 +414,11 @@ async function registerExtension(
 
   const hoverprovider = vscode.languages.registerHoverProvider(supportedLanguages, {
     async provideHover(document, cursor, token) {
-      trackLiveHoverCursor(document, cursor);
+      const liveTraceRequest = trackLiveHoverRequest(document, cursor);
 
       if (!parser) {
         console.error("[Hover] Parser is unavailable!");
+        trackLiveHoverResult(liveTraceRequest, 'error', 'Parser is unavailable!');
         return Promise.reject("Parser is unavailable!");
       }
 
@@ -403,6 +429,7 @@ async function registerExtension(
       const tree = trees[document.uri.toString()];
       return withTreeCopy(tree, async requestTree => {
         if (isProviderSuppressedAtPosition(requestTree.rootNode, cursor)) {
+          trackLiveHoverResult(liveTraceRequest, 'suppressed');
           return undefined;
         }
         const currentWord = getCurrentNode(requestTree.rootNode, cursor).text;
@@ -426,6 +453,7 @@ async function registerExtension(
               msg.isTrusted = {
                 enabledCommands: ['h2o.clearCache'],
               };
+              trackLiveHoverResult(liveTraceRequest, 'hover');
               return new vscode.Hover(msg);
             } else if (subcommandStep) {
               // Display a subcommand
@@ -439,20 +467,25 @@ async function registerExtension(
                 : thatCmd.description;
               const usageText = formatUsage(thatCmd.usage);
               const msg = `${cmdPrefixName} **${subcommandStep.source.text}**\n\n${description}${usageText}`;
+              trackLiveHoverResult(liveTraceRequest, 'hover');
               return new vscode.Hover(new vscode.MarkdownString(msg));
             } else if (cmdSeq.length
               && commandContext.resolution.stopReason !== 'end-of-options') {
               const opts = getMatchingOption(currentWord, name, cmdSeq);
               const msg = optsToMessage(opts);
+              trackLiveHoverResult(liveTraceRequest, 'hover');
               return new vscode.Hover(new vscode.MarkdownString(msg));
             } else {
+              trackLiveHoverResult(liveTraceRequest, 'none', `No hover is available for ${currentWord}`);
               return Promise.reject(`No hover is available for ${currentWord}`);
             }
           }
         } catch (e) {
           console.log("[Hover] Error: ", e);
+          trackLiveHoverResult(liveTraceRequest, 'error', debugError(e));
           return Promise.reject("No hover is available");
         }
+        trackLiveHoverResult(liveTraceRequest, 'none');
         return undefined;
       });
     }
@@ -509,8 +542,20 @@ async function registerExtension(
   });
 
   let liveDebugEnabled = false;
+  let liveDebugPaused = false;
   let liveDebugUpdateSequence = 0;
   let liveDebugLatestSnapshot: LiveEditorDebugSnapshot | undefined;
+  let liveDebugCompletionTrace: LiveCompletionProviderTrace | null = null;
+  let liveDebugHoverTrace: LiveHoverProviderTrace | null = null;
+  interface LiveTraceRequest {
+    id: number;
+    documentUri: string;
+    documentVersion: number;
+    position: DebugPosition;
+  }
+  let liveDebugTraceRequestSequence = 0;
+  let liveDebugCompletionRequestId: number | undefined;
+  let liveDebugHoverRequestId: number | undefined;
   let liveDebugCursor: {
     documentUri: string;
     documentVersion: number;
@@ -518,32 +563,154 @@ async function registerExtension(
   } | undefined;
   let liveDebugRevision = 0;
   let liveDebugTimer: ReturnType<typeof setTimeout> | undefined;
-  let liveDebugOutputChannel: vscode.OutputChannel | undefined;
+  const liveDebugViews = new LiveDebugViewManager();
+  activationRegistrations.push(liveDebugViews, ...liveDebugViews.registrations());
+  void vscode.commands.executeCommand('setContext', 'h2o.liveDebugEnabled', false);
+  void vscode.commands.executeCommand('setContext', 'h2o.liveDebugPaused', false);
 
-  function getLiveDebugOutputChannel(): vscode.OutputChannel {
-    liveDebugOutputChannel ??= vscode.window.createOutputChannel('Shell Completion Live Debug');
-    return liveDebugOutputChannel;
+  function liveDebugTraces(): LiveProviderTraces {
+    return {
+      completion: liveDebugCompletionTrace,
+      hover: liveDebugHoverTrace,
+    };
   }
 
-  function trackLiveHoverCursor(document: vscode.TextDocument, cursor: vscode.Position): void {
-    if (!liveDebugEnabled) {
-      return;
+  function renderLiveDebugViews(): void {
+    try {
+      liveDebugViews.update(
+        liveDebugEnabled,
+        liveDebugPaused,
+        liveDebugLatestSnapshot,
+        liveDebugTraces(),
+      );
+    } catch (error) {
+      console.error(`[Live Debug] Failed to update the debug interface: ${debugError(error)}`);
     }
-    liveDebugCursor = {
+  }
+
+  function traceRequest(document: vscode.TextDocument, position: vscode.Position): LiveTraceRequest {
+    return {
+      id: ++liveDebugTraceRequestSequence,
       documentUri: document.uri.toString(),
       documentVersion: document.version,
+      position: debugPosition(position),
+    };
+  }
+
+  function trackLiveCompletionRequest(
+    document: vscode.TextDocument,
+    caret: vscode.Position,
+  ): LiveTraceRequest | undefined {
+    if (!liveDebugEnabled || liveDebugPaused) {
+      return undefined;
+    }
+    const request = traceRequest(document, caret);
+    liveDebugCompletionRequestId = request.id;
+    liveDebugCompletionTrace = {
+      documentUri: request.documentUri,
+      documentVersion: request.documentVersion,
+      position: request.position,
+      observedAt: new Date().toISOString(),
+      outcome: 'pending',
+      itemCount: null,
+      fallback: false,
+      error: null,
+    };
+    renderLiveDebugViews();
+    return request;
+  }
+
+  function trackLiveCompletionResult(
+    request: LiveTraceRequest | undefined,
+    outcome: LiveCompletionProviderTrace['outcome'],
+    details: {
+      itemCount?: number;
+      fallback?: boolean;
+      error?: string;
+    } = {},
+  ): void {
+    if (
+      !request
+      || !liveDebugEnabled
+      || liveDebugPaused
+      || request.id !== liveDebugCompletionRequestId
+    ) {
+      return;
+    }
+    liveDebugCompletionTrace = {
+      documentUri: request.documentUri,
+      documentVersion: request.documentVersion,
+      position: request.position,
+      observedAt: new Date().toISOString(),
+      outcome,
+      itemCount: details.itemCount ?? null,
+      fallback: details.fallback ?? false,
+      error: details.error ?? null,
+    };
+    renderLiveDebugViews();
+  }
+
+  function trackLiveHoverRequest(
+    document: vscode.TextDocument,
+    cursor: vscode.Position,
+  ): LiveTraceRequest | undefined {
+    if (!liveDebugEnabled || liveDebugPaused) {
+      return undefined;
+    }
+    const request = traceRequest(document, cursor);
+    liveDebugHoverRequestId = request.id;
+    liveDebugCursor = {
+      documentUri: request.documentUri,
+      documentVersion: request.documentVersion,
       position: cursor,
     };
+    liveDebugHoverTrace = {
+      documentUri: request.documentUri,
+      documentVersion: request.documentVersion,
+      position: request.position,
+      observedAt: new Date().toISOString(),
+      outcome: 'pending',
+      error: null,
+    };
+    renderLiveDebugViews();
     scheduleLiveDebug();
+    return request;
+  }
+
+  function trackLiveHoverResult(
+    request: LiveTraceRequest | undefined,
+    outcome: LiveHoverProviderTrace['outcome'],
+    error?: string,
+  ): void {
+    if (
+      !request
+      || !liveDebugEnabled
+      || liveDebugPaused
+      || request.id !== liveDebugHoverRequestId
+    ) {
+      return;
+    }
+    liveDebugHoverTrace = {
+      documentUri: request.documentUri,
+      documentVersion: request.documentVersion,
+      position: request.position,
+      observedAt: new Date().toISOString(),
+      outcome,
+      error: error ?? null,
+    };
+    renderLiveDebugViews();
   }
 
   async function refreshLiveDebug(revision: number): Promise<LiveEditorDebugSnapshot | undefined> {
     const editor = vscode.window.activeTextEditor;
-    const output = getLiveDebugOutputChannel();
+    if (editor?.document.uri.scheme === debugDocumentScheme) {
+      return liveDebugLatestSnapshot;
+    }
     if (!editor || !supportedLanguages.includes(editor.document.languageId)) {
-      if (liveDebugEnabled && revision === liveDebugRevision) {
-        output.clear();
-        output.appendLine('Open a Shell Script or BitBake editor to inspect live caret/cursor context.');
+      if (liveDebugEnabled && !liveDebugPaused && revision === liveDebugRevision) {
+        liveDebugLatestSnapshot = undefined;
+        liveDebugUpdateSequence += 1;
+        renderLiveDebugViews();
       }
       return undefined;
     }
@@ -575,42 +742,13 @@ async function registerExtension(
       cursor,
       cursorOffset,
     );
-    if (!liveDebugEnabled || revision !== liveDebugRevision) {
+    if (!liveDebugEnabled || liveDebugPaused || revision !== liveDebugRevision) {
       return undefined;
     }
 
     liveDebugLatestSnapshot = snapshot;
     liveDebugUpdateSequence += 1;
-    output.clear();
-    output.appendLine(
-      `Live update #${liveDebugUpdateSequence}: ${snapshot.document.uri}`,
-    );
-    output.appendLine(
-      `Caret: ${snapshot.caret.line + 1}:${snapshot.caret.character + 1}; offset=${snapshot.caret.offset}; documentVersion=${snapshot.document.version}`,
-    );
-    output.appendLine(
-      `Caret node: type=${snapshot.caretNode.type}; field=${snapshot.caretNode.fieldName ?? '-'}; commandToken=${snapshot.caretNode.commandToken}; text=${JSON.stringify(snapshot.caretNode.text)}`,
-    );
-    if (snapshot.cursor && snapshot.cursorNode) {
-      output.appendLine(
-        `Cursor: ${snapshot.cursor.line + 1}:${snapshot.cursor.character + 1}; offset=${snapshot.cursor.offset}`,
-      );
-      output.appendLine(
-        `Cursor node: type=${snapshot.cursorNode.type}; field=${snapshot.cursorNode.fieldName ?? '-'}; commandToken=${snapshot.cursorNode.commandToken}; text=${JSON.stringify(snapshot.cursorNode.text)}`,
-      );
-    } else {
-      output.appendLine('Cursor: not observed yet (waiting for a hover request)');
-    }
-    output.appendLine(liveProviderPositionSummary('Completion', snapshot.completion));
-    if (snapshot.hover) {
-      output.appendLine(liveProviderPositionSummary('Hover', snapshot.hover));
-    }
-    output.appendLine(liveProviderSummary('completion', snapshot.completion));
-    output.appendLine(snapshot.hover
-      ? liveProviderSummary('hover', snapshot.hover)
-      : 'hover: waiting for a hover request');
-    output.appendLine('');
-    output.appendLine(JSON.stringify(snapshot, null, 2));
+    renderLiveDebugViews();
     return snapshot;
   }
 
@@ -624,7 +762,7 @@ async function registerExtension(
   }
 
   function scheduleLiveDebug(): void {
-    if (!liveDebugEnabled) {
+    if (!liveDebugEnabled || liveDebugPaused) {
       return;
     }
     if (liveDebugTimer) {
@@ -634,10 +772,8 @@ async function registerExtension(
     liveDebugTimer = setTimeout(() => {
       liveDebugTimer = undefined;
       void refreshLiveDebug(revision).catch(error => {
-        if (liveDebugEnabled && revision === liveDebugRevision) {
-          const output = getLiveDebugOutputChannel();
-          output.clear();
-          output.appendLine(`Live caret/cursor inspection failed: ${debugError(error)}`);
+        if (liveDebugEnabled && !liveDebugPaused && revision === liveDebugRevision) {
+          console.error(`Live caret/cursor inspection failed: ${debugError(error)}`);
         }
       });
     }, 80);
@@ -647,23 +783,41 @@ async function registerExtension(
     'h2o.toggleLiveCaretAndCursorContext',
     async (requestedState?: boolean): Promise<LiveEditorDebugToggleResult> => {
       const nextState = requestedState ?? !liveDebugEnabled;
-      liveDebugEnabled = nextState;
-      const output = getLiveDebugOutputChannel();
 
-      if (liveDebugEnabled) {
+      if (nextState) {
+        if (!liveDebugEnabled) {
+          liveDebugLatestSnapshot = undefined;
+          liveDebugCompletionTrace = null;
+          liveDebugHoverTrace = null;
+          liveDebugCompletionRequestId = undefined;
+          liveDebugHoverRequestId = undefined;
+        }
+        liveDebugEnabled = true;
+        liveDebugPaused = false;
         liveDebugCursor = undefined;
-        output.show(true);
+        void vscode.commands.executeCommand('setContext', 'h2o.liveDebugEnabled', true);
+        void vscode.commands.executeCommand('setContext', 'h2o.liveDebugPaused', false);
+        renderLiveDebugViews();
+        void vscode.commands.executeCommand('workbench.view.extension.h2oDebug');
         const snapshot = await runLiveDebugNow();
         return { enabled: true, snapshot };
       } else {
+        liveDebugEnabled = false;
+        liveDebugPaused = false;
         liveDebugRevision += 1;
+        liveDebugLatestSnapshot = undefined;
+        liveDebugCompletionTrace = null;
+        liveDebugHoverTrace = null;
+        liveDebugCompletionRequestId = undefined;
+        liveDebugHoverRequestId = undefined;
         liveDebugCursor = undefined;
         if (liveDebugTimer) {
           clearTimeout(liveDebugTimer);
           liveDebugTimer = undefined;
         }
-        output.clear();
-        output.appendLine('Live caret/cursor context inspection is disabled.');
+        void vscode.commands.executeCommand('setContext', 'h2o.liveDebugEnabled', false);
+        void vscode.commands.executeCommand('setContext', 'h2o.liveDebugPaused', false);
+        renderLiveDebugViews();
         return { enabled: false };
       }
     },
@@ -673,9 +827,67 @@ async function registerExtension(
     'h2o.getLiveCaretAndCursorContextState',
     (): LiveEditorDebugState => ({
       enabled: liveDebugEnabled,
+      paused: liveDebugPaused,
       updateSequence: liveDebugUpdateSequence,
+      traces: liveDebugTraces(),
+      presentation: liveDebugViews.getPresentation(),
       snapshot: liveDebugLatestSnapshot,
     }),
+  ));
+  activationRegistrations.push(vscode.commands.registerCommand(
+    'h2o.toggleLiveDebugPause',
+    async (requestedState?: boolean): Promise<LiveEditorDebugPauseResult> => {
+      if (!liveDebugEnabled) {
+        return { enabled: false, paused: false };
+      }
+      liveDebugPaused = requestedState ?? !liveDebugPaused;
+      void vscode.commands.executeCommand('setContext', 'h2o.liveDebugPaused', liveDebugPaused);
+      if (liveDebugPaused) {
+        liveDebugRevision += 1;
+        liveDebugCompletionRequestId = undefined;
+        liveDebugHoverRequestId = undefined;
+        if (liveDebugTimer) {
+          clearTimeout(liveDebugTimer);
+          liveDebugTimer = undefined;
+        }
+        renderLiveDebugViews();
+      } else {
+        renderLiveDebugViews();
+        await runLiveDebugNow();
+      }
+      return { enabled: true, paused: liveDebugPaused };
+    },
+  ));
+  activationRegistrations.push(vscode.commands.registerCommand(
+    'h2o.pauseLiveDebug',
+    (): Thenable<LiveEditorDebugPauseResult> =>
+      vscode.commands.executeCommand('h2o.toggleLiveDebugPause', true),
+  ));
+  activationRegistrations.push(vscode.commands.registerCommand(
+    'h2o.resumeLiveDebug',
+    (): Thenable<LiveEditorDebugPauseResult> =>
+      vscode.commands.executeCommand('h2o.toggleLiveDebugPause', false),
+  ));
+  activationRegistrations.push(vscode.commands.registerCommand(
+    'h2o.showLiveDebugViews',
+    async (): Promise<void> => {
+      if (!liveDebugEnabled) {
+        await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', true);
+      }
+      await vscode.commands.executeCommand('workbench.view.extension.h2oDebug');
+    },
+  ));
+  activationRegistrations.push(vscode.commands.registerCommand(
+    'h2o.openCompletionDebugSnapshot',
+    () => liveDebugViews.openSnapshot('completion'),
+  ));
+  activationRegistrations.push(vscode.commands.registerCommand(
+    'h2o.openHoverDebugSnapshot',
+    () => liveDebugViews.openSnapshot('hover'),
+  ));
+  activationRegistrations.push(vscode.commands.registerCommand(
+    'h2o.openTreeSitterDebugSnapshot',
+    () => liveDebugViews.openSnapshot('tree-sitter'),
   ));
   activationRegistrations.push(vscode.window.onDidChangeActiveTextEditor(() => {
     liveDebugCursor = undefined;
@@ -689,13 +901,17 @@ async function registerExtension(
   activationRegistrations.push({
     dispose: () => {
       liveDebugEnabled = false;
+      liveDebugPaused = false;
       liveDebugRevision += 1;
       liveDebugLatestSnapshot = undefined;
+      liveDebugCompletionTrace = null;
+      liveDebugHoverTrace = null;
+      liveDebugCompletionRequestId = undefined;
+      liveDebugHoverRequestId = undefined;
       liveDebugCursor = undefined;
       if (liveDebugTimer) {
         clearTimeout(liveDebugTimer);
       }
-      liveDebugOutputChannel?.dispose();
     },
   });
 
@@ -1390,16 +1606,7 @@ async function createCaretDebugReport(
 }
 
 function liveDebugNode(node: DebugNode): LiveDebugNode {
-  return {
-    type: node.type,
-    fieldName: node.fieldName,
-    commandToken: node.commandToken,
-    text: node.text,
-    error: node.error,
-    missing: node.missing,
-    start: node.start,
-    end: node.end,
-  };
+  return node;
 }
 
 function liveProviderDecision(
@@ -1460,6 +1667,7 @@ async function createLiveEditorDebugSnapshot(
         lineText: sourceLines[caret.line] ?? '',
       },
       caretNode: liveDebugNode(debugNode(caretNode)),
+      caretAncestors: debugAncestors(caretNode).slice(1).map(liveDebugNode),
       cursor: cursor && cursorOffset !== undefined
         ? {
           ...debugPosition(cursor),
@@ -1468,33 +1676,13 @@ async function createLiveEditorDebugSnapshot(
         }
         : null,
       cursorNode: cursorNode ? liveDebugNode(debugNode(cursorNode)) : null,
+      cursorAncestors: cursorNode
+        ? debugAncestors(cursorNode).slice(1).map(liveDebugNode)
+        : [],
       completion: liveProviderDecision(completion),
       hover: hover ? liveProviderDecision(hover) : null,
     };
   });
-}
-
-function liveProviderPositionSummary(
-  label: 'Completion' | 'Hover',
-  decision: LiveDebugProviderDecision,
-): string {
-  const position = decision.resolvedPosition;
-  return `${label} resolved position: ${position.line + 1}:${position.character + 1}; moved=${decision.moved}; node=${decision.resolvedNode.type}; text=${JSON.stringify(decision.resolvedNode.text)}`;
-}
-
-function liveProviderSummary(
-  label: 'completion' | 'hover',
-  decision: LiveDebugProviderDecision,
-): string {
-  const suppressionReasons = decision.requestSuppressionReasons.length > 0
-    ? decision.requestSuppressionReasons
-    : decision.resolvedSuppressionReasons;
-  const state = decision.enabled
-    ? 'enabled'
-    : `suppressed:${suppressionReasons.join(',') || 'unknown'}`;
-  const command = decision.invocation?.name.text ?? '-';
-  const path = decision.resolution?.path.join(' > ') ?? '-';
-  return `${label}: ${state}; node=${decision.resolvedNode.type}; moved=${decision.moved}; command=${command}; path=${path}`;
 }
 
 export function updateTree(p: Parser, trees: TreeCache, edit: vscode.TextDocumentChangeEvent): void {

@@ -2,7 +2,11 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { Command } from '../../command';
-import type { CaretDebugReport, LiveEditorDebugToggleResult } from '../../extension';
+import type {
+	CaretDebugReport,
+	LiveEditorDebugState,
+	LiveEditorDebugToggleResult,
+} from '../../extension';
 
 const extensionId = 'tetradresearch.vscode-h2o';
 
@@ -47,6 +51,10 @@ export async function run(): Promise<void> {
 		'h2o.clearCache',
 		'h2o.inspectCaretContext',
 		'h2o.loadCommand',
+		'h2o.openTreeSitterDebugSnapshot',
+		'h2o.pauseLiveDebug',
+		'h2o.resumeLiveDebug',
+		'h2o.showLiveDebugViews',
 		'h2o.toggleLiveCaretAndCursorContext',
 		'registeredCommands.refreshEntry',
 	]) {
@@ -112,7 +120,12 @@ export async function run(): Promise<void> {
 		);
 		assert.strictEqual(liveDebug.enabled, true);
 		assert.strictEqual(liveDebug.snapshot?.caretNode.type, 'word');
-		assert.ok(!('grammarType' in liveDebug.snapshot!.caretNode));
+		assert.strictEqual(liveDebug.snapshot?.caretNode.grammarType, 'word');
+		const liveState = await vscode.commands.executeCommand<LiveEditorDebugState>(
+			'h2o.getLiveCaretAndCursorContextState',
+		);
+		assert.strictEqual(liveState.presentation.statusText, 'H2O C✓ H— TS:word');
+		assert.strictEqual(liveState.presentation.completion[0]?.description, 'Enabled');
 		await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
 	} finally {
 		packagedCachingFetcher.prototype.fetch = originalFetch;

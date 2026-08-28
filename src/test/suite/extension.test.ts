@@ -15,6 +15,7 @@ import {
 } from '../../extension';
 import type {
 	CaretDebugReport,
+	LiveEditorDebugPauseResult,
 	LiveEditorDebugState,
 	LiveEditorDebugToggleResult,
 	TreeCache,
@@ -128,8 +129,15 @@ async function verifyRegisteredCommands(): Promise<void> {
 		'h2o.loadCommand',
 		'h2o.loadCommon',
 		'h2o.inspectCaretContext',
+		'h2o.openCompletionDebugSnapshot',
+		'h2o.openHoverDebugSnapshot',
+		'h2o.openTreeSitterDebugSnapshot',
+		'h2o.pauseLiveDebug',
 		'h2o.removeBio',
+		'h2o.resumeLiveDebug',
+		'h2o.showLiveDebugViews',
 		'h2o.toggleLiveCaretAndCursorContext',
+		'h2o.toggleLiveDebugPause',
 		'registeredCommands.refreshEntry',
 		'registeredCommands.removeEntry',
 	];
@@ -839,8 +847,19 @@ async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
 		);
 		assert.strictEqual(enabled.enabled, true);
 		assert.ok(enabled.snapshot);
-		assert.deepStrictEqual(enabled.snapshot.caretNode, {
+		assert.deepStrictEqual({
+			type: enabled.snapshot.caretNode.type,
+			grammarType: enabled.snapshot.caretNode.grammarType,
+			fieldName: enabled.snapshot.caretNode.fieldName,
+			commandToken: enabled.snapshot.caretNode.commandToken,
+			text: enabled.snapshot.caretNode.text,
+			error: enabled.snapshot.caretNode.error,
+			missing: enabled.snapshot.caretNode.missing,
+			start: enabled.snapshot.caretNode.start,
+			end: enabled.snapshot.caretNode.end,
+		}, {
 			type: 'word',
+			grammarType: 'word',
 			fieldName: 'argument',
 			commandToken: true,
 			text: '--v',
@@ -849,14 +868,45 @@ async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
 			start: { line: 0, character: 4, index: 4 },
 			end: { line: 0, character: 7, index: 7 },
 		});
-		assert.ok(!('grammarType' in enabled.snapshot.caretNode));
+		assert.strictEqual(typeof enabled.snapshot.caretNode.id, 'number');
+		assert.strictEqual(typeof enabled.snapshot.caretNode.typeId, 'number');
+		assert.strictEqual(typeof enabled.snapshot.caretNode.grammarId, 'number');
+		assert.strictEqual(enabled.snapshot.caretNode.named, true);
+		assert.strictEqual(enabled.snapshot.caretNode.extra, false);
+		assert.strictEqual(enabled.snapshot.caretNode.hasError, false);
+		assert.strictEqual(enabled.snapshot.caretNode.hasChanges, false);
+		assert.strictEqual(typeof enabled.snapshot.caretNode.parseState, 'number');
+		assert.strictEqual(typeof enabled.snapshot.caretNode.nextParseState, 'number');
+		assert.strictEqual(enabled.snapshot.caretAncestors[0]?.type, 'command');
 		assert.strictEqual(enabled.snapshot.completion.includeArgumentAtPosition, false);
 		assert.deepStrictEqual(enabled.snapshot.completion.invocation?.arguments, []);
 		assert.strictEqual(enabled.snapshot.cursor, null);
 		assert.strictEqual(enabled.snapshot.cursorNode, null);
+		assert.deepStrictEqual(enabled.snapshot.cursorAncestors, []);
 		assert.strictEqual(enabled.snapshot.hover, null);
 
-		const beforeHover = await getLiveState();
+		const initialState = await getLiveState();
+		assert.strictEqual(initialState.paused, false);
+		assert.deepStrictEqual(initialState.traces, { completion: null, hover: null });
+		assert.strictEqual(initialState.presentation.statusText, 'H2O C✓ H— TS:word');
+		assert.strictEqual(
+			initialState.presentation.completion.find(row => row.id === 'completion.decision')?.description,
+			'Enabled',
+		);
+		assert.strictEqual(initialState.presentation.hover[0]?.id, 'hover.waiting');
+
+		const completion = await completionLabelsAt(document, end);
+		assert.ok(completion.labels.includes('--vscode-h2o-race'));
+		const completionState = await getLiveState();
+		assert.strictEqual(completionState.traces.completion?.outcome, 'items');
+		assert.strictEqual(completionState.traces.completion?.itemCount, 1);
+		assert.match(
+			completionState.presentation.completion
+				.find(row => row.id === 'completion.provider-result')?.description ?? '',
+			/^1 item\(s\)$/,
+		);
+
+		const beforeHover = completionState;
 		const optionCursor = new vscode.Position(0, 5);
 		await requestHover(document, optionCursor);
 		const hoverState = await waitForLiveUpdate(
@@ -871,11 +921,19 @@ async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
 			lineText: 'git --v',
 		});
 		assert.strictEqual(hoverState.snapshot?.cursorNode?.text, '--v');
+		assert.strictEqual(hoverState.snapshot?.cursorNode?.grammarType, 'word');
+		assert.strictEqual(hoverState.snapshot?.cursorAncestors[0]?.type, 'command');
 		assert.strictEqual(hoverState.snapshot?.hover?.includeArgumentAtPosition, true);
 		assert.deepStrictEqual(
 			hoverState.snapshot?.hover?.invocation?.arguments.map(argument => argument.text),
 			['--v'],
 		);
+		assert.strictEqual(hoverState.traces.hover?.outcome, 'hover');
+		assert.strictEqual(
+			hoverState.presentation.hover.find(row => row.id === 'hover.provider-result')?.description,
+			'Hover returned',
+		);
+		assert.strictEqual(hoverState.presentation.statusText, 'H2O C✓ H✓ TS:word');
 
 		const beforeSelection = hoverState;
 		const commandPosition = new vscode.Position(0, 1);
@@ -933,8 +991,18 @@ async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
 		assert.ok(redirectState.snapshot?.completion.requestSuppressionReasons.includes('file_redirect'));
 		assert.strictEqual(redirectState.snapshot?.hover?.enabled, false);
 		assert.ok(redirectState.snapshot?.hover?.requestSuppressionReasons.includes('file_redirect'));
+		assert.strictEqual(redirectState.traces.hover?.outcome, 'suppressed');
+		await completionLabelsAt(document, redirectPosition);
+		const redirectProviderState = await getLiveState();
+		assert.strictEqual(redirectProviderState.traces.completion?.outcome, 'suppressed');
+		assert.strictEqual(redirectProviderState.traces.completion?.itemCount, 0);
+		assert.strictEqual(
+			redirectProviderState.presentation.completion
+				.find(row => row.id === 'completion.provider-result')?.description,
+			'Suppressed; 0 items',
+		);
 
-		const beforeSubcommand = redirectState.updateSequence;
+		const beforeSubcommand = redirectProviderState.updateSequence;
 		const subcommandEdit = new vscode.WorkspaceEdit();
 		subcommandEdit.replace(
 			document.uri,
@@ -999,6 +1067,55 @@ async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
 		});
 		assert.strictEqual(walkbackState.snapshot?.hover?.moved, false);
 
+		const paused = await vscode.commands.executeCommand<LiveEditorDebugPauseResult>(
+			'h2o.pauseLiveDebug',
+		);
+		assert.deepStrictEqual(paused, { enabled: true, paused: true });
+		const pausedSequence = walkbackState.updateSequence;
+		const pausedCaret = new vscode.Position(0, 0);
+		editor.selection = new vscode.Selection(pausedCaret, pausedCaret);
+		await new Promise<void>(resolve => setTimeout(resolve, 160));
+		const pausedState = await getLiveState();
+		assert.strictEqual(pausedState.paused, true);
+		assert.strictEqual(pausedState.updateSequence, pausedSequence);
+		assert.strictEqual(pausedState.snapshot?.caret.character, trailingSpaceCaret.character);
+		assert.match(pausedState.presentation.statusText ?? '', /^H2O⏸ /);
+
+		const resumed = await vscode.commands.executeCommand<LiveEditorDebugPauseResult>(
+			'h2o.resumeLiveDebug',
+		);
+		assert.deepStrictEqual(resumed, { enabled: true, paused: false });
+		const resumedState = await waitForLiveUpdate(
+			pausedSequence,
+			state => state.snapshot?.caret.character === pausedCaret.character,
+		);
+		assert.strictEqual(resumedState.paused, false);
+
+		await vscode.commands.executeCommand('h2o.openTreeSitterDebugSnapshot');
+		const snapshotEditor = vscode.window.activeTextEditor;
+		assert.ok(snapshotEditor);
+		assert.strictEqual(snapshotEditor.document.uri.scheme, 'h2o-debug');
+		assert.strictEqual(snapshotEditor.document.languageId, 'json');
+		const rawTreeSnapshot = JSON.parse(snapshotEditor.document.getText()) as {
+			caretNode: {
+				type: string;
+				grammarType: string;
+				id: number;
+				hasError: boolean;
+				hasChanges: boolean;
+				parseState: number;
+			};
+			caretAncestors: Array<{ type: string }>;
+		};
+		assert.strictEqual(rawTreeSnapshot.caretNode.type, 'word');
+		assert.strictEqual(rawTreeSnapshot.caretNode.grammarType, 'word');
+		assert.strictEqual(typeof rawTreeSnapshot.caretNode.id, 'number');
+		assert.strictEqual(rawTreeSnapshot.caretNode.hasError, false);
+		assert.strictEqual(rawTreeSnapshot.caretNode.hasChanges, false);
+		assert.strictEqual(typeof rawTreeSnapshot.caretNode.parseState, 'number');
+		assert.ok(rawTreeSnapshot.caretAncestors.some(node => node.type === 'command'));
+		await vscode.window.showTextDocument(document, { preview: false });
+
 		const disabled = await vscode.commands.executeCommand<LiveEditorDebugToggleResult>(
 			'h2o.toggleLiveCaretAndCursorContext',
 		);
@@ -1013,6 +1130,167 @@ async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
 		await captureDocumentChange(document, () => vscode.workspace.applyEdit(disabledEdit));
 		await new Promise<void>(resolve => setTimeout(resolve, 160));
 		assert.strictEqual((await getLiveState()).updateSequence, disabledSequence);
+	} finally {
+		await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
+		CachingFetcher.prototype.fetch = originalFetch;
+	}
+}
+
+async function verifyLiveProviderTraceRaces(): Promise<void> {
+	const originalFetch = CachingFetcher.prototype.fetch;
+	const traceCommand = (options: string[]): Command => ({
+		name: 'git',
+		description: 'live provider trace race fixture',
+		options: options.map(name => ({
+			names: [name],
+			argument: '',
+			description: name,
+		})),
+	});
+	interface Deferred<T> {
+		promise: Promise<T>;
+		resolve(value: T): void;
+		reject(error: unknown): void;
+	}
+	function deferred<T>(): Deferred<T> {
+		let resolve!: (value: T) => void;
+		let reject!: (error: unknown) => void;
+		const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+			resolve = resolvePromise;
+			reject = rejectPromise;
+		});
+		return { promise, resolve, reject };
+	}
+	async function waitUntil(predicate: () => boolean): Promise<void> {
+		const deadline = Date.now() + 5000;
+		while (Date.now() < deadline) {
+			if (predicate()) {
+				return;
+			}
+			await new Promise<void>(resolve => setTimeout(resolve, 5));
+		}
+		throw new Error('Timed out waiting for a controlled provider request');
+	}
+	function getLiveState(): Thenable<LiveEditorDebugState> {
+		return vscode.commands.executeCommand<LiveEditorDebugState>('h2o.getLiveCaretAndCursorContextState');
+	}
+	async function waitForSnapshot(
+		afterSequence: number,
+		predicate: (state: LiveEditorDebugState) => boolean,
+	): Promise<LiveEditorDebugState> {
+		const deadline = Date.now() + 5000;
+		while (Date.now() < deadline) {
+			const state = await getLiveState();
+			if (state.updateSequence > afterSequence && predicate(state)) {
+				return state;
+			}
+			await new Promise<void>(resolve => setTimeout(resolve, 5));
+		}
+		throw new Error(`Timed out waiting for a live snapshot after ${afterSequence}`);
+	}
+
+	CachingFetcher.prototype.fetch = async () => traceCommand(['--trace-initial']);
+	try {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git --\n',
+		});
+		const editor = await vscode.window.showTextDocument(document, { preview: false });
+		const requestPosition = new vscode.Position(0, 6);
+		editor.selection = new vscode.Selection(requestPosition, requestPosition);
+		await vscode.commands.executeCommand<LiveEditorDebugToggleResult>(
+			'h2o.toggleLiveCaretAndCursorContext',
+			true,
+		);
+
+		const versionRequest = deferred<Command>();
+		let versionRequestStarted = false;
+		CachingFetcher.prototype.fetch = async () => {
+			if (!versionRequestStarted) {
+				versionRequestStarted = true;
+				return versionRequest.promise;
+			}
+			return traceCommand(['--trace-refresh']);
+		};
+		const requestVersion = document.version;
+		const completionBeforeEdit = completionLabelsAt(document, requestPosition);
+		await waitUntil(() => versionRequestStarted);
+
+		const beforeEdit = (await getLiveState()).updateSequence;
+		const edit = new vscode.WorkspaceEdit();
+		edit.insert(document.uri, new vscode.Position(1, 0), 'echo edited');
+		await captureDocumentChange(document, () => vscode.workspace.applyEdit(edit));
+		const editedState = await waitForSnapshot(
+			beforeEdit,
+			state => state.snapshot?.document.version === document.version,
+		);
+		assert.notStrictEqual(editedState.snapshot?.document.version, requestVersion);
+
+		versionRequest.resolve(traceCommand(['--trace-version-a']));
+		await completionBeforeEdit;
+		const versionResult = await getLiveState();
+		assert.strictEqual(versionResult.traces.completion?.documentVersion, requestVersion);
+		assert.match(
+			versionResult.presentation.completion
+				.find(row => row.id === 'completion.provider-result')?.description ?? '',
+			/ · stale$/,
+		);
+
+		const completionRequests: Array<Deferred<Command>> = [];
+		CachingFetcher.prototype.fetch = async () => {
+			const request = deferred<Command>();
+			completionRequests.push(request);
+			return request.promise;
+		};
+		const completionA = completionLabelsAt(document, requestPosition);
+		await waitUntil(() => completionRequests.length === 1);
+		const completionB = completionLabelsAt(document, requestPosition);
+		await waitUntil(() => completionRequests.length === 2);
+
+		completionRequests[1].resolve(traceCommand(['--trace-b1', '--trace-b2']));
+		await completionB;
+		const completionBState = await getLiveState();
+		assert.strictEqual(completionBState.traces.completion?.itemCount, 2);
+		const completionBObservedAt = completionBState.traces.completion?.observedAt;
+
+		completionRequests[0].resolve(traceCommand(['--trace-a']));
+		await completionA;
+		const completionAfterA = await getLiveState();
+		assert.strictEqual(completionAfterA.traces.completion?.itemCount, 2);
+		assert.strictEqual(completionAfterA.traces.completion?.observedAt, completionBObservedAt);
+
+		const hoverRequests: Array<Deferred<Command>> = [];
+		CachingFetcher.prototype.fetch = async () => {
+			const request = deferred<Command>();
+			hoverRequests.push(request);
+			return request.promise;
+		};
+		const hoverPosition = new vscode.Position(0, 1);
+		const hoverA = vscode.commands.executeCommand<vscode.Hover[]>(
+			'vscode.executeHoverProvider',
+			document.uri,
+			hoverPosition,
+		);
+		await waitUntil(() => hoverRequests.length === 1);
+		const hoverB = vscode.commands.executeCommand<vscode.Hover[]>(
+			'vscode.executeHoverProvider',
+			document.uri,
+			hoverPosition,
+		);
+		await waitUntil(() => hoverRequests.length === 2);
+		CachingFetcher.prototype.fetch = async () => traceCommand(['--trace-hover-refresh']);
+
+		hoverRequests[1].resolve(traceCommand(['--trace-hover-b']));
+		await hoverB;
+		const hoverBState = await getLiveState();
+		assert.strictEqual(hoverBState.traces.hover?.outcome, 'hover');
+		const hoverBObservedAt = hoverBState.traces.hover?.observedAt;
+
+		hoverRequests[0].reject(new Error('controlled stale hover failure'));
+		await Promise.resolve(hoverA).catch(() => undefined);
+		const hoverAfterA = await getLiveState();
+		assert.strictEqual(hoverAfterA.traces.hover?.outcome, 'hover');
+		assert.strictEqual(hoverAfterA.traces.hover?.observedAt, hoverBObservedAt);
 	} finally {
 		await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
 		CachingFetcher.prototype.fetch = originalFetch;
@@ -2276,6 +2554,7 @@ suite('Parser and provider behavior', () => {
 	test('preserves editor-facing Unicode ranges', verifyEditorFacingParserCompatibility);
 	test('reports caret parser and provider metadata', verifyCaretDebugInterface);
 	test('updates provider-critical caret/cursor metadata live', verifyLiveCaretAndCursorDebugInterface);
+	test('keeps live provider traces bound to their originating requests', verifyLiveProviderTraceRaces);
 	test('suppresses providers inside redirects and parser recovery regions', verifyProviderSuppressionRegions);
 	test('preserves caret behavior across incremental edits', async () => {
 		await verifyCaretBehaviorAcrossEdits(parser);
