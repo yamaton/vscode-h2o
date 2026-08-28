@@ -13,7 +13,7 @@ import {
 	updateTree,
 	walkbackIfNeeded,
 } from '../../extension';
-import type { TreeCache } from '../../extension';
+import type { CursorDebugReport, TreeCache } from '../../extension';
 import { CachingFetcher, CachingFetcherDependencies } from '../../cacheFetcher';
 import type { CommandCacheStorage } from '../../cacheStorage';
 import type { Command } from '../../command';
@@ -122,6 +122,7 @@ async function verifyRegisteredCommands(): Promise<void> {
 		'h2o.loadBio',
 		'h2o.loadCommand',
 		'h2o.loadCommon',
+		'h2o.inspectCursorContext',
 		'h2o.removeBio',
 		'registeredCommands.refreshEntry',
 		'registeredCommands.removeEntry',
@@ -676,6 +677,94 @@ async function verifyEditorFacingParserCompatibility(): Promise<void> {
 	try {
 		const unicodeOption = await optionCompletion('echo 😀あ; git --v');
 		assert.deepStrictEqual(unicodeOption.range, new vscode.Range(0, 14, 0, 17));
+	} finally {
+		CachingFetcher.prototype.fetch = originalFetch;
+	}
+}
+
+async function verifyCursorDebugInterface(): Promise<void> {
+	const originalFetch = CachingFetcher.prototype.fetch;
+	CachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+		assert.strictEqual(name, 'git');
+		return commandForProviderRace();
+	};
+
+	async function inspectDocument(
+		document: vscode.TextDocument,
+		offset: number,
+	): Promise<CursorDebugReport> {
+		const editor = await vscode.window.showTextDocument(document, { preview: false });
+		const position = document.positionAt(offset);
+		editor.selection = new vscode.Selection(position, position);
+		return withTimeout(
+			vscode.commands.executeCommand<CursorDebugReport>('h2o.inspectCursorContext'),
+			5000,
+		);
+	}
+
+	async function inspect(markedContent: string): Promise<CursorDebugReport> {
+		const { content, offset } = extractCursor(markedContent);
+		const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+		return inspectDocument(document, offset);
+	}
+
+	try {
+		const incrementalDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git --v',
+		});
+		const beforeEdit = await completionLabelsAt(incrementalDocument);
+		assert.ok(beforeEdit.labels.includes('--vscode-h2o-race'));
+
+		// Reuse the provider-owned tree across a Unicode edit that changes the grammar boundary.
+		const boundaryEdit = new vscode.WorkspaceEdit();
+		const herestringText = 'git <<< pay😀load ';
+		boundaryEdit.replace(
+			incrementalDocument.uri,
+			new vscode.Range(0, 4, 0, 7),
+			herestringText.slice(4),
+		);
+		await captureDocumentChange(
+			incrementalDocument,
+			() => vscode.workspace.applyEdit(boundaryEdit),
+		);
+		assert.strictEqual(incrementalDocument.getText(), herestringText);
+
+		const herestring = await inspectDocument(incrementalDocument, herestringText.length);
+		assert.strictEqual(herestring.document.languageId, 'shellscript');
+		assert.strictEqual(herestring.cursor.offset, herestringText.length);
+		assert.strictEqual(herestring.cached.ancestors[0].type, herestring.cached.currentNode.type);
+		assert.strictEqual(typeof herestring.cached.currentNode.parseState, 'number');
+		assert.strictEqual(herestring.cached.completion.enabled, true);
+		assert.strictEqual(herestring.cached.completion.moved, true);
+		assert.strictEqual(herestring.cached.completion.resumedAfterHerestring, true);
+		assert.deepStrictEqual(
+			herestring.cached.completion.resolvedSuppressionReasons,
+			['herestring_redirect'],
+		);
+		assert.strictEqual(herestring.cached.completion.invocation?.name.text, 'git');
+		assert.deepStrictEqual(herestring.cached.completion.resolution?.path, ['git']);
+		assert.deepStrictEqual(herestring.comparison, {
+			syntaxAtCursorEquivalent: true,
+			completionEquivalent: true,
+			hoverEquivalent: true,
+		});
+
+		const redirect = await inspect(`git 2> err${cursorMarker}ors.log`);
+		assert.strictEqual(redirect.cached.completion.enabled, false);
+		assert.ok(redirect.cached.completion.requestSuppressionReasons.includes('file_redirect'));
+		assert.strictEqual(redirect.cached.hover.enabled, false);
+		assert.ok(redirect.cached.hover.requestSuppressionReasons.includes('file_redirect'));
+		assert.strictEqual(redirect.cached.completion.invocation, null);
+		assert.strictEqual(redirect.comparison.completionEquivalent, true);
+		assert.strictEqual(redirect.comparison.hoverEquivalent, true);
+
+		const recovery = await inspect(`git "unter${cursorMarker}minated`);
+		assert.strictEqual(recovery.cached.completion.enabled, false);
+		assert.ok(recovery.cached.completion.requestSuppressionReasons.includes('ERROR'));
+		assert.strictEqual(recovery.cached.hover.enabled, false);
+		assert.ok(recovery.cached.hover.requestSuppressionReasons.includes('ERROR'));
+		assert.strictEqual(recovery.comparison.syntaxAtCursorEquivalent, true);
 	} finally {
 		CachingFetcher.prototype.fetch = originalFetch;
 	}
@@ -1924,6 +2013,7 @@ suite('Parser and provider behavior', () => {
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
 	test('refreshes command names after asynchronous lookup', verifyCompletionRefreshesCommandList);
 	test('preserves editor-facing Unicode ranges', verifyEditorFacingParserCompatibility);
+	test('reports cursor parser and provider metadata', verifyCursorDebugInterface);
 	test('suppresses providers inside redirects and parser recovery regions', verifyProviderSuppressionRegions);
 	test('preserves cursor behavior across incremental edits', async () => {
 		await verifyCursorBehaviorAcrossEdits(parser);

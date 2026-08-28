@@ -61,6 +61,10 @@
                 "title": "Shell Completion: Load Command Spec (experimental)"
             },
             {
+                "command": "h2o.inspectCursorContext",
+                "title": "Shell Completion: Inspect Cursor Context"
+            },
+            {
                 "command": "registeredCommands.refreshEntry",
                 "title": "Refresh",
                 "icon": "$(refresh)"
@@ -91,6 +95,10 @@
                 },
                 {
                     "command": "h2o.loadCommand",
+                    "when": "editorLangId == shellscript || editorLangId == bitbake"
+                },
+                {
+                    "command": "h2o.inspectCursorContext",
                     "when": "editorLangId == shellscript || editorLangId == bitbake"
                 }
             ],

@@ -55,8 +55,20 @@ The following commands are available from the Command Palette while a Shell Scri
 | **Shell Completion: Remove All Bioinformatics CLI Specs** | Remove the bioinformatics collection from the cache. |
 | **Shell Completion: Load Command Spec (experimental)** | Download one specification from the experimental collection. |
 | **Shell Completion: Remove Command Spec** | Remove one cached specification by name. |
+| **Shell Completion: Inspect Cursor Context** | Show parser and provider metadata for the active cursor in the **Shell Completion Debug** output channel. |
 
 Loading, updating, or bulk-removing a collection requires an internet connection because the extension fetches its current bundle or command index.
+
+### Inspect Cursor Context
+
+For completion and hover debugging, place the cursor at the position to inspect and run **Shell Completion: Inspect Cursor Context**. The command writes a JSON report to the **Shell Completion Debug** output channel and also returns that report to programmatic command callers. It includes:
+
+* the tree-sitter node and ancestor chain, including grammar types, field names, ranges, error and missing-node flags, and parse states;
+* the completion walkback position and redirect or error-recovery suppression reasons;
+* the command invocation, resolved subcommand path, aliases, and resolver stop reason used by completion and hover; and
+* the same observations from the incrementally cached tree and a fresh parse, with equivalence results for quick comparison.
+
+The inspection follows the normal provider lookup path, so inspecting a command may populate its regenerable command-specification cache.
 
 The H2O executable can also be selected with the `shellCompletion.h2oPath` setting. Its default value, `<bundled>`, uses the scanner packaged for the current platform.
 

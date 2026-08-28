@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { Command } from '../../command';
+import type { CursorDebugReport } from '../../extension';
 
 const extensionId = 'tetradresearch.vscode-h2o';
 
@@ -42,7 +43,12 @@ export async function run(): Promise<void> {
 	}
 	assert.strictEqual(extension.isActive, true);
 	const commands = new Set(await vscode.commands.getCommands(true));
-	for (const command of ['h2o.clearCache', 'h2o.loadCommand', 'registeredCommands.refreshEntry']) {
+	for (const command of [
+		'h2o.clearCache',
+		'h2o.inspectCursorContext',
+		'h2o.loadCommand',
+		'registeredCommands.refreshEntry',
+	]) {
 		assert.ok(commands.has(command), `${command} must be registered by the packaged extension`);
 	}
 
@@ -64,11 +70,14 @@ export async function run(): Promise<void> {
 			language: 'shellscript',
 			content: 'git --v',
 		});
+		const editor = await vscode.window.showTextDocument(document, { preview: false });
+		const cursor = document.positionAt(document.getText().length);
+		editor.selection = new vscode.Selection(cursor, cursor);
 		const completion = await withTimeout(
 			vscode.commands.executeCommand<vscode.CompletionList>(
 				'vscode.executeCompletionItemProvider',
 				document.uri,
-				document.positionAt(document.getText().length),
+				cursor,
 			),
 			10000,
 		);
@@ -79,6 +88,19 @@ export async function run(): Promise<void> {
 			),
 			'the installed VSIX must parse a shell document and provide an option completion',
 		);
+
+		const debugReport = await withTimeout(
+			vscode.commands.executeCommand<CursorDebugReport>('h2o.inspectCursorContext'),
+			10000,
+		);
+		assert.strictEqual(debugReport.document.uri, document.uri.toString());
+		assert.strictEqual(debugReport.cached.completion.invocation?.name.text, 'git');
+		assert.deepStrictEqual(debugReport.cached.completion.resolution?.path, ['git']);
+		assert.deepStrictEqual(debugReport.comparison, {
+			syntaxAtCursorEquivalent: true,
+			completionEquivalent: true,
+			hoverEquivalent: true,
+		});
 	} finally {
 		packagedCachingFetcher.prototype.fetch = originalFetch;
 	}

@@ -86,6 +86,117 @@ interface ResolvedCommandContext {
   resolution: CommandPathResolution<CommandWord>;
 }
 
+export type ProviderSuppressionReason =
+  | 'ERROR'
+  | 'MISSING'
+  | 'file_redirect'
+  | 'herestring_redirect'
+  | 'heredoc_redirect';
+
+export interface CursorDebugPosition {
+  line: number;
+  character: number;
+}
+
+export interface CursorDebugNode {
+  id: number;
+  type: string;
+  grammarType: string;
+  fieldName: string | null;
+  typeId: number;
+  grammarId: number;
+  named: boolean;
+  extra: boolean;
+  error: boolean;
+  missing: boolean;
+  hasError: boolean;
+  hasChanges: boolean;
+  parseState: number;
+  nextParseState: number;
+  start: CursorDebugPosition & { index: number };
+  end: CursorDebugPosition & { index: number };
+  text: string;
+}
+
+export interface CursorDebugInvocation {
+  name: CursorDebugWord;
+  arguments: CursorDebugWord[];
+}
+
+export interface CursorDebugWord {
+  text: string;
+  start: CursorDebugPosition;
+  end: CursorDebugPosition;
+}
+
+export interface CursorDebugResolution {
+  path: string[];
+  steps: Array<{
+    command: string;
+    source: string;
+    matchedBy: 'canonical' | 'alias';
+  }>;
+  stopReason: CommandPathResolution['stopReason'] | null;
+}
+
+export interface CursorDebugProviderDecision {
+  enabled: boolean;
+  requestedPosition: CursorDebugPosition;
+  resolvedPosition: CursorDebugPosition;
+  moved: boolean;
+  walkbackUnchanged: boolean;
+  includeArgumentAtPosition: boolean;
+  resumedAfterHerestring: boolean;
+  requestSuppressionReasons: ProviderSuppressionReason[];
+  resolvedSuppressionReasons: ProviderSuppressionReason[];
+  resolvedNode: CursorDebugNode;
+  commandNode: CursorDebugNode | null;
+  invocation: CursorDebugInvocation | null;
+  resolution: CursorDebugResolution | null;
+  lookupError: string | null;
+}
+
+export interface CursorDebugTreeReport {
+  root: CursorDebugNode;
+  currentNode: CursorDebugNode;
+  ancestors: CursorDebugNode[];
+  completion: CursorDebugProviderDecision;
+  hover: CursorDebugProviderDecision;
+}
+
+export interface CursorDebugReport {
+  generatedAt: string;
+  document: {
+    uri: string;
+    languageId: string;
+    version: number;
+  };
+  cursor: CursorDebugPosition & {
+    offset: number;
+    lineText: string;
+  };
+  cached: CursorDebugTreeReport;
+  fresh: CursorDebugTreeReport;
+  comparison: {
+    syntaxAtCursorEquivalent: boolean;
+    completionEquivalent: boolean;
+    hoverEquivalent: boolean;
+  };
+}
+
+interface CompletionCursorDecision {
+  enabled: boolean;
+  position: vscode.Position;
+  walkbackUnchanged: boolean;
+  resumedAfterHerestring: boolean;
+  requestSuppressionReasons: ProviderSuppressionReason[];
+  resolvedSuppressionReasons: ProviderSuppressionReason[];
+}
+
+interface LineTextProvider {
+  lineAt(line: number): { text: string };
+}
+
 export interface ActivationDependencies {
   initializeParser(): Promise<Parser>;
 }
@@ -141,19 +252,17 @@ async function registerExtension(
         }
         const tree = trees[document.uri.toString()];
         return withTreeCopy(tree, async requestTree => {
-          if (isProviderSuppressedAtPosition(requestTree.rootNode, position)) {
+          const cursorDecision = getCompletionCursorDecision(
+            document,
+            requestTree.rootNode,
+            position,
+          );
+          if (!cursorDecision.enabled) {
             return [];
           }
 
-          // this is an ugly hack to get current Node
-          const p = walkbackIfNeeded(document, requestTree.rootNode, position);
-          if (
-            isProviderSuppressedAtPosition(requestTree.rootNode, p)
-            && !isSafeHerestringWalkback(requestTree.rootNode, p)
-          ) {
-            return [];
-          }
-          const isCursorTouchingWord = (p === position);
+          const p = cursorDecision.position;
+          const isCursorTouchingWord = cursorDecision.walkbackUnchanged;
           console.log(`[Completion] isCursorTouchingWord: ${isCursorTouchingWord}`);
 
           try {
@@ -289,6 +398,55 @@ async function registerExtension(
     }
   });
   activationRegistrations.push(hoverprovider);
+
+  let debugOutputChannel: vscode.OutputChannel | undefined;
+  const inspectCursorContext = vscode.commands.registerCommand(
+    'h2o.inspectCursorContext',
+    async (): Promise<CursorDebugReport | undefined> => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || !supportedLanguages.includes(editor.document.languageId)) {
+        void vscode.window.showInformationMessage(
+          '[Shell Completion] Open a Shell Script or BitBake editor to inspect cursor context.',
+        );
+        return undefined;
+      }
+
+      const source = editor.document.getText();
+      const cursor = editor.selection.active;
+      const cursorOffset = editor.document.offsetAt(cursor);
+      const key = editor.document.uri.toString();
+      if (!trees[key]) {
+        trees[key] = parseTree(parser, source);
+      }
+
+      const report = await createCursorDebugReport(
+        parser,
+        trees[key],
+        fetcher,
+        {
+          uri: key,
+          languageId: editor.document.languageId,
+          version: editor.document.version,
+        },
+        source,
+        cursor,
+        cursorOffset,
+      );
+
+      debugOutputChannel ??= vscode.window.createOutputChannel('Shell Completion Debug');
+      debugOutputChannel.appendLine(
+        `=== Cursor Context: ${report.document.uri} @ ${report.cursor.line + 1}:${report.cursor.character + 1} ===`,
+      );
+      debugOutputChannel.appendLine(JSON.stringify(report, null, 2));
+      debugOutputChannel.appendLine('');
+      debugOutputChannel.show(true);
+      return report;
+    },
+  );
+  activationRegistrations.push(inspectCursorContext);
+  activationRegistrations.push({
+    dispose: () => debugOutputChannel?.dispose(),
+  });
 
   function edit(edit: vscode.TextDocumentChangeEvent) {
     updateTree(parser, trees, edit);
@@ -563,39 +721,67 @@ function hasMissingNodeAtPosition(node: Node, position: vscode.Position): boolea
  * command context. Callers may resume after a real shell boundary such as `;`.
  */
 export function isProviderSuppressedAtPosition(root: Node, position: vscode.Position): boolean {
+  return getProviderSuppressionReasons(root, position).length > 0;
+}
+
+export function getProviderSuppressionReasons(
+  root: Node,
+  position: vscode.Position,
+): ProviderSuppressionReason[] {
+  const reasons = new Set<ProviderSuppressionReason>();
   if (hasMissingNodeAtPosition(root, position)) {
-    return true;
+    reasons.add('MISSING');
   }
 
   let node: Node | null = getCurrentNode(root, position);
   while (node) {
-    if (node.isError || node.isMissing || providerSuppressedNodeTypes.has(node.type)) {
-      return true;
+    if (node.isError) {
+      reasons.add('ERROR');
+    }
+    if (node.isMissing) {
+      reasons.add('MISSING');
+    }
+    if (providerSuppressedNodeTypes.has(node.type)) {
+      reasons.add(node.type as ProviderSuppressionReason);
     }
     node = node.parent;
   }
-  return false;
+  return [...reasons];
 }
 
 function isSafeHerestringWalkback(root: Node, position: vscode.Position): boolean {
-  if (hasMissingNodeAtPosition(root, position)) {
-    return false;
+  const reasons = getProviderSuppressionReasons(root, position);
+  return reasons.length === 1 && reasons[0] === 'herestring_redirect';
+}
+
+function getCompletionCursorDecision(
+  document: LineTextProvider,
+  root: Node,
+  position: vscode.Position,
+): CompletionCursorDecision {
+  const requestSuppressionReasons = getProviderSuppressionReasons(root, position);
+  if (requestSuppressionReasons.length > 0) {
+    return {
+      enabled: false,
+      position,
+      walkbackUnchanged: true,
+      resumedAfterHerestring: false,
+      requestSuppressionReasons,
+      resolvedSuppressionReasons: requestSuppressionReasons,
+    };
   }
 
-  let isInsideHerestring = false;
-  let node: Node | null = getCurrentNode(root, position);
-  while (node) {
-    if (node.isError || node.isMissing) {
-      return false;
-    }
-    if (node.type === 'herestring_redirect') {
-      isInsideHerestring = true;
-    } else if (providerSuppressedNodeTypes.has(node.type)) {
-      return false;
-    }
-    node = node.parent;
-  }
-  return isInsideHerestring;
+  const resolvedPosition = walkbackIfNeeded(document, root, position);
+  const resolvedSuppressionReasons = getProviderSuppressionReasons(root, resolvedPosition);
+  const resumedAfterHerestring = isSafeHerestringWalkback(root, resolvedPosition);
+  return {
+    enabled: resolvedSuppressionReasons.length === 0 || resumedAfterHerestring,
+    position: resolvedPosition,
+    walkbackUnchanged: resolvedPosition === position,
+    resumedAfterHerestring,
+    requestSuppressionReasons,
+    resolvedSuppressionReasons,
+  };
 }
 
 
@@ -603,7 +789,7 @@ function isSafeHerestringWalkback(root: Node, position: vscode.Position): boolea
 // This is just a workround as you cannot reach command node if you start from
 // the position, say, after 'echo '
 // [FIXME] Do not rely on such an ugly hack
-export function walkbackIfNeeded(document: vscode.TextDocument, root: Node, position: vscode.Position): vscode.Position {
+export function walkbackIfNeeded(document: LineTextProvider, root: Node, position: vscode.Position): vscode.Position {
   let currentPosition = position;
   let moveCount = 0;
 
@@ -641,6 +827,295 @@ export function walkbackIfNeeded(document: vscode.TextDocument, root: Node, posi
     }
     return currentPosition;
   }
+}
+
+function debugPosition(point: Point | vscode.Position): CursorDebugPosition {
+  return 'row' in point
+    ? { line: point.row, character: point.column }
+    : { line: point.line, character: point.character };
+}
+
+function fieldNameForNode(node: Node): string | null {
+  const parent = node.parent;
+  if (!parent) {
+    return null;
+  }
+  for (let index = 0; index < parent.childCount; index += 1) {
+    if (parent.child(index)?.equals(node)) {
+      return parent.fieldNameForChild(index);
+    }
+  }
+  return null;
+}
+
+function debugText(text: string): string {
+  const maximumLength = 160;
+  return text.length <= maximumLength
+    ? text
+    : `${text.slice(0, maximumLength - 1)}…`;
+}
+
+function debugNode(node: Node): CursorDebugNode {
+  return {
+    id: node.id,
+    type: node.type,
+    grammarType: node.grammarType,
+    fieldName: fieldNameForNode(node),
+    typeId: node.typeId,
+    grammarId: node.grammarId,
+    named: node.isNamed,
+    extra: node.isExtra,
+    error: node.isError,
+    missing: node.isMissing,
+    hasError: node.hasError,
+    hasChanges: node.hasChanges,
+    parseState: node.parseState,
+    nextParseState: node.nextParseState,
+    start: { ...debugPosition(node.startPosition), index: node.startIndex },
+    end: { ...debugPosition(node.endPosition), index: node.endIndex },
+    text: debugText(node.text),
+  };
+}
+
+function debugAncestors(node: Node): CursorDebugNode[] {
+  const ancestors: CursorDebugNode[] = [];
+  let ancestor: Node | null = node;
+  while (ancestor) {
+    ancestors.push(debugNode(ancestor));
+    ancestor = ancestor.parent;
+  }
+  return ancestors;
+}
+
+function debugWord(word: CommandWord): CursorDebugWord {
+  return {
+    text: word.text,
+    start: debugPosition(word.startPosition),
+    end: debugPosition(word.endPosition),
+  };
+}
+
+function debugInvocation(invocation: CommandInvocation): CursorDebugInvocation {
+  return {
+    name: debugWord(invocation.name),
+    arguments: invocation.arguments.map(debugWord),
+  };
+}
+
+function debugResolution(
+  resolution: CommandPathResolution<CommandWord>,
+): CursorDebugResolution {
+  return {
+    path: resolution.path.map(command => command.name),
+    steps: resolution.steps.map(step => ({
+      command: step.command.name,
+      source: step.source.text,
+      matchedBy: step.matchedBy,
+    })),
+    stopReason: resolution.stopReason ?? null,
+  };
+}
+
+function debugError(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name}: ${error.message}`;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+async function inspectProviderDecision(
+  root: Node,
+  requestedPosition: vscode.Position,
+  decision: CompletionCursorDecision,
+  fetcher: CachingFetcher,
+  includeArgumentAtPosition: boolean,
+): Promise<CursorDebugProviderDecision> {
+  const commandNode = decision.enabled
+    ? _getContextCommandNode(root, decision.position)
+    : undefined;
+  const report: CursorDebugProviderDecision = {
+    enabled: decision.enabled,
+    requestedPosition: debugPosition(requestedPosition),
+    resolvedPosition: debugPosition(decision.position),
+    moved: !decision.position.isEqual(requestedPosition),
+    walkbackUnchanged: decision.walkbackUnchanged,
+    includeArgumentAtPosition,
+    resumedAfterHerestring: decision.resumedAfterHerestring,
+    requestSuppressionReasons: decision.requestSuppressionReasons,
+    resolvedSuppressionReasons: decision.resolvedSuppressionReasons,
+    resolvedNode: debugNode(getCurrentNode(root, decision.position)),
+    commandNode: commandNode ? debugNode(commandNode) : null,
+    invocation: null,
+    resolution: null,
+    lookupError: null,
+  };
+
+  if (!decision.enabled) {
+    return report;
+  }
+
+  try {
+    const context = await getContextCommandResolution(
+      root,
+      decision.position,
+      fetcher,
+      includeArgumentAtPosition,
+    );
+    report.invocation = debugInvocation(context.invocation);
+    report.resolution = debugResolution(context.resolution);
+  } catch (error) {
+    const invocation = getCommandInvocationToPosition(
+      commandNode,
+      asPoint(decision.position),
+      includeArgumentAtPosition,
+    );
+    report.invocation = invocation ? debugInvocation(invocation) : null;
+    report.lookupError = debugError(error);
+  }
+  return report;
+}
+
+async function inspectTreeCursor(
+  document: LineTextProvider,
+  root: Node,
+  position: vscode.Position,
+  fetcher: CachingFetcher,
+): Promise<CursorDebugTreeReport> {
+  const currentNode = getCurrentNode(root, position);
+  const completionDecision = getCompletionCursorDecision(document, root, position);
+  const hoverSuppressionReasons = getProviderSuppressionReasons(root, position);
+  const hoverDecision: CompletionCursorDecision = {
+    enabled: hoverSuppressionReasons.length === 0,
+    position,
+    walkbackUnchanged: true,
+    resumedAfterHerestring: false,
+    requestSuppressionReasons: hoverSuppressionReasons,
+    resolvedSuppressionReasons: hoverSuppressionReasons,
+  };
+
+  return {
+    root: debugNode(root),
+    currentNode: debugNode(currentNode),
+    ancestors: debugAncestors(currentNode),
+    completion: await inspectProviderDecision(
+      root,
+      position,
+      completionDecision,
+      fetcher,
+      !completionDecision.walkbackUnchanged,
+    ),
+    hover: await inspectProviderDecision(root, position, hoverDecision, fetcher, true),
+  };
+}
+
+function syntaxComparisonProjection(report: CursorDebugTreeReport): unknown {
+  return report.ancestors.map(node => ({
+    type: node.type,
+    grammarType: node.grammarType,
+    fieldName: node.fieldName,
+    named: node.named,
+    extra: node.extra,
+    error: node.error,
+    missing: node.missing,
+    hasError: node.hasError,
+    start: node.start,
+    end: node.end,
+    text: node.text,
+  }));
+}
+
+function providerComparisonProjection(decision: CursorDebugProviderDecision): unknown {
+  return {
+    enabled: decision.enabled,
+    requestedPosition: decision.requestedPosition,
+    resolvedPosition: decision.resolvedPosition,
+    moved: decision.moved,
+    walkbackUnchanged: decision.walkbackUnchanged,
+    includeArgumentAtPosition: decision.includeArgumentAtPosition,
+    resumedAfterHerestring: decision.resumedAfterHerestring,
+    requestSuppressionReasons: decision.requestSuppressionReasons,
+    resolvedSuppressionReasons: decision.resolvedSuppressionReasons,
+    resolvedNode: {
+      type: decision.resolvedNode.type,
+      grammarType: decision.resolvedNode.grammarType,
+      fieldName: decision.resolvedNode.fieldName,
+      start: decision.resolvedNode.start,
+      end: decision.resolvedNode.end,
+      text: decision.resolvedNode.text,
+    },
+    commandNode: decision.commandNode && {
+      type: decision.commandNode.type,
+      grammarType: decision.commandNode.grammarType,
+      fieldName: decision.commandNode.fieldName,
+      start: decision.commandNode.start,
+      end: decision.commandNode.end,
+      text: decision.commandNode.text,
+    },
+    invocation: decision.invocation,
+    resolution: decision.resolution,
+    lookupError: decision.lookupError,
+  };
+}
+
+function debugValuesEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+async function createCursorDebugReport(
+  parser: Parser,
+  cachedTree: Tree,
+  fetcher: CachingFetcher,
+  document: CursorDebugReport['document'],
+  source: string,
+  cursor: vscode.Position,
+  cursorOffset: number,
+): Promise<CursorDebugReport> {
+  const sourceLines = source.split(/\r\n|\r|\n/);
+  const lineProvider: LineTextProvider = {
+    lineAt: line => ({ text: sourceLines[line] ?? '' }),
+  };
+
+  return withTreeCopy(cachedTree, async cachedCopy => {
+    const freshTree = parseTree(parser, source);
+    try {
+      const cached = await inspectTreeCursor(lineProvider, cachedCopy.rootNode, cursor, fetcher);
+      const fresh = await inspectTreeCursor(lineProvider, freshTree.rootNode, cursor, fetcher);
+      return {
+        generatedAt: new Date().toISOString(),
+        document,
+        cursor: {
+          ...debugPosition(cursor),
+          offset: cursorOffset,
+          lineText: sourceLines[cursor.line] ?? '',
+        },
+        cached,
+        fresh,
+        comparison: {
+          syntaxAtCursorEquivalent: debugValuesEqual(
+            syntaxComparisonProjection(cached),
+            syntaxComparisonProjection(fresh),
+          ),
+          completionEquivalent: debugValuesEqual(
+            providerComparisonProjection(cached.completion),
+            providerComparisonProjection(fresh.completion),
+          ),
+          hoverEquivalent: debugValuesEqual(
+            providerComparisonProjection(cached.hover),
+            providerComparisonProjection(fresh.hover),
+          ),
+        },
+      };
+    } finally {
+      freshTree.delete();
+    }
+  });
 }
 
 export function updateTree(p: Parser, trees: TreeCache, edit: vscode.TextDocumentChangeEvent): void {
