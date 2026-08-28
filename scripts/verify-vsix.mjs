@@ -5,9 +5,15 @@ import { readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { h2oTargetForVsix, loadH2oLock, verifyBinaryHeader, verifyStaticElf } from './lib/h2o-release.mjs';
+import {
+  loadGrammarLock,
+  verifyGrammarArtifact,
+  verifyGrammarRuntimeCompatibility,
+} from './lib/tree-sitter-grammar.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const h2oLock = loadH2oLock(path.join(projectRoot, 'h2o.lock.json'));
+const grammarLock = loadGrammarLock(path.join(projectRoot, 'tree-sitter-bash.lock.json'));
 const packageLock = JSON.parse(readFileSync(path.join(projectRoot, 'package-lock.json'), 'utf8'));
 const vsixPath = path.resolve(projectRoot, process.argv[2] || 'artifacts/vscode-h2o-linux-x64.vsix');
 const vsixTarget = process.argv[3] || 'linux-x64';
@@ -111,18 +117,9 @@ if (expectedH2o.static) {
   verifyStaticElf(packagedH2o, h2oTarget);
 }
 
-const packagedWasm = archivedFile('extension/tree-sitter-bash.wasm');
-assert.ok(packagedWasm.length > 100000, 'tree-sitter-bash.wasm is truncated');
-assert.deepStrictEqual(
-  packagedWasm.subarray(0, 8),
-  Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]),
-  'tree-sitter-bash.wasm has an invalid binary header',
-);
-assert.strictEqual(
-  sha256(packagedWasm),
-  sha256(readFileSync(path.join(projectRoot, 'tree-sitter-bash.wasm'))),
-  'tree-sitter-bash.wasm changed while packaging',
-);
+const packagedWasm = archivedFile(`extension/${grammarLock.file}`);
+verifyGrammarArtifact(packagedWasm, grammarLock, `extension/${grammarLock.file}`);
+await verifyGrammarRuntimeCompatibility(packagedWasm, grammarLock, `extension/${grammarLock.file}`);
 
 const zipListing = execFileSync('zipinfo', ['-l', vsixPath], { encoding: 'utf8' });
 for (const file of [

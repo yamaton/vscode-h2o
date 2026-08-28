@@ -152,7 +152,7 @@
         "test:integration": "node ./out/test/runTest.js && node ./out/test/runStorageIntegration.js",
         "test:vsix": "node ./out/test/runVsixTest.js artifacts/vscode-h2o-linux-x64.vsix",
         "audit:prod": "npm audit --omit=dev --audit-level=high",
-        "test:release-tools": "node scripts/test-h2o-release.mjs && node scripts/test-release-tag.mjs && node scripts/test-marketplace-release.mjs",
+        "test:release-tools": "node scripts/test-h2o-release.mjs && node scripts/test-tree-sitter-grammar.mjs && node scripts/test-release-tag.mjs && node scripts/test-marketplace-release.mjs",
         "h2o:verify-release": "node scripts/verify-h2o-release.mjs",
         "h2o:fetch": "node scripts/fetch-h2o.mjs",
         "verify:native": "node scripts/verify-native.mjs",

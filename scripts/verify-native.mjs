@@ -5,9 +5,15 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { h2oTargetForVsix, loadH2oLock, verifyBinary } from './lib/h2o-release.mjs';
+import {
+  loadGrammarLock,
+  verifyGrammarArtifact,
+  verifyGrammarRuntimeCompatibility,
+} from './lib/tree-sitter-grammar.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const lock = loadH2oLock(path.join(projectRoot, 'h2o.lock.json'));
+const grammarLock = loadGrammarLock(path.join(projectRoot, 'tree-sitter-bash.lock.json'));
 const hostTarget = `${process.platform}-${process.arch}`;
 const vsixTarget = process.argv[2] ?? hostTarget;
 const h2oTarget = h2oTargetForVsix(lock, vsixTarget);
@@ -136,13 +142,9 @@ try {
   rmSync(wrapperFixtureDir, { recursive: true, force: true });
 }
 
-const parserWasm = readFileSync(path.join(projectRoot, 'tree-sitter-bash.wasm'));
-assert.ok(parserWasm.length > 100000, 'tree-sitter-bash.wasm appears truncated');
-assert.deepStrictEqual(
-  parserWasm.subarray(0, 8),
-  Buffer.from([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]),
-  'tree-sitter-bash.wasm has an invalid WebAssembly header',
-);
+const parserWasm = readFileSync(path.join(projectRoot, grammarLock.file));
+verifyGrammarArtifact(parserWasm, grammarLock);
+await verifyGrammarRuntimeCompatibility(parserWasm, grammarLock);
 
 const runnable = vsixTarget === hostTarget || (vsixTarget === 'alpine-x64' && hostTarget === 'linux-x64');
 if (runnable) {
@@ -165,4 +167,4 @@ if (runnable) {
   console.log(`Native execution skipped for ${vsixTarget} on ${hostTarget}; content checks still passed.`);
 }
 
-console.log('Pinned native executable and WebAssembly checks passed.');
+console.log('Pinned native executable and tree-sitter grammar checks passed.');

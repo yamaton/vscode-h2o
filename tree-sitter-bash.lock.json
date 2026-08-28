@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "language": "bash",
+  "file": "tree-sitter-bash.wasm",
+  "languageAbiVersion": 13,
+  "wasmSize": 438455,
+  "wasmSha256": "1a320e387f265e029d4d3a314ee33388c34033fe433d4bde562809997b6d889e",
+  "provenance": {
+    "status": "legacy-unresolved",
+    "introducedByCommit": "9b68c5de4f3a21a1e98c3e38a86802fc2eaffbe3"
+  }
+}

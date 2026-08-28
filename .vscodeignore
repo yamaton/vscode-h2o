@@ -11,6 +11,7 @@ src/**
 .gitignore
 GEMINI.md
 h2o.lock.json
+tree-sitter-bash.lock.json
 package-lock.json
 test.bb
 .yarnrc
