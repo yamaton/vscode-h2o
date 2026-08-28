@@ -165,7 +165,35 @@ interface CommandContextObservation {
 	commandName: string | undefined;
 	currentNodeText: string;
 	currentNodeType: string;
+	currentNodeStart: { line: number; character: number };
+	currentNodeEnd: { line: number; character: number };
+	resolvedPosition: { line: number; character: number };
 	moved: boolean;
+}
+
+function observeCommandContextInTree(
+	document: vscode.TextDocument,
+	root: SyntaxNode,
+	cursor: vscode.Position,
+	walkback: boolean,
+): CommandContextObservation {
+	const position = walkback ? walkbackIfNeeded(document, root, cursor) : cursor;
+	const currentNode = getCurrentNode(root, position);
+	return {
+		commandName: getContextCommandName(root, position),
+		currentNodeText: currentNode.text,
+		currentNodeType: currentNode.type,
+		currentNodeStart: {
+			line: currentNode.startPosition.row,
+			character: currentNode.startPosition.column,
+		},
+		currentNodeEnd: {
+			line: currentNode.endPosition.row,
+			character: currentNode.endPosition.column,
+		},
+		resolvedPosition: { line: position.line, character: position.character },
+		moved: !position.isEqual(cursor),
+	};
 }
 
 async function observeCommandContext(
@@ -177,14 +205,7 @@ async function observeCommandContext(
 	const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
 	return withParsedTree(parser, content, tree => {
 		const cursor = document.positionAt(offset);
-		const position = walkback ? walkbackIfNeeded(document, tree.rootNode, cursor) : cursor;
-		const currentNode = getCurrentNode(tree.rootNode, position);
-		return {
-			commandName: getContextCommandName(tree.rootNode, position),
-			currentNodeText: currentNode.text,
-			currentNodeType: currentNode.type,
-			moved: !position.isEqual(cursor),
-		};
+		return observeCommandContextInTree(document, tree.rootNode, cursor, walkback);
 	});
 }
 
@@ -208,6 +229,22 @@ function snapshot(node: SyntaxNode): NodeSnapshot {
 		endPosition: node.endPosition,
 		children: node.children.map(snapshot),
 	};
+}
+
+function assertCachedCursorMatchesFresh(
+	parser: Parser,
+	trees: TreeCache,
+	document: vscode.TextDocument,
+	cursor: vscode.Position,
+	walkback: boolean,
+): CommandContextObservation {
+	const cachedTree = trees[document.uri.toString()];
+	assert.ok(cachedTree, 'the incremental tree must be cached');
+	const cached = observeCommandContextInTree(document, cachedTree.rootNode, cursor, walkback);
+	const fresh = withParsedTree(parser, document.getText(), tree =>
+		observeCommandContextInTree(document, tree.rootNode, cursor, walkback));
+	assert.deepStrictEqual(cached, fresh, document.getText());
+	return cached;
 }
 
 function trackDeletion(tree: Parser.Tree): () => number {
@@ -259,6 +296,18 @@ function commandForProviderRace(): Command {
 			names: ['--vscode-h2o-race'],
 			argument: '',
 			description: 'Option returned only by the h2o race test',
+		}],
+	};
+}
+
+function cursorEditCommand(name: 'git' | 'npm'): Command {
+	return {
+		name,
+		description: `CURSOR_EDIT_${name.toUpperCase()}_DESCRIPTION`,
+		options: [{
+			names: [`--cursor-${name}`],
+			argument: '',
+			description: `option for ${name} cursor/edit compatibility`,
 		}],
 	};
 }
@@ -405,6 +454,46 @@ async function editDocument(document: vscode.TextDocument, text: string): Promis
 	const edit = new vscode.WorkspaceEdit();
 	edit.insert(document.uri, document.positionAt(document.getText().length), text);
 	await captureDocumentChange(document, () => vscode.workspace.applyEdit(edit));
+}
+
+async function applyTrackedEdit(
+	parser: Parser,
+	trees: TreeCache,
+	document: vscode.TextDocument,
+	edit: vscode.WorkspaceEdit,
+): Promise<void> {
+	const event = await captureDocumentChange(document, () => vscode.workspace.applyEdit(edit));
+	updateTree(parser, trees, event);
+}
+
+async function completionLabelsAt(
+	document: vscode.TextDocument,
+	position = document.positionAt(document.getText().length),
+): Promise<{ labels: string[]; items: vscode.CompletionItem[] }> {
+	const completion = await withTimeout(
+		vscode.commands.executeCommand<vscode.CompletionList>(
+			'vscode.executeCompletionItemProvider',
+			document.uri,
+			position,
+		),
+		5000,
+	);
+	return {
+		labels: completion.items.map(completionLabel),
+		items: completion.items,
+	};
+}
+
+async function hoverTextAt(document: vscode.TextDocument, position: vscode.Position): Promise<string> {
+	const hovers = await withTimeout(
+		vscode.commands.executeCommand<vscode.Hover[]>(
+			'vscode.executeHoverProvider',
+			document.uri,
+			position,
+		),
+		5000,
+	);
+	return hoverText(hovers);
 }
 
 async function verifyProviderTreeOwnership(parser: Parser): Promise<void> {
@@ -584,6 +673,309 @@ async function verifyEditorFacingParserCompatibility(): Promise<void> {
 		}
 	} finally {
 		CachingFetcher.prototype.fetch = originalFetch;
+	}
+}
+
+async function verifyCursorBehaviorAcrossEdits(parser: Parser): Promise<void> {
+	const originalFetch = CachingFetcher.prototype.fetch;
+	const originalGetList = CachingFetcher.prototype.getList;
+	const commands = new Map<string, Command>([
+		['git', cursorEditCommand('git')],
+		['npm', cursorEditCommand('npm')],
+		['docker', hierarchicalDockerCommand()],
+	]);
+	const treeCaches: TreeCache[] = [];
+
+	CachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+		const command = commands.get(name);
+		assert.ok(command, `unexpected command lookup after an edit: ${name}`);
+		return command;
+	};
+	CachingFetcher.prototype.getList = function getList(): string[] {
+		return [...commands.keys()];
+	};
+
+	function createTreeCache(document: vscode.TextDocument): TreeCache {
+		const trees: TreeCache = {
+			[document.uri.toString()]: parser.parse(document.getText()),
+		};
+		treeCaches.push(trees);
+		return trees;
+	}
+
+	async function assertOptionCompletion(
+		document: vscode.TextDocument,
+		trees: TreeCache,
+		expectedCommand: 'git' | 'npm',
+		expectedRange: vscode.Range | undefined,
+		cursor = document.positionAt(document.getText().length),
+	): Promise<CommandContextObservation> {
+		const observation = assertCachedCursorMatchesFresh(parser, trees, document, cursor, true);
+		assert.strictEqual(observation.commandName, expectedCommand, document.getText());
+
+		const expectedLabel = `--cursor-${expectedCommand}`;
+		const unexpectedLabel = expectedCommand === 'git' ? '--cursor-npm' : '--cursor-git';
+		const completion = await completionLabelsAt(document, cursor);
+		assert.ok(completion.labels.includes(expectedLabel), document.getText());
+		assert.ok(!completion.labels.includes(unexpectedLabel), document.getText());
+
+		if (expectedRange) {
+			assert.strictEqual(observation.currentNodeType, 'word');
+			assert.ok(expectedLabel.startsWith(observation.currentNodeText), document.getText());
+			assert.deepStrictEqual(observation.currentNodeStart, {
+				line: expectedRange.start.line,
+				character: expectedRange.start.character,
+			});
+			assert.deepStrictEqual(observation.currentNodeEnd, {
+				line: expectedRange.end.line,
+				character: expectedRange.end.character,
+			});
+			const item = completion.items.find(candidate => completionLabel(candidate) === expectedLabel);
+			assert.ok(item);
+			assert.deepStrictEqual(item.range, expectedRange);
+		}
+
+		return observation;
+	}
+
+	try {
+		const separatorDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git npm --cursor-',
+		});
+		const separatorTrees = createTreeCache(separatorDocument);
+		await assertOptionCompletion(separatorDocument, separatorTrees, 'git', new vscode.Range(0, 8, 0, 17));
+
+		let characterEdit = new vscode.WorkspaceEdit();
+		characterEdit.insert(
+			separatorDocument.uri,
+			separatorDocument.positionAt(separatorDocument.getText().length),
+			'g',
+		);
+		await applyTrackedEdit(parser, separatorTrees, separatorDocument, characterEdit);
+		await assertOptionCompletion(separatorDocument, separatorTrees, 'git', new vscode.Range(0, 8, 0, 18));
+		await assertOptionCompletion(
+			separatorDocument,
+			separatorTrees,
+			'git',
+			new vscode.Range(0, 8, 0, 18),
+			separatorDocument.positionAt(separatorDocument.getText().length - 1),
+		);
+
+		characterEdit = new vscode.WorkspaceEdit();
+		characterEdit.delete(separatorDocument.uri, new vscode.Range(
+			separatorDocument.positionAt(separatorDocument.getText().length - 1),
+			separatorDocument.positionAt(separatorDocument.getText().length),
+		));
+		await applyTrackedEdit(parser, separatorTrees, separatorDocument, characterEdit);
+		await assertOptionCompletion(separatorDocument, separatorTrees, 'git', new vscode.Range(0, 8, 0, 17));
+
+		const separatorOffset = 'git'.length;
+		let separator = '';
+		async function replaceSeparator(replacement: string): Promise<void> {
+			const edit = new vscode.WorkspaceEdit();
+			edit.replace(
+				separatorDocument.uri,
+				new vscode.Range(
+					separatorDocument.positionAt(separatorOffset),
+					separatorDocument.positionAt(separatorOffset + separator.length),
+				),
+				replacement,
+			);
+			await applyTrackedEdit(parser, separatorTrees, separatorDocument, edit);
+			separator = replacement;
+		}
+
+		await replaceSeparator(';');
+		await assertOptionCompletion(separatorDocument, separatorTrees, 'npm', new vscode.Range(0, 9, 0, 18));
+		const npmOffset = separatorDocument.getText().indexOf('npm');
+		assert.ok(npmOffset >= 0);
+		assert.match(
+			await hoverTextAt(separatorDocument, separatorDocument.positionAt(npmOffset + 1)),
+			/CURSOR_EDIT_NPM_DESCRIPTION/,
+		);
+
+		for (const { replacement, expectedRange } of [
+			{ replacement: '|', expectedRange: new vscode.Range(0, 9, 0, 18) },
+			{ replacement: '&&', expectedRange: new vscode.Range(0, 10, 0, 19) },
+			{ replacement: '\n', expectedRange: new vscode.Range(1, 5, 1, 14) },
+		]) {
+			await replaceSeparator(replacement);
+			await assertOptionCompletion(separatorDocument, separatorTrees, 'npm', expectedRange);
+		}
+		await replaceSeparator('');
+		await assertOptionCompletion(separatorDocument, separatorTrees, 'git', new vscode.Range(0, 8, 0, 17));
+
+		const hierarchyDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'docker ru',
+		});
+		const hierarchyTrees = createTreeCache(hierarchyDocument);
+		async function assertDockerCompletion(
+			position: vscode.Position,
+			expectedLabel: string,
+			expectedRange: vscode.Range,
+		): Promise<void> {
+			const observation = assertCachedCursorMatchesFresh(
+				parser,
+				hierarchyTrees,
+				hierarchyDocument,
+				position,
+				true,
+			);
+			assert.strictEqual(observation.commandName, 'docker');
+			assert.deepStrictEqual(observation.currentNodeStart, {
+				line: expectedRange.start.line,
+				character: expectedRange.start.character,
+			});
+			assert.deepStrictEqual(observation.currentNodeEnd, {
+				line: expectedRange.end.line,
+				character: expectedRange.end.character,
+			});
+			const completion = await completionLabelsAt(hierarchyDocument, position);
+			const item = completion.items.find(candidate => completionLabel(candidate) === expectedLabel);
+			assert.ok(item, hierarchyDocument.getText());
+			assert.deepStrictEqual(item.range, expectedRange);
+		}
+
+		await assertDockerCompletion(new vscode.Position(0, 9), 'run', new vscode.Range(0, 7, 0, 9));
+		let hierarchyEdit = new vscode.WorkspaceEdit();
+		hierarchyEdit.insert(hierarchyDocument.uri, new vscode.Position(0, 9), 'n');
+		await applyTrackedEdit(parser, hierarchyTrees, hierarchyDocument, hierarchyEdit);
+		await assertDockerCompletion(new vscode.Position(0, 10), 'run', new vscode.Range(0, 7, 0, 10));
+		await assertDockerCompletion(new vscode.Position(0, 9), 'run', new vscode.Range(0, 7, 0, 10));
+		assert.match(await hoverTextAt(hierarchyDocument, new vscode.Position(0, 2)), /docker root/);
+		assert.match(await hoverTextAt(hierarchyDocument, new vscode.Position(0, 8)), /run a container/);
+
+		hierarchyEdit = new vscode.WorkspaceEdit();
+		hierarchyEdit.insert(hierarchyDocument.uri, new vscode.Position(0, 10), ' --r');
+		await applyTrackedEdit(parser, hierarchyTrees, hierarchyDocument, hierarchyEdit);
+		await assertDockerCompletion(new vscode.Position(0, 14), '--run-only', new vscode.Range(0, 11, 0, 14));
+		await assertDockerCompletion(new vscode.Position(0, 13), '--run-only', new vscode.Range(0, 11, 0, 14));
+
+		const incompleteDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git ',
+		});
+		const incompleteTrees = createTreeCache(incompleteDocument);
+		await assertOptionCompletion(incompleteDocument, incompleteTrees, 'git', undefined);
+
+		let edit = new vscode.WorkspaceEdit();
+		edit.insert(incompleteDocument.uri, incompleteDocument.positionAt(incompleteDocument.getText().length), '"unterminated');
+		await applyTrackedEdit(parser, incompleteTrees, incompleteDocument, edit);
+		await assertOptionCompletion(incompleteDocument, incompleteTrees, 'git', undefined);
+
+		edit = new vscode.WorkspaceEdit();
+		edit.insert(incompleteDocument.uri, incompleteDocument.positionAt(incompleteDocument.getText().length), '" ');
+		await applyTrackedEdit(parser, incompleteTrees, incompleteDocument, edit);
+		await assertOptionCompletion(incompleteDocument, incompleteTrees, 'git', undefined);
+
+		edit = new vscode.WorkspaceEdit();
+		edit.delete(incompleteDocument.uri, new vscode.Range(
+			incompleteDocument.positionAt(incompleteDocument.getText().length - 2),
+			incompleteDocument.positionAt(incompleteDocument.getText().length),
+		));
+		await applyTrackedEdit(parser, incompleteTrees, incompleteDocument, edit);
+		await assertOptionCompletion(incompleteDocument, incompleteTrees, 'git', undefined);
+
+		edit = new vscode.WorkspaceEdit();
+		edit.replace(
+			incompleteDocument.uri,
+			new vscode.Range(new vscode.Position(0, 0), incompleteDocument.positionAt(incompleteDocument.getText().length)),
+			'git |   ',
+		);
+		await applyTrackedEdit(parser, incompleteTrees, incompleteDocument, edit);
+		for (const character of [4, 5]) {
+			const pipelineBoundary = assertCachedCursorMatchesFresh(
+				parser,
+				incompleteTrees,
+				incompleteDocument,
+				new vscode.Position(0, character),
+				false,
+			);
+			assert.strictEqual(pipelineBoundary.commandName, undefined);
+			assert.strictEqual(pipelineBoundary.currentNodeType, '|');
+			assert.strictEqual(pipelineBoundary.currentNodeText, '|');
+			assert.deepStrictEqual(pipelineBoundary.currentNodeStart, { line: 0, character: 4 });
+			assert.deepStrictEqual(pipelineBoundary.currentNodeEnd, { line: 0, character: 5 });
+		}
+		const missingCommand = await assertOptionCompletion(incompleteDocument, incompleteTrees, 'git', undefined);
+		assert.strictEqual(missingCommand.resolvedPosition.character, 3);
+		assert.strictEqual(missingCommand.moved, true);
+
+		edit = new vscode.WorkspaceEdit();
+		edit.insert(
+			incompleteDocument.uri,
+			incompleteDocument.positionAt(incompleteDocument.getText().length),
+			'npm --cursor-',
+		);
+		await applyTrackedEdit(parser, incompleteTrees, incompleteDocument, edit);
+		await assertOptionCompletion(incompleteDocument, incompleteTrees, 'npm', new vscode.Range(0, 12, 0, 21));
+
+		const crlfDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'echo base\r\ngit --cursor-',
+		});
+		const crlfTrees = createTreeCache(crlfDocument);
+		await assertOptionCompletion(crlfDocument, crlfTrees, 'git', new vscode.Range(1, 4, 1, 13));
+
+		edit = new vscode.WorkspaceEdit();
+		edit.replace(crlfDocument.uri, new vscode.Range(0, 5, 0, 9), '😀あ');
+		await applyTrackedEdit(parser, crlfTrees, crlfDocument, edit);
+		assert.strictEqual(crlfDocument.getText(), 'echo 😀あ\r\ngit --cursor-');
+		await assertOptionCompletion(crlfDocument, crlfTrees, 'git', new vscode.Range(1, 4, 1, 13));
+
+		edit = new vscode.WorkspaceEdit();
+		edit.delete(crlfDocument.uri, new vscode.Range(
+			new vscode.Position(0, 0),
+			crlfDocument.positionAt(crlfDocument.getText().length),
+		));
+		await applyTrackedEdit(parser, crlfTrees, crlfDocument, edit);
+		const empty = assertCachedCursorMatchesFresh(
+			parser,
+			crlfTrees,
+			crlfDocument,
+			new vscode.Position(0, 0),
+			true,
+		);
+		assert.strictEqual(empty.commandName, undefined);
+		assert.strictEqual(empty.currentNodeType, 'program');
+		assert.strictEqual(empty.currentNodeText, '');
+
+		edit = new vscode.WorkspaceEdit();
+		edit.insert(crlfDocument.uri, new vscode.Position(0, 0), 'npm --cursor-');
+		await applyTrackedEdit(parser, crlfTrees, crlfDocument, edit);
+		await assertOptionCompletion(crlfDocument, crlfTrees, 'npm', new vscode.Range(0, 4, 0, 13));
+
+		const continuationDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git \\\r\n  ',
+		});
+		const continuationTrees = createTreeCache(continuationDocument);
+		await assertOptionCompletion(continuationDocument, continuationTrees, 'git', undefined);
+
+		edit = new vscode.WorkspaceEdit();
+		edit.delete(continuationDocument.uri, new vscode.Range(
+			new vscode.Position(0, 4),
+			continuationDocument.positionAt(continuationDocument.getText().length),
+		));
+		await applyTrackedEdit(parser, continuationTrees, continuationDocument, edit);
+		assert.strictEqual(continuationDocument.getText(), 'git ');
+		await assertOptionCompletion(continuationDocument, continuationTrees, 'git', undefined);
+
+		edit = new vscode.WorkspaceEdit();
+		edit.insert(continuationDocument.uri, new vscode.Position(0, 4), '\\\r\n  ');
+		await applyTrackedEdit(parser, continuationTrees, continuationDocument, edit);
+		assert.strictEqual(continuationDocument.getText(), 'git \\\r\n  ');
+		await assertOptionCompletion(continuationDocument, continuationTrees, 'git', undefined);
+	} finally {
+		for (const trees of treeCaches) {
+			for (const tree of Object.values(trees)) {
+				tree.delete();
+			}
+		}
+		CachingFetcher.prototype.fetch = originalFetch;
+		CachingFetcher.prototype.getList = originalGetList;
 	}
 }
 
@@ -1319,6 +1711,9 @@ suite('Parser and provider behavior', () => {
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
 	test('refreshes command names after asynchronous lookup', verifyCompletionRefreshesCommandList);
 	test('preserves editor-facing ranges and incomplete-input completions', verifyEditorFacingParserCompatibility);
+	test('preserves cursor behavior across incremental edits', async () => {
+		await verifyCursorBehaviorAcrossEdits(parser);
+	});
 	test('resolves command specs strictly through their hierarchy', verifyHierarchicalCommandResolution);
 });
 
