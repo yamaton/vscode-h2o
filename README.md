@@ -77,10 +77,12 @@ Remote environments such as WSL use the platform of their VS Code Extension Host
 ## How It Works
 
 * [tree-sitter](https://tree-sitter.github.io/tree-sitter/) identifies the command, subcommand, and option at the cursor.
-* The extension first looks for a command specification in its VS Code global-state cache.
+* The extension first looks for a command specification in its in-memory cache, restored from a compressed snapshot in VS Code global storage. This on-disk cache is regenerable and is not synchronized through Settings Sync.
 * The common curated collection is downloaded in the background when the extension activates. Existing cached entries are preserved unless you explicitly reload the collection.
 * For an unknown command available in the local environment, the bundled [H2O](https://github.com/yamaton/h2o) scanner runs `<command> --help`, parses the output, and caches the result.
 * Network requests and local help scans have a 10-second timeout.
+
+When upgrading from a version that stored command specifications in VS Code global state, the extension discards those legacy cache entries instead of migrating them. It then rebuilds the cache from curated data or locally scanned help output.
 
 ## Security
 

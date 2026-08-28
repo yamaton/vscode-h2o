@@ -15,6 +15,7 @@ import {
 } from '../../extension';
 import type { TreeCache } from '../../extension';
 import { CachingFetcher, CachingFetcherDependencies } from '../../cacheFetcher';
+import type { CommandCacheStorage } from '../../cacheStorage';
 import type { Command } from '../../command';
 import { withParsedTree } from '../parserTestUtils';
 
@@ -24,9 +25,9 @@ const cursorMarker = '<|cursor|>';
 interface InitialCuratedProbe {
 	completion: Promise<void>;
 	commandNames: string[];
-	memento: vscode.Memento;
+	storage: CommandCacheStorage;
 	startedAt: number;
-	updateStarts: number[];
+	saveStarts: number[];
 }
 
 let initialCuratedProbe: InitialCuratedProbe | undefined;
@@ -62,21 +63,21 @@ async function activateExtension(): Promise<vscode.Extension<unknown>> {
 
 	CachingFetcher.prototype.startInitialCuratedFetch = function startInitialCuratedFetch(kind = 'general'): Promise<void> {
 		const internals = this as unknown as {
-			memento: vscode.Memento;
 			dependencies: CachingFetcherDependencies;
 		};
-		const memento = internals.memento;
-		const updateStarts: number[] = [];
-		internals.memento = {
-			keys: () => memento.keys(),
-			get: memento.get.bind(memento) as vscode.Memento['get'],
-			update: (key, value) => {
-				updateStarts.push(Date.now());
-				return memento.update(key, value);
+		const storage = internals.dependencies.cacheStorage;
+		assert.ok(storage, 'activation must configure command cache storage');
+		const saveStarts: number[] = [];
+		const observedStorage: CommandCacheStorage = {
+			load: () => storage.load(),
+			save: snapshot => {
+				saveStarts.push(Date.now());
+				return storage.save(snapshot);
 			},
 		};
 		internals.dependencies = {
 			...internals.dependencies,
+			cacheStorage: observedStorage,
 			fetch: async () => new Response(body, { status: 200 }),
 		};
 		const startedAt = Date.now();
@@ -84,9 +85,9 @@ async function activateExtension(): Promise<vscode.Extension<unknown>> {
 		initialCuratedProbe = {
 			completion,
 			commandNames: commands.map(command => command.name),
-			memento,
+			storage: observedStorage,
 			startedAt,
-			updateStarts,
+			saveStarts,
 		};
 		return completion;
 	};
@@ -104,9 +105,13 @@ async function activateExtension(): Promise<vscode.Extension<unknown>> {
 async function verifyInitialCuratedPersistence(): Promise<void> {
 	assert.ok(initialCuratedProbe);
 	await withTimeout(initialCuratedProbe.completion, 15000);
-	assert.strictEqual(initialCuratedProbe.updateStarts.length, initialCuratedProbe.commandNames.length);
-	const updateStartSpan = Math.max(...initialCuratedProbe.updateStarts) - Math.min(...initialCuratedProbe.updateStarts);
-	assert.ok(updateStartSpan < 1000, `curated Memento writes started over ${updateStartSpan} ms instead of one batch`);
+	assert.strictEqual(initialCuratedProbe.saveStarts.length, 1);
+	const snapshot = await initialCuratedProbe.storage.load();
+	assert.ok(snapshot, 'controlled curated load must persist a snapshot');
+	assert.deepStrictEqual(
+		new Set(snapshot.commands.map(command => command.name)),
+		new Set(initialCuratedProbe.commandNames),
+	);
 	assert.ok(Date.now() - initialCuratedProbe.startedAt < 15000, 'controlled curated persistence exceeded 15 seconds');
 }
 
@@ -1081,6 +1086,7 @@ async function verifyFailedActivationDisposesParser(): Promise<void> {
 		},
 	} as unknown as Parser;
 	const context = {
+		globalStorageUri: vscode.Uri.file('/tmp/vscode-h2o-failed-activation'),
 		globalState: {},
 		subscriptions: [],
 	} as unknown as vscode.ExtensionContext;
@@ -1162,17 +1168,9 @@ suiteSetup(async () => {
 	await activateExtension();
 });
 
-suiteTeardown(async () => {
-	if (initialCuratedProbe) {
-		await Promise.all(initialCuratedProbe.commandNames.map(name =>
-			initialCuratedProbe!.memento.update(CachingFetcher.getKey(name), undefined)
-		));
-	}
-});
-
 suite('Extension activation', () => {
 	test('registers contributed commands', verifyRegisteredCommands);
-	test('batches controlled curated writes through real globalState', verifyInitialCuratedPersistence);
+	test('persists a controlled curated load as one global-storage snapshot', verifyInitialCuratedPersistence);
 	test('handles non-destructive command paths', verifyCommandHandlers);
 });
 

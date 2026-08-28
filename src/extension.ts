@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
+import { randomUUID } from 'crypto';
 import * as Parser from 'web-tree-sitter';
 import { SyntaxNode } from 'web-tree-sitter';
 import { CachingFetcher } from './cacheFetcher';
+import { GzipCommandCacheStorage } from './cacheStorage';
 import { Option, Command } from './command';
 import {
   CommandPathResolution,
@@ -94,7 +96,16 @@ async function registerExtension(
   trees: TreeCache,
   activationRegistrations: vscode.Disposable[],
 ): Promise<void> {
-  const fetcher = new CachingFetcher(context.globalState);
+  const cacheDirectory = context.globalStorageUri;
+  const cacheStorage = new GzipCommandCacheStorage(vscode.workspace.fs, {
+    directory: cacheDirectory,
+    snapshot: vscode.Uri.joinPath(cacheDirectory, 'commands-v1.json.gz'),
+    temporary: () => vscode.Uri.joinPath(
+      cacheDirectory,
+      `commands-v1.${process.pid}.${randomUUID()}.json.gz.tmp`,
+    ),
+  });
+  const fetcher = new CachingFetcher(context.globalState, { cacheStorage });
   await fetcher.init();
   const initialCuratedFetch = fetcher.startInitialCuratedFetch("general");
   void initialCuratedFetch.catch(() => {
@@ -367,7 +378,7 @@ async function registerExtension(
       void vscode.window.showInformationMessage(msg1);
 
       const names = await fetcher.fetchList('bio');
-      await Promise.all(names.map((name) => fetcher.unset(name)));
+      await fetcher.unsetAll(names);
     } catch (e) {
       console.error("[h2o.removeBio] Error: ", e);
       return Promise.reject("[h2o.removeBio] Fetch Error: ");

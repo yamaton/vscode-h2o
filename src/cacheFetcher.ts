@@ -1,11 +1,19 @@
 import { spawnSync } from 'child_process';
-import { gunzipSync } from 'node:zlib';
 import * as path from 'path';
 import type { Memento } from 'vscode';
 import type * as Vscode from 'vscode';
 import { Command } from './command';
 import fetch from 'node-fetch';
 import type { Response } from 'node-fetch';
+import {
+  CommandCacheSnapshot,
+  CommandCacheStorage,
+  InvalidCommandCacheSnapshotError,
+  commandCacheSnapshotVersion,
+  decodeCommandBundle,
+  validateCommands,
+  validateCommandsYielding,
+} from './cacheStorage';
 
 let neverNotifiedError = true;
 
@@ -28,6 +36,7 @@ export interface CachingFetcherDependencies {
   fetch(url: string, timeoutMs: number): Promise<Response>;
   runLocalCommand(name: string): Command | undefined;
   requestTimeoutMs: number;
+  cacheStorage?: CommandCacheStorage;
 }
 
 function createDefaultH2oRuntime(): H2oRuntime {
@@ -51,6 +60,7 @@ const defaultDependencies: CachingFetcherDependencies = {
   fetch: (url: string, timeoutMs: number) => fetch(url, { timeout: timeoutMs }),
   runLocalCommand: (name: string) => runH2o(name),
   requestTimeoutMs: 10000,
+  cacheStorage: undefined,
 };
 
 
@@ -85,7 +95,10 @@ export function runH2o(name: string, runtime: H2oRuntime = createDefaultH2oRunti
   const out = proc.stdout;
   if (out) {
     try {
-      const command = JSON.parse(out.toString()) as Command;
+      const command = validateCommands([JSON.parse(out.toString()) as unknown])[0];
+      if (command.name !== name) {
+        throw new Error(`H2O returned ${command.name} for requested command ${name}.`);
+      }
       console.log(`[CacheFetcher.runH2o] Got command output: ${command.name}`);
       return command;
     } catch (error) {
@@ -99,14 +112,18 @@ export function runH2o(name: string, runtime: H2oRuntime = createDefaultH2oRunti
 
 
 // -----
-// CachingFetcher manages the local cache using Memento.
-// It also pulls command data from the remote repository.
+// CachingFetcher keeps the active cache in memory and persists a versioned
+// snapshot through CommandCacheStorage. Memento is retained only to delete
+// cache entries written by older extension versions.
 export class CachingFetcher {
   static readonly keyPrefix = 'h2oFetcher.cache.';
   static readonly commandListKey = 'h2oFetcher.registered.all';
 
   private readonly dependencies: CachingFetcherDependencies;
+  private commands = new Map<string, Command>();
   private readonly removedNames = new Set<string>();
+  private saveChain: Promise<void> = Promise.resolve();
+  private persistenceEnabled = true;
   private initialCuratedAvailability: Promise<void> | undefined;
   private initialCuratedCompletion: Promise<void> | undefined;
 
@@ -118,16 +135,33 @@ export class CachingFetcher {
   }
 
   public async init(): Promise<void> {
-    const existing = this.getList();
+    if (this.dependencies.cacheStorage) {
+      try {
+        const snapshot = await this.dependencies.cacheStorage.load();
+        if (snapshot) {
+          const commands = await validateCommandsYielding(snapshot.commands);
+          this.commands = new Map(commands.map(command => [command.name, command]));
+        }
+      } catch (error) {
+        if (error instanceof InvalidCommandCacheSnapshotError) {
+          console.warn('[CacheFetcher.init] Ignoring invalid command cache snapshot:', error.originalError);
+        } else {
+          this.persistenceEnabled = false;
+          console.warn('[CacheFetcher.init] Failed to read the command cache snapshot; persistence is disabled for this session:', error);
+        }
+      }
+    }
 
-    if (!existing || !existing.length || existing.length === 0) {
+    await this.cleanupLegacyState();
+
+    if (this.commands.size === 0) {
       console.log(">>>---------------------------------------");
       console.log("  Clean state");
       console.log("<<<---------------------------------------");
     } else {
       console.log(">>>---------------------------------------");
-      console.log("  Memento entries already exist");
-      console.log("    # of command specs in the local DB:", existing.length);
+      console.log("  Command cache entries already exist");
+      console.log("    # of command specs in the local DB:", this.commands.size);
       console.log("<<<---------------------------------------");
     }
   }
@@ -137,32 +171,61 @@ export class CachingFetcher {
     return CachingFetcher.keyPrefix + name;
   }
 
-  // Get Memento data of the command `name`
-  private getCache(name: string): Command | undefined {
-    const key = CachingFetcher.getKey(name);
-    return this.memento.get(key);
+  private async cleanupLegacyState(): Promise<void> {
+    const keys = this.memento.keys().filter(key =>
+      key.startsWith(CachingFetcher.keyPrefix) || key === CachingFetcher.commandListKey
+    );
+    const failures: Array<{ key: string; error: unknown }> = [];
+    await Promise.all(keys.map(async key => {
+      try {
+        await this.memento.update(key, undefined);
+      } catch (error) {
+        failures.push({ key, error });
+      }
+    }));
+    for (const failure of failures) {
+      console.warn(`[CacheFetcher.init] Failed to delete legacy Memento entry ${failure.key}:`, failure.error);
+    }
   }
 
-  // Update Memento record and the name list
-  // Pass undefined to remove the value.
+  private snapshot(): CommandCacheSnapshot {
+    return {
+      version: commandCacheSnapshotVersion,
+      commands: [...this.commands.values()],
+    };
+  }
+
+  private persist(): Promise<void> {
+    const storage = this.dependencies.cacheStorage;
+    if (!storage || !this.persistenceEnabled) {
+      return Promise.resolve();
+    }
+    const snapshot = this.snapshot();
+    const save = this.saveChain.catch(() => undefined).then(() => storage.save(snapshot));
+    this.saveChain = save;
+    return save;
+  }
+
   private async updateCache(name: string, command: Command | undefined, logging: boolean = false): Promise<void> {
+    if (command && command.name !== name) {
+      throw new Error(`Received command ${command.name} for requested command ${name}.`);
+    }
     if (command) {
+      command = validateCommands([command])[0];
+    }
+    const startedAt = Date.now();
+    const next = new Map(this.commands);
+    if (command) {
+      next.set(name, command);
       this.removedNames.delete(name);
     } else {
+      next.delete(name);
       this.removedNames.add(name);
     }
-
+    this.commands = next;
+    await this.persist();
     if (logging) {
-      console.log(`[CacheFetcher.update] Updating ${name}...`);
-      const t0 = new Date();
-      const key = CachingFetcher.getKey(name);
-      await this.memento.update(key, command);
-      const t1 = new Date();
-      const diff = t1.getTime() - t0.getTime();
-      console.log(`[CacheFetcher.update] ${name}: Memento update took ${diff} ms.`);
-    } else {
-      const key = CachingFetcher.getKey(name);
-      await this.memento.update(key, command);
+      console.log(`[CacheFetcher.update] ${name}: Cache snapshot update took ${Date.now() - startedAt} ms.`);
     }
   }
 
@@ -173,15 +236,15 @@ export class CachingFetcher {
       return Promise.reject(`Command name too short: ${name}`);
     }
 
-    let cached = this.getCache(name);
+    let cached = this.commands.get(name);
     if (cached) {
       console.log('[CacheFetcher.fetch] Fetching from cache:', name);
-      return cached as Command;
+      return cached;
     }
 
     if (this.initialCuratedAvailability) {
       await this.initialCuratedAvailability;
-      cached = this.getCache(name);
+      cached = this.commands.get(name);
       if (cached) {
         console.log('[CacheFetcher.fetch] Fetching from newly available curated cache:', name);
         return cached;
@@ -195,12 +258,23 @@ export class CachingFetcher {
         console.warn(`[CacheFetcher.fetch] Failed to fetch command ${name} from H2O`);
         return Promise.reject(`Failed to fetch command ${name} from H2O`);
       }
+      if (command.name !== name) {
+        console.warn(`[CacheFetcher.fetch] H2O returned ${command.name} for requested command ${name}`);
+        return Promise.reject(`H2O returned ${command.name} for requested command ${name}`);
+      }
+      let validated: Command;
       try {
-        await this.updateCache(name, command, true);
+        validated = validateCommands([command])[0];
+      } catch (error) {
+        console.warn(`[CacheFetcher.fetch] H2O returned invalid command data for ${name}:`, error);
+        return Promise.reject(`H2O returned invalid command data for ${name}`);
+      }
+      try {
+        await this.updateCache(name, validated, true);
       } catch (e) {
         console.log("Failed to update:", e);
       }
-      return command;
+      return validated;
 
     } catch (e) {
       console.log("[CacheFetcher.fetch] Error: ", e);
@@ -239,25 +313,32 @@ export class CachingFetcher {
     const response = await this.fetchResponse(url);
     console.log("[CacheFetcher.fetchAllCurated] received HTTP response");
 
-    let commands: Command[] = [];
+    let commands: Command[];
     try {
       const s = await response.buffer();
-      const decoded = gunzipSync(s).toString('utf8');
-      commands = JSON.parse(decoded) as Command[];
+      commands = await decodeCommandBundle(s);
     } catch (err) {
       console.error("[fetchAllCurated] Error: ", err);
-      return Promise.reject("Failed to decompress and parse the content as JSON.");
+      return Promise.reject("Failed to inflate and parse the content as JSON.");
     }
-    console.log("[CacheFetcher.fetchAllCurated] Done decompressing and parsing. Command #:", commands.length);
+    console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Command #:", commands.length);
 
-    const updates: Promise<void>[] = [];
+    const next = new Map(this.commands);
+    let inserted = false;
     for (const cmd of commands) {
-      if (isForcing || (!this.removedNames.has(cmd.name) && this.getCache(cmd.name) === undefined)) {
-        updates.push(this.updateCache(cmd.name, cmd, false));
+      if (isForcing || (!this.removedNames.has(cmd.name) && !next.has(cmd.name))) {
+        next.set(cmd.name, cmd);
+        inserted = true;
+        if (isForcing) {
+          this.removedNames.delete(cmd.name);
+        }
       }
     }
+    this.commands = next;
     markAvailable?.();
-    await Promise.all(updates);
+    if (isForcing || inserted) {
+      await this.persist();
+    }
   }
 
 
@@ -271,7 +352,7 @@ export class CachingFetcher {
     let cmd: Command;
     try {
       const content = await response.text();
-      cmd = JSON.parse(content) as Command;
+      cmd = validateCommands([JSON.parse(content) as unknown])[0];
     } catch (err) {
       const msg = `[CacheFetcher.downloadCommand] Error: ${err}`;
       console.error(msg);
@@ -279,7 +360,7 @@ export class CachingFetcher {
     }
 
     console.log(`[CacheFetcher.downloadCommand] Loading: ${cmd.name}`);
-    await this.updateCache(cmd.name, cmd, true);
+    await this.updateCache(name, cmd, true);
   }
 
 
@@ -328,18 +409,32 @@ export class CachingFetcher {
 
   // Unset cache data of command `name` by assigning undefined
   public async unset(name: string): Promise<void> {
+    if (!this.commands.has(name)) {
+      this.removedNames.add(name);
+      console.log(`[CacheFetcher.unset] ${name} was not cached`);
+      return;
+    }
     await this.updateCache(name, undefined);
     console.log(`[CacheFetcher.unset] Unset ${name}`);
   }
 
-  // Load a list of registered commands from Memento
+  public async unsetAll(names: readonly string[]): Promise<void> {
+    const next = new Map(this.commands);
+    let removed = false;
+    for (const name of names) {
+      removed = next.delete(name) || removed;
+      this.removedNames.add(name);
+    }
+    this.commands = next;
+    if (removed) {
+      await this.persist();
+    }
+    console.log(`[CacheFetcher.unsetAll] Unset ${names.length} commands`);
+  }
+
+  // Load a list of registered commands from the in-memory snapshot.
   public getList(): string[] {
-    const keys = this.memento.keys();
-    const prefix = CachingFetcher.keyPrefix;
-    const cmdKeys =
-      keys.filter(x => x.startsWith(prefix))
-          .map(x => x.substring(prefix.length));
-    return cmdKeys;
+    return [...this.commands.keys()];
   }
 
 }

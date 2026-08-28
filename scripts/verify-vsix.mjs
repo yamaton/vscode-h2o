@@ -30,6 +30,7 @@ const requiredFiles = [
   'extension/LICENSE.txt',
   'extension/out/analyzer.js',
   'extension/out/cacheFetcher.js',
+  'extension/out/cacheStorage.js',
   'extension/out/command.js',
   'extension/out/commandExplorer.js',
   'extension/out/commandResolver.js',
