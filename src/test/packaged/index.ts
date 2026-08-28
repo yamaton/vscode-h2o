@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import type { Command } from '../../command';
-import type { CursorDebugReport } from '../../extension';
+import type { CursorDebugReport, LiveCursorDebugToggleResult } from '../../extension';
 
 const extensionId = 'tetradresearch.vscode-h2o';
 
@@ -47,6 +47,7 @@ export async function run(): Promise<void> {
 		'h2o.clearCache',
 		'h2o.inspectCursorContext',
 		'h2o.loadCommand',
+		'h2o.toggleLiveCursorContext',
 		'registeredCommands.refreshEntry',
 	]) {
 		assert.ok(commands.has(command), `${command} must be registered by the packaged extension`);
@@ -101,6 +102,18 @@ export async function run(): Promise<void> {
 			completionEquivalent: true,
 			hoverEquivalent: true,
 		});
+
+		const liveDebug = await withTimeout(
+			vscode.commands.executeCommand<LiveCursorDebugToggleResult>(
+				'h2o.toggleLiveCursorContext',
+				true,
+			),
+			10000,
+		);
+		assert.strictEqual(liveDebug.enabled, true);
+		assert.strictEqual(liveDebug.snapshot?.caretNode.type, 'word');
+		assert.ok(!('grammarType' in liveDebug.snapshot!.caretNode));
+		await vscode.commands.executeCommand('h2o.toggleLiveCursorContext', false);
 	} finally {
 		packagedCachingFetcher.prototype.fetch = originalFetch;
 	}

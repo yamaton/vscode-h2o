@@ -13,7 +13,12 @@ import {
 	updateTree,
 	walkbackIfNeeded,
 } from '../../extension';
-import type { CursorDebugReport, TreeCache } from '../../extension';
+import type {
+	CursorDebugReport,
+	LiveCursorDebugState,
+	LiveCursorDebugToggleResult,
+	TreeCache,
+} from '../../extension';
 import { CachingFetcher, CachingFetcherDependencies } from '../../cacheFetcher';
 import type { CommandCacheStorage } from '../../cacheStorage';
 import type { Command } from '../../command';
@@ -124,6 +129,7 @@ async function verifyRegisteredCommands(): Promise<void> {
 		'h2o.loadCommon',
 		'h2o.inspectCursorContext',
 		'h2o.removeBio',
+		'h2o.toggleLiveCursorContext',
 		'registeredCommands.refreshEntry',
 		'registeredCommands.removeEntry',
 	];
@@ -766,6 +772,246 @@ async function verifyCursorDebugInterface(): Promise<void> {
 		assert.ok(recovery.cached.hover.requestSuppressionReasons.includes('ERROR'));
 		assert.strictEqual(recovery.comparison.syntaxAtCursorEquivalent, true);
 	} finally {
+		CachingFetcher.prototype.fetch = originalFetch;
+	}
+}
+
+async function verifyLiveCursorDebugInterface(): Promise<void> {
+	const originalFetch = CachingFetcher.prototype.fetch;
+	CachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+		assert.strictEqual(name, 'git');
+		return {
+			...commandForProviderRace(),
+			subcommands: [{
+				name: 'status',
+				aliases: ['st'],
+				description: 'live cursor debug subcommand',
+				options: [],
+			}],
+		};
+	};
+
+	function getLiveState(): Thenable<LiveCursorDebugState> {
+		return vscode.commands.executeCommand<LiveCursorDebugState>('h2o.getLiveCursorContextState');
+	}
+
+	async function waitForLiveUpdate(
+		afterSequence: number,
+		predicate: (state: LiveCursorDebugState) => boolean = () => true,
+	): Promise<LiveCursorDebugState> {
+		const deadline = Date.now() + 5000;
+		while (Date.now() < deadline) {
+			const state = await getLiveState();
+			if (state.updateSequence > afterSequence && predicate(state)) {
+				return state;
+			}
+			await new Promise<void>(resolve => setTimeout(resolve, 10));
+		}
+		throw new Error(`Live cursor context did not update after sequence ${afterSequence}`);
+	}
+
+	async function requestHover(document: vscode.TextDocument, position: vscode.Position): Promise<void> {
+		await withTimeout(
+			vscode.commands.executeCommand<vscode.Hover[]>(
+				'vscode.executeHoverProvider',
+				document.uri,
+				position,
+			),
+			5000,
+		);
+	}
+
+	try {
+		const document = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git --v',
+		});
+		const editor = await vscode.window.showTextDocument(document, { preview: false });
+		const end = document.positionAt(document.getText().length);
+		editor.selection = new vscode.Selection(end, end);
+
+		const enabled = await withTimeout(
+			vscode.commands.executeCommand<LiveCursorDebugToggleResult>('h2o.toggleLiveCursorContext'),
+			5000,
+		);
+		assert.strictEqual(enabled.enabled, true);
+		assert.ok(enabled.snapshot);
+		assert.deepStrictEqual(enabled.snapshot.caretNode, {
+			type: 'word',
+			fieldName: 'argument',
+			commandToken: true,
+			text: '--v',
+			error: false,
+			missing: false,
+			start: { line: 0, character: 4, index: 4 },
+			end: { line: 0, character: 7, index: 7 },
+		});
+		assert.ok(!('grammarType' in enabled.snapshot.caretNode));
+		assert.strictEqual(enabled.snapshot.completion.includeArgumentAtPosition, false);
+		assert.deepStrictEqual(enabled.snapshot.completion.invocation?.arguments, []);
+		assert.strictEqual(enabled.snapshot.cursor, null);
+		assert.strictEqual(enabled.snapshot.cursorNode, null);
+		assert.strictEqual(enabled.snapshot.hover, null);
+
+		const beforeHover = await getLiveState();
+		const optionCursor = new vscode.Position(0, 5);
+		await requestHover(document, optionCursor);
+		const hoverState = await waitForLiveUpdate(
+			beforeHover.updateSequence,
+			state => state.snapshot?.cursor?.character === optionCursor.character,
+		);
+		assert.strictEqual(hoverState.snapshot?.caret.character, 7);
+		assert.deepStrictEqual(hoverState.snapshot?.cursor, {
+			line: 0,
+			character: 5,
+			offset: 5,
+			lineText: 'git --v',
+		});
+		assert.strictEqual(hoverState.snapshot?.cursorNode?.text, '--v');
+		assert.strictEqual(hoverState.snapshot?.hover?.includeArgumentAtPosition, true);
+		assert.deepStrictEqual(
+			hoverState.snapshot?.hover?.invocation?.arguments.map(argument => argument.text),
+			['--v'],
+		);
+
+		const beforeSelection = hoverState;
+		const commandPosition = new vscode.Position(0, 1);
+		editor.selection = new vscode.Selection(commandPosition, commandPosition);
+		const selectionState = await waitForLiveUpdate(beforeSelection.updateSequence);
+		assert.strictEqual(selectionState.snapshot?.document.version, document.version);
+		assert.deepStrictEqual(selectionState.snapshot?.caret, {
+			line: 0,
+			character: 1,
+			offset: 1,
+			lineText: 'git --v',
+		});
+		assert.strictEqual(selectionState.snapshot?.caretNode.text, 'git');
+		assert.deepStrictEqual(selectionState.snapshot?.completion.resolvedPosition, {
+			line: 0,
+			character: 1,
+		});
+		assert.strictEqual(selectionState.snapshot?.completion.moved, false);
+		assert.strictEqual(selectionState.snapshot?.cursor?.character, 5);
+		assert.deepStrictEqual(selectionState.snapshot?.hover?.resolvedPosition, {
+			line: 0,
+			character: 5,
+		});
+		assert.strictEqual(selectionState.snapshot?.hover?.moved, false);
+		assert.strictEqual(selectionState.snapshot?.completion.invocation?.name.text, 'git');
+		assert.strictEqual(selectionState.snapshot?.hover?.invocation?.name.text, 'git');
+
+		const beforeEdit = selectionState.updateSequence;
+		const append = new vscode.WorkspaceEdit();
+		append.insert(document.uri, document.positionAt(document.getText().length), 'x');
+		await captureDocumentChange(document, () => vscode.workspace.applyEdit(append));
+		const editState = await waitForLiveUpdate(beforeEdit);
+		assert.strictEqual(editState.snapshot?.document.version, document.version);
+		assert.strictEqual(editState.snapshot?.caret.character, 1);
+		assert.strictEqual(editState.snapshot?.caretNode.text, 'git');
+		assert.strictEqual(editState.snapshot?.cursor, null);
+		assert.strictEqual(editState.snapshot?.cursorNode, null);
+		assert.strictEqual(editState.snapshot?.hover, null);
+
+		const beforeRedirect = editState.updateSequence;
+		const redirectEdit = new vscode.WorkspaceEdit();
+		redirectEdit.replace(document.uri, new vscode.Range(0, 4, 0, 8), '2> errors.log');
+		await captureDocumentChange(document, () => vscode.workspace.applyEdit(redirectEdit));
+		const redirectPosition = new vscode.Position(0, 8);
+		editor.selection = new vscode.Selection(redirectPosition, redirectPosition);
+		await requestHover(document, redirectPosition);
+		const redirectState = await waitForLiveUpdate(
+			beforeRedirect,
+			state => state.snapshot?.cursor?.character === redirectPosition.character,
+		);
+		assert.strictEqual(redirectState.snapshot?.document.version, document.version);
+		assert.strictEqual(redirectState.snapshot?.caret.character, 8);
+		assert.strictEqual(redirectState.snapshot?.caretNode.text, 'errors.log');
+		assert.strictEqual(redirectState.snapshot?.completion.enabled, false);
+		assert.ok(redirectState.snapshot?.completion.requestSuppressionReasons.includes('file_redirect'));
+		assert.strictEqual(redirectState.snapshot?.hover?.enabled, false);
+		assert.ok(redirectState.snapshot?.hover?.requestSuppressionReasons.includes('file_redirect'));
+
+		const beforeSubcommand = redirectState.updateSequence;
+		const subcommandEdit = new vscode.WorkspaceEdit();
+		subcommandEdit.replace(
+			document.uri,
+			new vscode.Range(0, 0, 0, document.getText().length),
+			'git st',
+		);
+		await captureDocumentChange(document, () => vscode.workspace.applyEdit(subcommandEdit));
+		const subcommandPosition = new vscode.Position(0, 5);
+		editor.selection = new vscode.Selection(subcommandPosition, subcommandPosition);
+		await requestHover(document, subcommandPosition);
+		const subcommandState = await waitForLiveUpdate(
+			beforeSubcommand,
+			state => state.snapshot?.cursor?.character === subcommandPosition.character,
+		);
+		assert.deepStrictEqual(subcommandState.snapshot?.hover?.resolution?.steps, [{
+			command: 'status',
+			source: 'st',
+			sourceRange: {
+				start: { line: 0, character: 4 },
+				end: { line: 0, character: 6 },
+			},
+			matchedBy: 'alias',
+		}]);
+
+		const beforeWalkback = subcommandState.updateSequence;
+		const walkbackEdit = new vscode.WorkspaceEdit();
+		walkbackEdit.replace(
+			document.uri,
+			new vscode.Range(0, 0, 0, document.getText().length),
+			'git ',
+		);
+		await captureDocumentChange(document, () => vscode.workspace.applyEdit(walkbackEdit));
+		const trailingSpaceCaret = new vscode.Position(0, 4);
+		editor.selection = new vscode.Selection(trailingSpaceCaret, trailingSpaceCaret);
+		const commandCursor = new vscode.Position(0, 1);
+		await requestHover(document, commandCursor);
+		const walkbackState = await waitForLiveUpdate(
+			beforeWalkback,
+			state => state.snapshot?.caret.character === trailingSpaceCaret.character
+				&& state.snapshot.cursor?.character === commandCursor.character,
+		);
+		assert.deepStrictEqual(walkbackState.snapshot?.caret, {
+			line: 0,
+			character: 4,
+			offset: 4,
+			lineText: 'git ',
+		});
+		assert.deepStrictEqual(walkbackState.snapshot?.completion.resolvedPosition, {
+			line: 0,
+			character: 3,
+		});
+		assert.strictEqual(walkbackState.snapshot?.completion.moved, true);
+		assert.deepStrictEqual(walkbackState.snapshot?.cursor, {
+			line: 0,
+			character: 1,
+			offset: 1,
+			lineText: 'git ',
+		});
+		assert.deepStrictEqual(walkbackState.snapshot?.hover?.resolvedPosition, {
+			line: 0,
+			character: 1,
+		});
+		assert.strictEqual(walkbackState.snapshot?.hover?.moved, false);
+
+		const disabled = await vscode.commands.executeCommand<LiveCursorDebugToggleResult>(
+			'h2o.toggleLiveCursorContext',
+		);
+		assert.strictEqual(disabled.enabled, false);
+		const disabledState = await getLiveState();
+		assert.strictEqual(disabledState.enabled, false);
+		const disabledSequence = disabledState.updateSequence;
+		const disabledPosition = new vscode.Position(0, 1);
+		editor.selection = new vscode.Selection(disabledPosition, disabledPosition);
+		const disabledEdit = new vscode.WorkspaceEdit();
+		disabledEdit.insert(document.uri, document.positionAt(document.getText().length), ' ');
+		await captureDocumentChange(document, () => vscode.workspace.applyEdit(disabledEdit));
+		await new Promise<void>(resolve => setTimeout(resolve, 160));
+		assert.strictEqual((await getLiveState()).updateSequence, disabledSequence);
+	} finally {
+		await vscode.commands.executeCommand('h2o.toggleLiveCursorContext', false);
 		CachingFetcher.prototype.fetch = originalFetch;
 	}
 }
@@ -2014,6 +2260,7 @@ suite('Parser and provider behavior', () => {
 	test('refreshes command names after asynchronous lookup', verifyCompletionRefreshesCommandList);
 	test('preserves editor-facing Unicode ranges', verifyEditorFacingParserCompatibility);
 	test('reports cursor parser and provider metadata', verifyCursorDebugInterface);
+	test('updates provider-critical cursor metadata live', verifyLiveCursorDebugInterface);
 	test('suppresses providers inside redirects and parser recovery regions', verifyProviderSuppressionRegions);
 	test('preserves cursor behavior across incremental edits', async () => {
 		await verifyCursorBehaviorAcrossEdits(parser);

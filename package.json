@@ -65,6 +65,10 @@
                 "title": "Shell Completion: Inspect Cursor Context"
             },
             {
+                "command": "h2o.toggleLiveCursorContext",
+                "title": "Shell Completion: Toggle Live Cursor Context"
+            },
+            {
                 "command": "registeredCommands.refreshEntry",
                 "title": "Refresh",
                 "icon": "$(refresh)"
@@ -99,6 +103,10 @@
                 },
                 {
                     "command": "h2o.inspectCursorContext",
+                    "when": "editorLangId == shellscript || editorLangId == bitbake"
+                },
+                {
+                    "command": "h2o.toggleLiveCursorContext",
                     "when": "editorLangId == shellscript || editorLangId == bitbake"
                 }
             ],
