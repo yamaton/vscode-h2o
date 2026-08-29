@@ -330,15 +330,22 @@ function commandForProviderRace(): Command {
 	};
 }
 
-function caretEditCommand(name: 'git' | 'npm'): Command {
+function caretEditCommand(name: 'git' | 'npm' | 'echo'): Command {
 	return {
 		name,
 		description: `CARET_EDIT_${name.toUpperCase()}_DESCRIPTION`,
-		options: [{
-			names: [`--caret-${name}`],
-			argument: '',
-			description: `option for ${name} caret/edit compatibility`,
-		}],
+		options: [
+			{
+				names: [`--caret-${name}`],
+				argument: '',
+				description: `option for ${name} caret/edit compatibility`,
+			},
+			{
+				names: [`--available-${name}`],
+				argument: '',
+				description: `unused option for ${name} context verification`,
+			},
+		],
 	};
 }
 
@@ -1567,6 +1574,7 @@ async function verifyProviderSuppressionRegions(): Promise<void> {
 	const commands = new Map<string, Command>([
 		['git', caretEditCommand('git')],
 		['npm', caretEditCommand('npm')],
+		['echo', caretEditCommand('echo')],
 	]);
 	let fetchCount = 0;
 	let getListCount = 0;
@@ -1598,6 +1606,33 @@ async function verifyProviderSuppressionRegions(): Promise<void> {
 		assert.strictEqual(getListCount, getListCountBefore, markedContent);
 	}
 
+	async function assertCommandEnabled(
+		markedContent: string,
+		commandName: 'git' | 'echo',
+	): Promise<void> {
+		const { content, offset } = extractPosition(markedContent);
+		const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+		const completion = await completionLabelsAt(document, document.positionAt(offset));
+		assert.ok(completion.labels.includes(`--caret-${commandName}`), markedContent);
+
+		const commandOffset = content.indexOf(commandName);
+		assert.ok(commandOffset >= 0, markedContent);
+		assert.match(
+			await hoverTextAt(document, document.positionAt(commandOffset + 1)),
+			new RegExp(`CARET_EDIT_${commandName.toUpperCase()}_DESCRIPTION`),
+			markedContent,
+		);
+	}
+
+	async function assertUsedOptionNotRepeated(markedContent: string): Promise<void> {
+		const { content, offset } = extractPosition(markedContent);
+		const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+		const completion = await completionLabelsAt(document, document.positionAt(offset));
+		assert.ok(!completion.labels.includes('--caret-echo'), markedContent);
+		assert.ok(completion.labels.includes('--available-echo'), markedContent);
+		assert.ok(!completion.labels.includes('--caret-git'), markedContent);
+	}
+
 	try {
 		for (const markedContent of [
 			`git 2> errors${positionMarker}.log --caret-git`,
@@ -1605,11 +1640,37 @@ async function verifyProviderSuppressionRegions(): Promise<void> {
 			`git <<< pay${positionMarker}load --caret-git`,
 			`cat <<EOF\nhel${positionMarker}lo\nEOF`,
 			`cat <<EOF\nhello\nE${positionMarker}OF`,
+			`cat > "$(git --caret-git)${positionMarker}"`,
+			`cat > "prefix$(git --caret-git)${positionMarker}suffix"`,
+			`cat > >(git --caret-git)${positionMarker}`,
+			`cat > "$(git --caret-${positionMarker}`,
+			`cat <<< "$${positionMarker}(git --caret-git)"`,
+			`cat <<< "$(${positionMarker}git --caret-git)"`,
 			`git "unterminated${positionMarker}`,
 			`if git; then${positionMarker}`,
 		]) {
 			await assertSuppressed(markedContent);
 		}
+		// Characterization of the current grammar limitation: tree-sitter-bash
+		// v0.25.1 can expose heredoc arithmetic text as a command-like subtree,
+		// so executable heredoc substitutions cannot yet be enabled safely.
+		await assertSuppressed(`cat <<EOF\n$(git --caret-${positionMarker})\nEOF`);
+
+		for (const markedContent of [
+			`cat > "$(git --caret-${positionMarker})"`,
+			`cat <<< "$(git --caret-${positionMarker})"`,
+			`cat > >(git --caret-${positionMarker})`,
+		]) {
+			await assertCommandEnabled(markedContent, 'git');
+		}
+		await assertCommandEnabled(`cat > $(git --caret-${positionMarker}`, 'git');
+		await assertCommandEnabled(`cat > >(git --caret-${positionMarker}`, 'git');
+		await assertCommandEnabled(`cat > "$(echo $(git)${positionMarker})"`, 'echo');
+		await assertCommandEnabled(`cat > "$(echo $(git) ${positionMarker})"`, 'echo');
+		await assertCommandEnabled(`cat > "$(echo <(git) ${positionMarker})"`, 'echo');
+		await assertUsedOptionNotRepeated(
+			`cat > "$(echo --caret-echo $(git)${positionMarker})"`,
+		);
 
 		for (const content of [
 			'git --caret- 2> errors.log',
@@ -2838,7 +2899,7 @@ suite('Parser and provider behavior', () => {
 	test('reports caret parser and provider metadata', verifyCaretDebugInterface);
 	test('updates provider-critical caret/cursor metadata live', verifyLiveCaretAndCursorDebugInterface);
 	test('keeps live provider traces bound to their originating requests', verifyLiveProviderTraceRaces);
-	test('suppresses providers inside redirects and parser recovery regions', verifyProviderSuppressionRegions);
+	test('handles providers around redirects and parser recovery regions', verifyProviderSuppressionRegions);
 	test('preserves caret behavior across incremental edits', async () => {
 		await verifyCaretBehaviorAcrossEdits(parser);
 	});

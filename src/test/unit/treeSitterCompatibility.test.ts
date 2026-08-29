@@ -82,6 +82,41 @@ suite('web-tree-sitter compatibility', () => {
     });
   });
 
+  test('exposes executable substitutions inside redirect payloads', () => {
+    for (const { source, redirectType, substitutionType } of [
+      {
+        source: 'cat > "$(git status)"',
+        redirectType: 'file_redirect',
+        substitutionType: 'command_substitution',
+      },
+      {
+        source: 'cat <<< "$(git status)"',
+        redirectType: 'herestring_redirect',
+        substitutionType: 'command_substitution',
+      },
+      {
+        source: 'cat > >(git status)',
+        redirectType: 'file_redirect',
+        substitutionType: 'process_substitution',
+      },
+    ]) {
+      withParsedTree(parser, source, tree => {
+        assert.strictEqual(tree.rootNode.hasError, false, source);
+        const commands = descendantsOfType(tree.rootNode, 'command');
+        assert.deepStrictEqual(commands.map(node => node.text), [
+          source.startsWith('cat <<<') ? source : 'cat',
+          'git status',
+        ], source);
+
+        const innerCommand = commands[1];
+        assert.ok(innerCommand, source);
+        assert.strictEqual(innerCommand.parent?.type, substitutionType, source);
+        assert.strictEqual(innerCommand.parent?.parent?.type === redirectType
+          || innerCommand.parent?.parent?.parent?.type === redirectType, true, source);
+      });
+    }
+  });
+
   test('incremental parsing matches a fresh parse after an edit', () => {
     const original = 'git status\necho ok';
     const updated = 'git log --oneline\necho ok';

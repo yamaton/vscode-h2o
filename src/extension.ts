@@ -32,15 +32,19 @@ import {
   type LiveHoverProviderTrace,
   type LiveProviderTraces,
 } from './debugView';
+import {
+  getContextCommandNodeAtPoint,
+  getCurrentNodeAtPoint,
+  getProviderSuppressionReasonsAtPoint,
+  resolveCompletionAnchor,
+  type LineTextProvider,
+  type ProviderSuppressionReason,
+} from './providerContext';
+
+export type { ProviderSuppressionReason } from './providerContext';
 
 
 const supportedLanguages = ['shellscript', 'bitbake'];
-const nestedCommandScopeBoundaries = new Set(['command_substitution', 'process_substitution', 'subshell']);
-const providerSuppressedNodeTypes = new Set([
-  'file_redirect',
-  'herestring_redirect',
-  'heredoc_redirect',
-]);
 
 export type TreeCache = { [uri: string]: Tree };
 
@@ -98,13 +102,6 @@ interface ResolvedCommandContext {
   invocation: CommandInvocation;
   resolution: CommandPathResolution<CommandWord>;
 }
-
-export type ProviderSuppressionReason =
-  | 'ERROR'
-  | 'MISSING'
-  | 'file_redirect'
-  | 'herestring_redirect'
-  | 'heredoc_redirect';
 
 export interface DebugPosition {
   line: number;
@@ -262,6 +259,8 @@ export interface LiveEditorDebugPauseResult {
 interface ProviderPositionDecision {
   enabled: boolean;
   position: vscode.Position;
+  commandNode: Node | undefined;
+  touchingCommandToken: boolean;
   walkbackUnchanged: boolean;
   resumedAfterHerestring: boolean;
   requestSuppressionReasons: ProviderSuppressionReason[];
@@ -274,10 +273,6 @@ interface CompletionRequestAnalysis {
   decision: ProviderPositionDecision;
   lookupTarget: CompletionLookupTarget;
   includeArgumentAtPosition: boolean;
-}
-
-interface LineTextProvider {
-  lineAt(line: number): { text: string };
 }
 
 export interface ActivationDependencies {
@@ -351,7 +346,7 @@ async function registerExtension(
           }
 
           const resolvedPosition = caretDecision.position;
-          const isCaretTouchingWord = caretDecision.walkbackUnchanged;
+          const isCaretTouchingWord = caretDecision.touchingCommandToken;
           console.log(`[Completion] isCaretTouchingWord: ${isCaretTouchingWord}`);
 
           if (completionAnalysis.lookupTarget.kind === 'none') {
@@ -398,8 +393,8 @@ async function registerExtension(
 
           try {
             const includeCurrentArgument = completionAnalysis.includeArgumentAtPosition;
-            const commandContext = await getContextCommandResolution(
-              requestTree.rootNode,
+            const commandContext = await getCommandNodeResolution(
+              caretDecision.commandNode,
               resolvedPosition,
               fetcher,
               includeCurrentArgument,
@@ -416,12 +411,7 @@ async function registerExtension(
                 : [];
               let compOptions = commandContext.resolution.stopReason === 'end-of-options'
                 ? []
-                : getCompletionsOptions(
-                  requestTree.rootNode,
-                  resolvedPosition,
-                  cmdSeq,
-                  includeCurrentArgument,
-                );
+                : getCompletionsOptions(commandContext);
               let compItems = [
                 ...compSubcommands,
                 ...compOptions,
@@ -474,14 +464,19 @@ async function registerExtension(
       }
       const tree = trees[document.uri.toString()];
       return withTreeCopy(tree, async requestTree => {
-        if (isProviderSuppressedAtPosition(requestTree.rootNode, cursor)) {
+        const cursorDecision = getHoverCursorDecision(requestTree.rootNode, cursor);
+        if (!cursorDecision.enabled) {
           trackLiveHoverResult(liveTraceRequest, 'suppressed');
           return undefined;
         }
         const currentWord = getCurrentNode(requestTree.rootNode, cursor).text;
         let commandContext: ResolvedCommandContext | undefined;
         try {
-          commandContext = await getContextCommandResolution(requestTree.rootNode, cursor, fetcher);
+          commandContext = await getCommandNodeResolution(
+            cursorDecision.commandNode,
+            cursor,
+            fetcher,
+          );
         } catch (e) {
           trackLiveHoverResult(liveTraceRequest, 'error', debugError(e));
           return undefined;
@@ -1151,6 +1146,10 @@ function asPoint(p: vscode.Position): Point {
   return { row: p.line, column: p.character };
 }
 
+function asPosition(point: Point): vscode.Position {
+  return new vscode.Position(point.row, point.column);
+}
+
 function advancePoint(start: Point, text: string): Point {
   let row = start.row;
   let column = start.column;
@@ -1209,36 +1208,18 @@ function rangeOfWord(word: CommandWord): vscode.Range {
 
 // Find the deepest node that contains the position in its range.
 export function getCurrentNode(n: Node, position: vscode.Position): Node {
-  if (!(range(n).contains(position))) {
+  if (!range(n).contains(position)) {
     console.error("Out of range!");
   }
-  for (const child of n.children) {
-    const r = range(child);
-    if (r.contains(position)) {
-      return getCurrentNode(child, position);
-    }
-  }
-  return n;
-}
-
-function positionsEqual(left: Point, right: vscode.Position): boolean {
-  return left.row === right.line && left.column === right.character;
-}
-
-function hasMissingNodeAtPosition(node: Node, position: vscode.Position): boolean {
-  if (!range(node).contains(position)) {
-    return false;
-  }
-  if (node.isMissing && positionsEqual(node.startPosition, position)) {
-    return true;
-  }
-  return node.children.some(child => hasMissingNodeAtPosition(child, position));
+  return getCurrentNodeAtPoint(n, asPoint(position));
 }
 
 /**
  * Provider error recovery is intentionally conservative: never interpret a
- * redirect payload, heredoc body, parser ERROR, or inserted MISSING token as a
- * command context. Callers may resume after a real shell boundary such as `;`.
+ * plain redirect payload, heredoc body, parser ERROR, or inserted MISSING token
+ * as a command context. Commands within executable redirect substitutions have
+ * their own context. Callers may also resume after a real shell boundary such
+ * as `;`.
  */
 export function isProviderSuppressedAtPosition(root: Node, position: vscode.Position): boolean {
   return getProviderSuppressionReasons(root, position).length > 0;
@@ -1248,25 +1229,7 @@ export function getProviderSuppressionReasons(
   root: Node,
   position: vscode.Position,
 ): ProviderSuppressionReason[] {
-  const reasons = new Set<ProviderSuppressionReason>();
-  if (hasMissingNodeAtPosition(root, position)) {
-    reasons.add('MISSING');
-  }
-
-  let node: Node | null = getCurrentNode(root, position);
-  while (node) {
-    if (node.isError) {
-      reasons.add('ERROR');
-    }
-    if (node.isMissing) {
-      reasons.add('MISSING');
-    }
-    if (providerSuppressedNodeTypes.has(node.type)) {
-      reasons.add(node.type as ProviderSuppressionReason);
-    }
-    node = node.parent;
-  }
-  return [...reasons];
+  return getProviderSuppressionReasonsAtPoint(root, asPoint(position));
 }
 
 function isSafeHerestringWalkback(root: Node, position: vscode.Position): boolean {
@@ -1284,6 +1247,8 @@ function getCompletionCaretDecision(
     return {
       enabled: false,
       position: caret,
+      commandNode: undefined,
+      touchingCommandToken: false,
       walkbackUnchanged: true,
       resumedAfterHerestring: false,
       requestSuppressionReasons,
@@ -1291,13 +1256,17 @@ function getCompletionCaretDecision(
     };
   }
 
-  const resolvedPosition = walkbackCompletionCaretIfNeeded(document, root, caret);
+  const anchor = resolveCompletionAnchor(document, root, asPoint(caret));
+  const resolvedPosition = asPosition(anchor.point);
   const resolvedSuppressionReasons = getProviderSuppressionReasons(root, resolvedPosition);
   const resumedAfterHerestring = isSafeHerestringWalkback(root, resolvedPosition);
+  const enabled = resolvedSuppressionReasons.length === 0 || resumedAfterHerestring;
   return {
-    enabled: resolvedSuppressionReasons.length === 0 || resumedAfterHerestring,
+    enabled,
     position: resolvedPosition,
-    walkbackUnchanged: resolvedPosition === caret,
+    commandNode: enabled ? anchor.commandNode : undefined,
+    touchingCommandToken: enabled && anchor.touchingCommandToken,
+    walkbackUnchanged: !anchor.moved,
     resumedAfterHerestring,
     requestSuppressionReasons,
     resolvedSuppressionReasons,
@@ -1310,15 +1279,12 @@ function getCompletionRequestAnalysis(
   caret: vscode.Position,
 ): CompletionRequestAnalysis {
   const decision = getCompletionCaretDecision(document, root, caret);
-  const commandNode = decision.enabled
-    ? _getContextCommandNode(root, caret)
-    : undefined;
   return {
     decision,
-    lookupTarget: commandNode
-      ? getCompletionLookupTarget(commandNode, asPoint(caret))
+    lookupTarget: decision.commandNode
+      ? getCompletionLookupTarget(decision.commandNode, asPoint(caret))
       : { kind: 'command-spec' },
-    includeArgumentAtPosition: !decision.walkbackUnchanged,
+    includeArgumentAtPosition: !decision.touchingCommandToken,
   };
 }
 
@@ -1327,6 +1293,10 @@ function getHoverCursorDecision(root: Node, cursor: vscode.Position): ProviderPo
   return {
     enabled: suppressionReasons.length === 0,
     position: cursor,
+    commandNode: suppressionReasons.length === 0
+      ? getContextCommandNodeAtPoint(root, asPoint(cursor))
+      : undefined,
+    touchingCommandToken: false,
     walkbackUnchanged: true,
     resumedAfterHerestring: false,
     requestSuppressionReasons: suppressionReasons,
@@ -1335,52 +1305,19 @@ function getHoverCursorDecision(root: Node, cursor: vscode.Position): ProviderPo
 }
 
 
-// Moves the completion caret left by one character IF it is contained only in
-// the root-node range. This is just a workaround as you cannot reach a command
-// node if you start from the caret, say, after 'echo '.
-// [FIXME] Do not rely on such an ugly hack
+// Retained for the debug/test API. Provider code consumes the command node and
+// token affinity from the same scope-aware resolution instead of resolving the
+// returned position a second time.
 export function walkbackCompletionCaretIfNeeded(
   document: LineTextProvider,
   root: Node,
   caret: vscode.Position,
 ): vscode.Position {
-  let currentPosition = caret;
-  let moveCount = 0;
-
-  while (true) {
-    const thisNode = getCurrentNode(root, currentPosition);
-    if (isProviderSuppressedAtPosition(root, currentPosition)) {
-      if (moveCount > 0) {
-        console.debug(`[walkbackCompletionCaretIfNeeded] moved ${moveCount} time(s); stopped in a suppressed syntax region.`);
-      }
-      return currentPosition;
-    }
-    if (thisNode.type === ';') {
-      if (moveCount > 0) {
-        console.debug(`[walkbackCompletionCaretIfNeeded] moved ${moveCount} time(s); stopped at ${thisNode.type}.`);
-      }
-      return currentPosition;
-    }
-
-    if (currentPosition.character > 0 && !isCommandTokenNode(thisNode)) {
-      currentPosition = currentPosition.translate(0, -1);
-      moveCount += 1;
-      continue;
-    } else if (!isCommandTokenNode(thisNode) && currentPosition.character === 0 && currentPosition.line > 0) {
-      const prevLineIndex = currentPosition.line - 1;
-      const prevLine = document.lineAt(prevLineIndex);
-      if (prevLine.text.trimEnd().endsWith('\\')) {
-        const charIndex = prevLine.text.trimEnd().length - 1;
-        currentPosition = new vscode.Position(prevLineIndex, charIndex);
-        moveCount += 1;
-        continue;
-      }
-    }
-    if (moveCount > 0) {
-      console.debug(`[walkbackCompletionCaretIfNeeded] moved ${moveCount} time(s); stopped at ${thisNode.type}.`);
-    }
-    return currentPosition;
+  const anchor = resolveCompletionAnchor(document, root, asPoint(caret));
+  if (anchor.moved) {
+    console.debug('[walkbackCompletionCaretIfNeeded] moved to a scope-aware completion anchor.');
   }
+  return asPosition(anchor.point);
 }
 
 function debugPosition(point: Point | vscode.Position): DebugPosition {
@@ -1497,9 +1434,7 @@ async function inspectProviderDecision(
   includeArgumentAtPosition: boolean,
   lookupTarget?: CompletionLookupTarget,
 ): Promise<DebugProviderDecision> {
-  const commandNode = decision.enabled
-    ? _getContextCommandNode(root, decision.position)
-    : undefined;
+  const commandNode = decision.commandNode;
   const report: DebugProviderDecision = {
     enabled: decision.enabled,
     lookupKind: decision.enabled
@@ -1535,8 +1470,8 @@ async function inspectProviderDecision(
   }
 
   try {
-    const context = await getContextCommandResolution(
-      root,
+    const context = await getCommandNodeResolution(
+      commandNode,
       decision.position,
       fetcher,
       includeArgumentAtPosition,
@@ -1875,17 +1810,7 @@ function unstackOption(name: string): string[] {
 
 // Get command node inferred from the current position
 export function _getContextCommandNode(root: Node, position: vscode.Position): Node | undefined {
-  let currentNode: Node | null = getCurrentNode(root, position);
-  while (currentNode) {
-    if (currentNode.type === 'command') {
-      return currentNode;
-    }
-    if (nestedCommandScopeBoundaries.has(currentNode.type)) {
-      return undefined;
-    }
-    currentNode = currentNode.parent;
-  }
-  return undefined;
+  return getContextCommandNodeAtPoint(root, asPoint(position));
 }
 
 // Get command name covering the position if exists
@@ -1895,13 +1820,12 @@ export function getContextCommandName(root: Node, position: vscode.Position): st
 }
 
 // Get command and subcommand inferred from the current position
-async function getContextCommandResolution(
-  root: Node,
+async function getCommandNodeResolution(
+  commandNode: Node | null | undefined,
   position: vscode.Position,
   fetcher: CachingFetcher,
   includeArgumentAtPosition = true,
 ): Promise<ResolvedCommandContext | undefined> {
-  const commandNode = _getContextCommandNode(root, position);
   const invocation = getCommandInvocationToPosition(
     commandNode,
     asPoint(position),
@@ -1919,19 +1843,8 @@ async function getContextCommandResolution(
 }
 
 
-// Get command arguments as string[]
-function getContextCmdArgs(
-  root: Node,
-  position: vscode.Position,
-  includeArgumentAtPosition: boolean,
-): string[] {
-  const commandNode = _getContextCommandNode(root, position);
-  const invocation = getCommandInvocationToPosition(
-    commandNode,
-    asPoint(position),
-    includeArgumentAtPosition,
-  );
-  return (invocation?.arguments ?? []).map(argument => {
+function getOptionArgumentNames(invocation: CommandInvocation): string[] {
+  return invocation.arguments.map(argument => {
     let text = argument.text;
     // --option=arg
     if (text.startsWith('--') && text.includes('=')) {
@@ -1961,15 +1874,10 @@ function getCompletionsSubcommands(deepestCmd: Command): vscode.CompletionItem[]
 
 
 // Get option completion
-function getCompletionsOptions(
-  root: Node,
-  position: vscode.Position,
-  cmdSeq: Command[],
-  includeArgumentAtPosition: boolean,
-): vscode.CompletionItem[] {
-  const args = getContextCmdArgs(root, position, includeArgumentAtPosition);
+function getCompletionsOptions(context: ResolvedCommandContext): vscode.CompletionItem[] {
+  const args = getOptionArgumentNames(context.invocation);
   const compitems: vscode.CompletionItem[] = [];
-  const options = getOptions(cmdSeq);
+  const options = getOptions(context.resolution.path);
   options.forEach((opt, idx) => {
     // suppress already-used options
     if (opt.names.every(name => !args.includes(name))) {
