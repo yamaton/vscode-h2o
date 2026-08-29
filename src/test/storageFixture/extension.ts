@@ -53,9 +53,13 @@ async function runPhase(context: vscode.ExtensionContext, phase: string): Promis
   const canonical = vscode.Uri.joinPath(context.globalStorageUri, 'commands-v1.json.gz');
 
   if (phase === 'seed') {
-    await context.globalState.update(legacyCommandKey, command('legacy', 'legacy Memento payload'));
-    await context.globalState.update(CachingFetcher.commandListKey, ['legacy']);
-    await context.globalState.update(unrelatedKey, true);
+    // Queue the Memento updates in one scheduler turn. Awaiting each update
+    // separately allows a delayed storage echo to replace a newer local value.
+    await Promise.all([
+      context.globalState.update(legacyCommandKey, command('legacy', 'legacy Memento payload')),
+      context.globalState.update(CachingFetcher.commandListKey, ['legacy']),
+      context.globalState.update(unrelatedKey, true),
+    ]);
     await storage.save({
       version: commandCacheSnapshotVersion,
       commands: [command('git', 'seed snapshot')],

@@ -13,7 +13,10 @@ async function main() {
 		// The path to test runner
 		// Passed to --extensionTestsPath
 		const extensionTestsPath = path.resolve(__dirname, './suite/index');
-		const profileRoot = mkdtempSync(path.join(tmpdir(), 'vscode-h2o-integration-'));
+		// Keep the macOS Unix-domain socket derived from --user-data-dir below
+		// its 103-byte limit; tmpdir() is a long per-user path on GitHub runners.
+		const profileParent = process.platform === 'darwin' ? '/tmp' : tmpdir();
+		const profileRoot = mkdtempSync(path.join(profileParent, 'h2o-integration-'));
 		const userDataDir = path.join(profileRoot, 'user-data');
 		const extensionsDir = path.join(profileRoot, 'extensions');
 		mkdirSync(userDataDir, { recursive: true });
