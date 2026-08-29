@@ -404,6 +404,10 @@ async function registerExtension(
               fetcher,
               includeCurrentArgument,
             );
+            if (!commandContext) {
+              trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
+              return [];
+            }
             const cmdSeq = commandContext.resolution.path;
             if (!!cmdSeq && cmdSeq.length) {
               const deepestCmd = cmdSeq[cmdSeq.length - 1];
@@ -475,57 +479,60 @@ async function registerExtension(
           return undefined;
         }
         const currentWord = getCurrentNode(requestTree.rootNode, cursor).text;
+        let commandContext: ResolvedCommandContext | undefined;
         try {
-          const commandContext = await getContextCommandResolution(requestTree.rootNode, cursor, fetcher);
-          const cmdSeq = commandContext.resolution.path;
-          if (!!cmdSeq && cmdSeq.length) {
-            const name = cmdSeq[0].name;
-            const subcommandStepIndex = commandContext.resolution.steps.findIndex(
-              step => rangeOfWord(step.source).contains(cursor),
-            );
-            const subcommandStep = commandContext.resolution.steps[subcommandStepIndex];
-            if (rangeOfWord(commandContext.invocation.name).contains(cursor)) {
-              // Display root-level command
-              const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
-              const thisCmd = cmdSeq[0];
-              const tldrText = formatTldr(thisCmd.tldr);
-              const usageText = formatUsage(thisCmd.usage);
-              const descText = (thisCmd.description !== thisCmd.name && !tldrText) ? formatDescription(thisCmd.description) : "";
-              const msg = new vscode.MarkdownString(`\`${name}\`${descText}${usageText}${tldrText}\n\n[Reset](${clearCacheCommandUri})`);
-              msg.isTrusted = {
-                enabledCommands: ['h2o.clearCache'],
-              };
-              trackLiveHoverResult(liveTraceRequest, 'hover');
-              return new vscode.Hover(msg);
-            } else if (subcommandStep) {
-              // Display a subcommand
-              const thatCmd = subcommandStep.command;
-              const cmdPrefixName = cmdSeq
-                .slice(0, subcommandStepIndex + 1)
-                .map(command => command.name)
-                .join(" ");
-              const description = subcommandStep.matchedBy === 'alias'
-                ? `(Alias of ${thatCmd.name}) ${thatCmd.description}`
-                : thatCmd.description;
-              const usageText = formatUsage(thatCmd.usage);
-              const msg = `${cmdPrefixName} **${subcommandStep.source.text}**\n\n${description}${usageText}`;
-              trackLiveHoverResult(liveTraceRequest, 'hover');
-              return new vscode.Hover(new vscode.MarkdownString(msg));
-            } else if (cmdSeq.length
-              && commandContext.resolution.stopReason !== 'end-of-options') {
-              const opts = getMatchingOption(currentWord, name, cmdSeq);
-              const msg = optsToMessage(opts);
-              trackLiveHoverResult(liveTraceRequest, 'hover');
-              return new vscode.Hover(new vscode.MarkdownString(msg));
-            } else {
-              trackLiveHoverResult(liveTraceRequest, 'none', `No hover is available for ${currentWord}`);
-              return Promise.reject(`No hover is available for ${currentWord}`);
-            }
-          }
+          commandContext = await getContextCommandResolution(requestTree.rootNode, cursor, fetcher);
         } catch (e) {
-          console.log("[Hover] Error: ", e);
           trackLiveHoverResult(liveTraceRequest, 'error', debugError(e));
-          return Promise.reject("No hover is available");
+          return undefined;
+        }
+        if (!commandContext) {
+          trackLiveHoverResult(liveTraceRequest, 'none');
+          return undefined;
+        }
+
+        const cmdSeq = commandContext.resolution.path;
+        const name = cmdSeq[0].name;
+        const subcommandStepIndex = commandContext.resolution.steps.findIndex(
+          step => rangeOfWord(step.source).contains(cursor),
+        );
+        const subcommandStep = commandContext.resolution.steps[subcommandStepIndex];
+        if (rangeOfWord(commandContext.invocation.name).contains(cursor)) {
+          // Display root-level command
+          const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
+          const thisCmd = cmdSeq[0];
+          const tldrText = formatTldr(thisCmd.tldr);
+          const usageText = formatUsage(thisCmd.usage);
+          const descText = (thisCmd.description !== thisCmd.name && !tldrText) ? formatDescription(thisCmd.description) : "";
+          const msg = new vscode.MarkdownString(`\`${name}\`${descText}${usageText}${tldrText}\n\n[Reset](${clearCacheCommandUri})`);
+          msg.isTrusted = {
+            enabledCommands: ['h2o.clearCache'],
+          };
+          trackLiveHoverResult(liveTraceRequest, 'hover');
+          return new vscode.Hover(msg);
+        }
+        if (subcommandStep) {
+          // Display a subcommand
+          const thatCmd = subcommandStep.command;
+          const cmdPrefixName = cmdSeq
+            .slice(0, subcommandStepIndex + 1)
+            .map(command => command.name)
+            .join(" ");
+          const description = subcommandStep.matchedBy === 'alias'
+            ? `(Alias of ${thatCmd.name}) ${thatCmd.description}`
+            : thatCmd.description;
+          const usageText = formatUsage(thatCmd.usage);
+          const msg = `${cmdPrefixName} **${subcommandStep.source.text}**\n\n${description}${usageText}`;
+          trackLiveHoverResult(liveTraceRequest, 'hover');
+          return new vscode.Hover(new vscode.MarkdownString(msg));
+        }
+        if (commandContext.resolution.stopReason !== 'end-of-options') {
+          const opts = getMatchingOption(currentWord, name, cmdSeq);
+          if (opts.length > 0) {
+            const msg = optsToMessage(opts);
+            trackLiveHoverResult(liveTraceRequest, 'hover');
+            return new vscode.Hover(new vscode.MarkdownString(msg));
+          }
         }
         trackLiveHoverResult(liveTraceRequest, 'none');
         return undefined;
@@ -1534,8 +1541,10 @@ async function inspectProviderDecision(
       fetcher,
       includeArgumentAtPosition,
     );
-    report.invocation = debugInvocation(context.invocation);
-    report.resolution = debugResolution(context.resolution);
+    if (context) {
+      report.invocation = debugInvocation(context.invocation);
+      report.resolution = debugResolution(context.resolution);
+    }
   } catch (error) {
     const invocation = getCommandInvocationToPosition(
       commandNode,
@@ -1891,7 +1900,7 @@ async function getContextCommandResolution(
   position: vscode.Position,
   fetcher: CachingFetcher,
   includeArgumentAtPosition = true,
-): Promise<ResolvedCommandContext> {
+): Promise<ResolvedCommandContext | undefined> {
   const commandNode = _getContextCommandNode(root, position);
   const invocation = getCommandInvocationToPosition(
     commandNode,
@@ -1899,19 +1908,14 @@ async function getContextCommandResolution(
     includeArgumentAtPosition,
   );
   if (!invocation) {
-    return Promise.reject("[getContextCommandResolution] Command name not found.");
+    return undefined;
   }
 
-  try {
-    const command = await fetcher.fetch(invocation.name.text);
-    return {
-      invocation,
-      resolution: resolveCommandPath(command, invocation.arguments),
-    };
-  } catch (e) {
-    console.error("[getContextCommandResolution] Error: ", e);
-    return Promise.reject("[getContextCommandResolution] unknown command!");
-  }
+  const command = await fetcher.fetch(invocation.name.text);
+  return {
+    invocation,
+    resolution: resolveCommandPath(command, invocation.arguments),
+  };
 }
 
 

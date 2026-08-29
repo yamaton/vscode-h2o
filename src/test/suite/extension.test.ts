@@ -37,6 +37,7 @@ interface InitialCuratedProbe {
 }
 
 let initialCuratedProbe: InitialCuratedProbe | undefined;
+let registeredHoverProvider: vscode.HoverProvider | undefined;
 
 async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Promise<T> {
 	let timeout: NodeJS.Timeout | undefined;
@@ -523,6 +524,82 @@ async function hoverTextAt(document: vscode.TextDocument, position: vscode.Posit
 		5000,
 	);
 	return hoverText(hovers);
+}
+
+async function provideHoverDirectly(markedContent: string): Promise<vscode.Hover | undefined | null> {
+	assert.ok(registeredHoverProvider, 'the extension hover provider must be captured during activation');
+	const { content, offset } = extractPosition(markedContent);
+	const document = await vscode.workspace.openTextDocument({ language: 'shellscript', content });
+	const cancellation = new vscode.CancellationTokenSource();
+	try {
+		return await withTimeout(
+			Promise.resolve(registeredHoverProvider.provideHover(
+				document,
+				document.positionAt(offset),
+				cancellation.token,
+			)),
+			5000,
+		);
+	} finally {
+		cancellation.dispose();
+	}
+}
+
+async function verifyHoverNoResultContract(): Promise<void> {
+	const originalFetch = CachingFetcher.prototype.fetch;
+	const command = commandForProviderRace();
+	const controlledFailure = new Error('controlled hover lookup failure');
+	CachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+		if (name === command.name) {
+			return command;
+		}
+		throw controlledFailure;
+	};
+
+	try {
+		const debugDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git',
+		});
+		await vscode.window.showTextDocument(debugDocument, { preview: false });
+		await vscode.commands.executeCommand<LiveEditorDebugToggleResult>(
+			'h2o.toggleLiveCaretAndCursorContext',
+			true,
+		);
+
+		assert.ok(await provideHoverDirectly(`g${positionMarker}it`) instanceof vscode.Hover);
+		assert.ok(
+			await provideHoverDirectly(`git --vscode-h2o-${positionMarker}race`) instanceof vscode.Hover,
+		);
+
+		for (const noResult of [
+			`git --unk${positionMarker}nown`,
+			`git posit${positionMarker}ional`,
+			`git -- posit${positionMarker}ional`,
+			` ${positionMarker}`,
+		]) {
+			assert.strictEqual(await provideHoverDirectly(noResult), undefined, noResult);
+		}
+
+		const noneState = await vscode.commands.executeCommand<LiveEditorDebugState>(
+			'h2o.getLiveCaretAndCursorContextState',
+		);
+		assert.strictEqual(noneState.traces.hover?.outcome, 'none');
+		assert.strictEqual(noneState.traces.hover?.error, null);
+
+		assert.strictEqual(
+			await provideHoverDirectly(`unk${positionMarker}nown`),
+			undefined,
+		);
+		const errorState = await vscode.commands.executeCommand<LiveEditorDebugState>(
+			'h2o.getLiveCaretAndCursorContextState',
+		);
+		assert.strictEqual(errorState.traces.hover?.outcome, 'error');
+		assert.match(errorState.traces.hover?.error ?? '', /controlled hover lookup failure/);
+	} finally {
+		await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
+		CachingFetcher.prototype.fetch = originalFetch;
+	}
 }
 
 async function verifyProviderTreeOwnership(parser: Parser): Promise<void> {
@@ -1115,10 +1192,10 @@ async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
 			hoverState.snapshot?.hover?.invocation?.arguments.map(argument => argument.text),
 			['--v'],
 		);
-		assert.strictEqual(hoverState.traces.hover?.outcome, 'hover');
+		assert.strictEqual(hoverState.traces.hover?.outcome, 'none');
 		assert.strictEqual(
 			hoverState.presentation.hover.find(row => row.id === 'hover.provider-result')?.description,
-			'Hover returned',
+			'No hover',
 		);
 		assert.strictEqual(hoverState.presentation.statusText, 'H2O C✓ H✓ TS:word');
 
@@ -2691,7 +2768,24 @@ function verifyParserResourceDisposalContinuesAfterFailure(): void {
 }
 
 suiteSetup(async () => {
-	await activateExtension();
+	const languages = vscode.languages as unknown as {
+		registerHoverProvider: typeof vscode.languages.registerHoverProvider;
+	};
+	const originalRegisterHoverProvider = languages.registerHoverProvider;
+	languages.registerHoverProvider = ((
+		selector: vscode.DocumentSelector,
+		provider: vscode.HoverProvider,
+	) => {
+		registeredHoverProvider = provider;
+		return originalRegisterHoverProvider.call(vscode.languages, selector, provider);
+	}) as typeof vscode.languages.registerHoverProvider;
+
+	try {
+		await activateExtension();
+	} finally {
+		languages.registerHoverProvider = originalRegisterHoverProvider;
+	}
+	assert.ok(registeredHoverProvider, 'activation must register a hover provider');
 });
 
 suite('Extension activation', () => {
@@ -2737,6 +2831,7 @@ suite('Parser and provider behavior', () => {
 		});
 	});
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
+	test('resolves normal hover misses without rejecting', verifyHoverNoResultContract);
 	test('separates command names from command-spec resolution', verifyCommandNameCompletionLifecycle);
 	test('keeps live completion debug aligned with command-name completion', verifyCommandNameLiveDebugDoesNotResolvePrefixes);
 	test('preserves editor-facing Unicode ranges', verifyEditorFacingParserCompatibility);
