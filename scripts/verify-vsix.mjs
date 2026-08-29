@@ -46,6 +46,7 @@ const requiredFiles = [
   'extension/out/debugView.js',
   'extension/out/extension.js',
   'extension/out/parserLanguage.js',
+  'extension/out/providerContext.js',
   'extension/out/utils.js',
   'extension/package.json',
   'extension/readme.md',

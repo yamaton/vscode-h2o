@@ -197,3 +197,28 @@ jobs:
         run: npm run test:integration
         env:
           VSCODE_VERSION: stable
+
+  quality-gate:
+    name: Quality gate
+    if: always()
+    needs:
+      - unit-and-package
+      - package-platforms
+      - integration-linux
+      - integration-macos-intel
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every quality job to pass
+        env:
+          UNIT_AND_PACKAGE: ${{ needs.unit-and-package.result }}
+          PACKAGE_PLATFORMS: ${{ needs.package-platforms.result }}
+          INTEGRATION_LINUX: ${{ needs.integration-linux.result }}
+          INTEGRATION_MACOS_INTEL: ${{ needs.integration-macos-intel.result }}
+        run: |
+          for result in "${UNIT_AND_PACKAGE}" "${PACKAGE_PLATFORMS}" "${INTEGRATION_LINUX}" "${INTEGRATION_MACOS_INTEL}"; do
+            if [[ "${result}" != success ]]; then
+              echo "A required quality job concluded with: ${result}" >&2
+              exit 1
+            fi
+          done

@@ -2,8 +2,11 @@ name: Publish Marketplace
 
 on:
   push:
-    tags:
-      - '*.*.*'
+    branches:
+      - main
+    paths:
+      - package.json
+      - package-lock.json
 
 permissions:
   actions: read
@@ -11,29 +14,40 @@ permissions:
 
 concurrency:
   group: publish-marketplace
+  queue: max
   cancel-in-progress: false
 
 jobs:
   release-metadata:
-    name: Version tag and main ancestry
+    name: Detect version bump
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    outputs:
+      release: ${{ steps.release.outputs.release }}
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
     steps:
-      - name: Check out tagged commit and history
+      - name: Check out main commit and history
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Match tag to extension version
-        run: node scripts/verify-release-tag.mjs "${GITHUB_REF_NAME}" "${GITHUB_SHA}"
+      - name: Read the previous manifest
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: git show "${BEFORE_SHA}:package.json" > "${RUNNER_TEMP}/previous-package.json"
 
-      - name: Require tagged commit on main
-        run: git merge-base --is-ancestor "${GITHUB_SHA}" origin/main
+      - name: Validate release metadata
+        id: release
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: node scripts/detect-release.mjs "${RUNNER_TEMP}/previous-package.json" "${RELEASE_SHA}"
 
   quality:
     name: Re-run release quality gate
     needs: release-metadata
+    if: needs.release-metadata.outputs.release == 'true'
     uses: ./.github/workflows/quality.yml
     permissions:
       actions: read
@@ -41,14 +55,21 @@ jobs:
 
   publish:
     name: Publish verified platform packages
-    needs: quality
+    needs:
+      - release-metadata
+      - quality
+    if: needs.release-metadata.outputs.release == 'true' && needs.quality.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: marketplace
+    permissions:
+      actions: read
+      contents: write
     steps:
-      - name: Check out tagged release tooling
+      - name: Check out approved release tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.release-metadata.outputs.commit }}
           persist-credentials: false
 
       - name: Set up Node.js
@@ -70,7 +91,31 @@ jobs:
       - name: Re-verify downloaded release packages
         run: npm run verify:release-artifacts
 
+      - name: Require a Marketplace credential
+        run: node -e "require('node:assert/strict').ok(process.env.VSCE_PAT, 'VSCE_PAT is required to publish Marketplace packages')"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Verify Marketplace publishing rights
+        run: npx --no-install vsce verify-pat tetradresearch
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Create the immutable release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.release-metadata.outputs.commit }}
+          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
+        run: node scripts/ensure-release-tag.mjs "${RELEASE_VERSION}" "${RELEASE_SHA}"
+
       - name: Publish all targets to Visual Studio Marketplace
         run: npm run publish:marketplace
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Confirm the Marketplace version
+        env:
+          RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
+        run: |
+          published_version="$(npx --no-install vsce show tetradresearch.vscode-h2o --json | jq -r '.versions[0].version')"
+          test "${published_version}" = "${RELEASE_VERSION}"
