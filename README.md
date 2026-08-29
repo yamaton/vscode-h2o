@@ -82,6 +82,8 @@ While live inspection is enabled, a single status bar item shows only the high-l
 
 The H2O executable can also be selected with the `shellCompletion.h2oPath` setting. Its default value, `<bundled>`, uses the scanner packaged for the current platform.
 
+Parser-backed completion, hover, and debug features are enabled by default for Shell Script and BitBake documents up to 1,048,576 UTF-16 characters. Use `shellCompletion.maxDocumentCharacters` to change this per workspace or workspace folder; set it to `0` to remove the limit.
+
 ## Supported Platforms
 
 The Visual Studio Marketplace selects a package containing the native H2O scanner for the Extension Host that runs VS Code:

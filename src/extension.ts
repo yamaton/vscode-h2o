@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
-import { Edit, Language, Node, Parser, Point, Tree } from 'web-tree-sitter';
+import { Language, Node, Parser, Point, Tree } from 'web-tree-sitter';
 import { CachingFetcher, CommandFetchCancelledError } from './cacheFetcher';
 import { GzipCommandCacheStorage } from './cacheStorage';
 import { Option, Command } from './command';
@@ -23,7 +23,17 @@ import {
   CompletionLookupTarget,
   getCompletionLookupTarget,
 } from './completionTarget';
-import { waitForPromiseOrCancellation } from './cancellable';
+import { waitForPromiseOrCancellation, waitForValueOrCancellation } from './cancellable';
+import {
+  defaultMaximumDocumentCharacters,
+  DocumentTreeCache,
+  parseDocumentTree,
+  supportedTreeLanguages,
+  TreeCache,
+  updateTree,
+} from './treeCache';
+export { parseDocumentTree, updateTree } from './treeCache';
+export type { TreeCache } from './treeCache';
 import {
   debugDocumentScheme,
   LiveDebugViewManager,
@@ -44,9 +54,7 @@ import {
 export type { ProviderSuppressionReason } from './providerContext';
 
 
-const supportedLanguages = ['shellscript', 'bitbake'];
-
-export type TreeCache = { [uri: string]: Tree };
+const supportedLanguages: string[] = [...supportedTreeLanguages];
 
 function parseTree(parser: Parser, source: string, oldTree?: Tree): Tree {
   const tree = parser.parse(source, oldTree);
@@ -299,6 +307,20 @@ async function registerExtension(
   trees: TreeCache,
   activationRegistrations: vscode.Disposable[],
 ): Promise<void> {
+  const documentTrees = new DocumentTreeCache(parser, trees, {
+    maximumDocumentCharacters: document => vscode.workspace
+      .getConfiguration('shellCompletion', vscode.Uri.parse(document.uri.toString()))
+      .get<number>('maxDocumentCharacters', defaultMaximumDocumentCharacters),
+    onDocumentLimited: (document, characters, maximum) => {
+      console.warn(
+        `[Parser] Skipping ${document.uri.toString()}: ${characters} characters exceeds the configured maximum of ${maximum}.`,
+      );
+    },
+    onError: (error, document) => {
+      console.error(`[Parser] Failed to update ${document.uri.toString()}:`, error);
+    },
+  });
+  activationRegistrations.push(documentTrees);
   const cacheDirectory = context.globalStorageUri;
   const cacheStorage = new GzipCommandCacheStorage(vscode.workspace.fs, {
     directory: cacheDirectory,
@@ -329,11 +351,16 @@ async function registerExtension(
           });
           return Promise.reject("Parser unavailable!");
         }
-        if (!trees[document.uri.toString()]) {
-          console.log("[Completion] Creating tree");
-          trees[document.uri.toString()] = parseTree(parser, document.getText());
+        const treeRequest = await waitForValueOrCancellation(documentTrees.get(document), token);
+        if (!treeRequest.completed) {
+          trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
+          return [];
         }
-        const tree = trees[document.uri.toString()];
+        const tree = treeRequest.value;
+        if (!tree) {
+          trackLiveCompletionResult(liveTraceRequest, 'suppressed', { itemCount: 0 });
+          return [];
+        }
         return withTreeCopy(tree, async requestTree => {
           const completionAnalysis = getCompletionRequestAnalysis(
             document,
@@ -464,11 +491,16 @@ async function registerExtension(
         return Promise.reject("Parser is unavailable!");
       }
 
-      if (!trees[document.uri.toString()]) {
-        console.log("[Hover] Creating tree");
-        trees[document.uri.toString()] = parseTree(parser, document.getText());
+      const treeRequest = await waitForValueOrCancellation(documentTrees.get(document), token);
+      if (!treeRequest.completed) {
+        trackLiveHoverResult(liveTraceRequest, 'cancelled');
+        return undefined;
       }
-      const tree = trees[document.uri.toString()];
+      const tree = treeRequest.value;
+      if (!tree) {
+        trackLiveHoverResult(liveTraceRequest, 'suppressed');
+        return undefined;
+      }
       return withTreeCopy(tree, async requestTree => {
         const cursorDecision = getHoverCursorDecision(requestTree.rootNode, cursor);
         if (!cursorDecision.enabled) {
@@ -560,17 +592,21 @@ async function registerExtension(
         return undefined;
       }
 
+      const tree = await documentTrees.get(editor.document);
+      if (!tree) {
+        void vscode.window.showInformationMessage(
+          '[Shell Completion] Parser features are unavailable for this document size.',
+        );
+        return undefined;
+      }
       const source = editor.document.getText();
       const caret = editor.selection.active;
       const caretOffset = editor.document.offsetAt(caret);
       const key = editor.document.uri.toString();
-      if (!trees[key]) {
-        trees[key] = parseTree(parser, source);
-      }
 
       const report = await createCaretDebugReport(
         parser,
-        trees[key],
+        tree,
         fetcher,
         {
           uri: key,
@@ -771,6 +807,15 @@ async function registerExtension(
       return undefined;
     }
 
+    const tree = await documentTrees.get(editor.document);
+    if (!tree) {
+      if (liveDebugEnabled && !liveDebugPaused && revision === liveDebugRevision) {
+        liveDebugLatestSnapshot = undefined;
+        liveDebugUpdateSequence += 1;
+        renderLiveDebugViews();
+      }
+      return undefined;
+    }
     const source = editor.document.getText();
     const caret = editor.selection.active;
     const caretOffset = editor.document.offsetAt(caret);
@@ -780,12 +825,8 @@ async function registerExtension(
       ? liveDebugCursor.position
       : undefined;
     const cursorOffset = cursor ? editor.document.offsetAt(cursor) : undefined;
-    if (!trees[key]) {
-      trees[key] = parseTree(parser, source);
-    }
-
     const snapshot = await createLiveEditorDebugSnapshot(
-      trees[key],
+      tree,
       fetcher,
       {
         uri: key,
@@ -972,7 +1013,7 @@ async function registerExtension(
   });
 
   function edit(edit: vscode.TextDocumentChangeEvent) {
-    updateTree(parser, trees, edit);
+    documentTrees.update(edit);
     if (vscode.window.activeTextEditor?.document.uri.toString() === edit.document.uri.toString()) {
       scheduleLiveDebug();
     }
@@ -980,11 +1021,7 @@ async function registerExtension(
 
   function close(document: vscode.TextDocument) {
     console.log("[Close] removing a tree");
-    const t = trees[document.uri.toString()];
-    if (t) {
-      t.delete();
-      delete trees[document.uri.toString()];
-    }
+    documentTrees.close(document);
     scheduleLiveDebug();
   }
 
@@ -1160,20 +1197,6 @@ function asPoint(p: vscode.Position): Point {
 
 function asPosition(point: Point): vscode.Position {
   return new vscode.Position(point.row, point.column);
-}
-
-function advancePoint(start: Point, text: string): Point {
-  let row = start.row;
-  let column = start.column;
-  for (let index = 0; index < text.length; index += 1) {
-    if (text.charCodeAt(index) === 10) {
-      row += 1;
-      column = 0;
-    } else {
-      column += 1;
-    }
-  }
-  return { row, column };
 }
 
 // Convert: option -> UI text (string)
@@ -1717,34 +1740,6 @@ async function createLiveEditorDebugSnapshot(
       hover: hover ? liveProviderDecision(hover) : null,
     };
   });
-}
-
-export function updateTree(p: Parser, trees: TreeCache, edit: vscode.TextDocumentChangeEvent): void {
-  if (
-    edit.document.isClosed ||
-    edit.contentChanges.length === 0 ||
-    !supportedLanguages.includes(edit.document.languageId)
-  ) { return; }
-
-  const key = edit.document.uri.toString();
-  const old = trees[key];
-  if (!!old) {
-    // Apply later ranges first so each remaining range still addresses the pre-edit tree.
-    const changes = [...edit.contentChanges].sort((left, right) => right.rangeOffset - left.rangeOffset);
-    for (const e of changes) {
-      const startIndex = e.rangeOffset;
-      const oldEndIndex = e.rangeOffset + e.rangeLength;
-      const newEndIndex = e.rangeOffset + e.text.length;
-      const startPosition = asPoint(e.range.start);
-      const oldEndPosition = asPoint(e.range.end);
-      const newEndPosition = advancePoint(startPosition, e.text);
-      const delta = new Edit({ startIndex, oldEndIndex, newEndIndex, startPosition, oldEndPosition, newEndPosition });
-      old.edit(delta);
-    }
-  }
-  const t = parseTree(p, edit.document.getText(), old);
-  trees[key] = t;
-  old?.delete();
 }
 
 export function disposeParserResources(p: Pick<Parser, 'delete'>, trees: TreeCache): void {

@@ -10,6 +10,7 @@ import {
 	getCurrentNode,
 	initializeParser,
 	isProviderSuppressedAtPosition,
+	parseDocumentTree,
 	updateTree,
 	walkbackCompletionCaretIfNeeded,
 } from '../../extension';
@@ -57,6 +58,16 @@ async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Pro
 		if (timeout) {
 			clearTimeout(timeout);
 		}
+	}
+}
+
+async function waitForCondition(condition: () => boolean, timeoutMs: number): Promise<void> {
+	const startedAt = Date.now();
+	while (!condition()) {
+		if (Date.now() - startedAt >= timeoutMs) {
+			throw new Error(`Condition was not met within ${timeoutMs} ms`);
+		}
+		await new Promise<void>(resolve => setTimeout(resolve, 10));
 	}
 }
 
@@ -506,6 +517,7 @@ async function applyTrackedEdit(
 ): Promise<void> {
 	const event = await captureDocumentChange(document, () => vscode.workspace.applyEdit(edit));
 	updateTree(parser, trees, event);
+	parseDocumentTree(parser, trees, document);
 }
 
 async function completionLabelsAt(
@@ -713,6 +725,7 @@ async function verifyProviderTreeOwnership(parser: Parser): Promise<void> {
 		await withTimeout(activeFetch.started.promise, 5000);
 		assert.strictEqual(copyDeleteCounts.length, 1);
 		await editDocument(completionDocument, 'status');
+		await waitForCondition(() => cacheDeleteCount >= 1, 5000);
 		assert.strictEqual(cacheDeleteCount, 1);
 		activeFetch.result.resolve(commandForProviderRace());
 		const completionList = await withTimeout(completion, 5000);
@@ -732,6 +745,7 @@ async function verifyProviderTreeOwnership(parser: Parser): Promise<void> {
 		await withTimeout(activeFetch.started.promise, 5000);
 		assert.strictEqual(copyDeleteCounts.length, 2);
 		await editDocument(hoverDocument, ' status');
+		await waitForCondition(() => cacheDeleteCount >= 2, 5000);
 		assert.strictEqual(cacheDeleteCount, 2);
 		activeFetch.result.resolve(commandForProviderRace());
 		const hovers = await withTimeout(hover, 5000);
@@ -2515,6 +2529,7 @@ async function verifyIncrementalParsing(parser: Parser): Promise<void> {
 	replacement.replace(document.uri, new vscode.Range(0, 4, 0, 10), 'log --oneline');
 	const replacementEvent = await captureDocumentChange(document, () => vscode.workspace.applyEdit(replacement));
 	updateTree(parser, trees, replacementEvent);
+	parseDocumentTree(parser, trees, document);
 	assert.strictEqual(firstTreeDeleteCount(), 1);
 	assert.notStrictEqual(trees[key], firstTree);
 
@@ -2528,6 +2543,7 @@ async function verifyIncrementalParsing(parser: Parser): Promise<void> {
 	multilineReplacement.replace(document.uri, new vscode.Range(0, 3, 1, 0), ' status ');
 	const multilineEvent = await captureDocumentChange(document, () => vscode.workspace.applyEdit(multilineReplacement));
 	updateTree(parser, trees, multilineEvent);
+	parseDocumentTree(parser, trees, document);
 	assert.strictEqual(secondTreeDeleteCount(), 1);
 	assert.notStrictEqual(trees[key], secondTree);
 
@@ -2553,6 +2569,7 @@ async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
 		() => vscode.workspace.applyEdit(shortening),
 	);
 	updateTree(parser, shorteningTrees, shorteningEvent);
+	parseDocumentTree(parser, shorteningTrees, shorteningDocument);
 	assert.deepStrictEqual(shorteningEdits, [{
 		startIndex: 4,
 		oldEndIndex: 10,
@@ -2590,6 +2607,7 @@ async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
 		[4, 16, 25],
 	);
 	updateTree(parser, multipleTrees, ascendingMultipleEvent);
+	parseDocumentTree(parser, multipleTrees, multipleDocument);
 	assert.deepStrictEqual(multipleEdits, [
 		{
 			startIndex: 25,
@@ -2634,6 +2652,7 @@ async function verifyIncrementalEditCoordinates(parser: Parser): Promise<void> {
 	unicode.replace(unicodeDocument.uri, new vscode.Range(1, 4, 1, 10), 'log\n--oneline');
 	const unicodeEvent = await captureDocumentChange(unicodeDocument, () => vscode.workspace.applyEdit(unicode));
 	updateTree(parser, unicodeTrees, unicodeEvent);
+	parseDocumentTree(parser, unicodeTrees, unicodeDocument);
 	assert.deepStrictEqual(unicodeEdits, [
 		{
 			startIndex: 14,
@@ -2671,7 +2690,9 @@ async function verifyIncrementalBoundaryEdits(parser: Parser): Promise<void> {
 		emptyDocument,
 		() => vscode.workspace.applyEdit(initialInsertion),
 	);
-	updateTree(parser, emptyTrees, initialEvent);
+	assert.strictEqual(updateTree(parser, emptyTrees, initialEvent), false);
+	assert.deepStrictEqual(Object.keys(emptyTrees), []);
+	parseDocumentTree(parser, emptyTrees, emptyDocument);
 	assert.strictEqual(emptyTrees[emptyKey].rootNode.text, emptyDocument.getText());
 	emptyTrees[emptyKey].delete();
 
@@ -2689,6 +2710,7 @@ async function verifyIncrementalBoundaryEdits(parser: Parser): Promise<void> {
 	deletion.delete(document.uri, new vscode.Range(new vscode.Position(0, 0), document.positionAt(initialText.length)));
 	const deletionEvent = await captureDocumentChange(document, () => vscode.workspace.applyEdit(deletion));
 	updateTree(parser, trees, deletionEvent);
+	parseDocumentTree(parser, trees, document);
 	assert.deepStrictEqual(populatedEdits, [{
 		startIndex: 0,
 		oldEndIndex: initialText.length,
@@ -2713,6 +2735,7 @@ async function verifyIncrementalBoundaryEdits(parser: Parser): Promise<void> {
 		() => vscode.workspace.applyEdit(unicodeInsertion),
 	);
 	updateTree(parser, trees, unicodeEvent);
+	parseDocumentTree(parser, trees, document);
 	assert.deepStrictEqual(emptyEdits, [{
 		startIndex: 0,
 		oldEndIndex: 0,

@@ -17,6 +17,7 @@
 - Fix completion and hover lookup for commands preceded by environment variable assignments.
 - Resolve common simple and nested `sudo` or `nohup` wrapper forms without broadly interpreting wrapper options.
 - Release superseded syntax trees, retain request-local copies during asynchronous completion and hover work, and ignore unrelated language edits to prevent WebAssembly memory growth and invalid tree access.
+- Coalesce syntax-tree parsing after document edits, parse unused documents lazily, and limit parser-backed features for very large documents by default to keep the Extension Host responsive.
 
 ## [0.2.15] (2023-11-04)
 - Add experimental support of Bitbake per [Issue #10](https://github.com/yamaton/vscode-h2o/issues/10)
