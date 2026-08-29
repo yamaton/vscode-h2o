@@ -9,6 +9,7 @@ test/**
 
 src/**
 .gitignore
+AGENTS.md
 GEMINI.md
 h2o.lock.json
 tree-sitter-bash.lock.json

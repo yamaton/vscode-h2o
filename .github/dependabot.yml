@@ -29,6 +29,11 @@ updates:
         update-types:
           - version-update:semver-minor
           - version-update:semver-major
+      # TypeScript 7.0 has no stable compiler API for typescript-eslint.
+      # Reconsider when TypeScript 7.1 and supporting tooling are available.
+      - dependency-name: typescript
+        versions:
+          - "7.0.x"
       # Keep the API types aligned with the minimum supported VS Code version.
       - dependency-name: "@types/vscode"
       # Keep Node.js types aligned with the minimum supported VS Code runtime.
