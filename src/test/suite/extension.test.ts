@@ -1129,9 +1129,9 @@ async function verifyCaretDebugInterface(): Promise<void> {
 	}
 }
 
-async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
+async function verifyLiveCaretAndCursorDebugInterface(parser: Parser): Promise<void> {
 	const originalFetch = CachingFetcher.prototype.fetch;
-	CachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+	const liveDebugFetch = async function fetch(name: string): Promise<Command> {
 		assert.strictEqual(name, 'git');
 		return {
 			...commandForProviderRace(),
@@ -1143,6 +1143,7 @@ async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
 			}],
 		};
 	};
+	CachingFetcher.prototype.fetch = liveDebugFetch;
 
 	function getLiveState(): Thenable<LiveEditorDebugState> {
 		return vscode.commands.executeCommand<LiveEditorDebugState>('h2o.getLiveCaretAndCursorContextState');
@@ -1242,13 +1243,83 @@ async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
 		const completionState = await getLiveState();
 		assert.strictEqual(completionState.traces.completion?.outcome, 'items');
 		assert.strictEqual(completionState.traces.completion?.itemCount, 1);
+		assert.ok((completionState.traces.completion?.timings?.totalMs ?? -1) >= 0);
+		assert.ok((completionState.traces.completion?.timings?.commandFetchMs ?? -1) >= 0);
+		assert.ok((completionState.traces.completion?.timings?.unclassifiedMs ?? -1) >= 0);
+		assert.ok(completionState.presentation.completion.some(row => row.id === 'completion.timing'));
+		assert.ok(
+			completionState.presentation.completion
+				.find(row => row.id === 'completion.timing')
+				?.children?.some(row => row.id === 'completion.timing.unclassifiedMs'),
+		);
 		assert.match(
 			completionState.presentation.completion
 				.find(row => row.id === 'completion.provider-result')?.description ?? '',
 			/^1 item\(s\)$/,
 		);
 
-		const beforeHover = completionState;
+		CachingFetcher.prototype.fetch = async function fetch(): Promise<Command> {
+			throw new Error('controlled live provider failure');
+		};
+		const failedCompletion = await completionLabelsAt(document, end);
+		assert.strictEqual(failedCompletion.labels.includes('--vscode-h2o-race'), false);
+		const failedCompletionState = await getLiveState();
+		assert.strictEqual(failedCompletionState.traces.completion?.outcome, 'error');
+		assert.match(
+			failedCompletionState.traces.completion?.error ?? '',
+			/controlled live provider failure/,
+		);
+		assert.ok((failedCompletionState.traces.completion?.timings?.totalMs ?? -1) >= 0);
+		CachingFetcher.prototype.fetch = liveDebugFetch;
+
+		const sampleTree = parseTree(parser, 'git');
+		const treePrototype = Object.getPrototypeOf(sampleTree) as {
+			copy(this: Tree): Tree;
+			delete(this: Tree): void;
+		};
+		const originalCopy = treePrototype.copy;
+		const originalDelete = treePrototype.delete;
+		const requestTrees = new WeakSet<Tree>();
+		sampleTree.delete();
+		let failNextRequestCleanup = true;
+		treePrototype.copy = function copy(this: Tree): Tree {
+			const requestTree = originalCopy.call(this);
+			requestTrees.add(requestTree);
+			return requestTree;
+		};
+		treePrototype.delete = function deleteTree(this: Tree): void {
+			if (requestTrees.has(this) && failNextRequestCleanup) {
+				failNextRequestCleanup = false;
+				const startedAt = Date.now();
+				while (Date.now() - startedAt < 5) {
+					// Keep cleanup synchronous so treeCopyMs must include this work.
+				}
+				originalDelete.call(this);
+				throw new Error('controlled request tree cleanup failure');
+			}
+			originalDelete.call(this);
+		};
+		try {
+			await completionLabelsAt(document, end);
+		} catch {
+			// VS Code versions differ on whether executeCompletionItemProvider rejects.
+		} finally {
+			treePrototype.copy = originalCopy;
+			treePrototype.delete = originalDelete;
+		}
+		const cleanupFailureState = await getLiveState();
+		assert.strictEqual(cleanupFailureState.traces.completion?.outcome, 'error');
+		assert.match(
+			cleanupFailureState.traces.completion?.error ?? '',
+			/controlled request tree cleanup failure/,
+		);
+		assert.ok((cleanupFailureState.traces.completion?.timings?.treeCopyMs ?? 0) >= 4);
+		assert.ok(
+			(cleanupFailureState.traces.completion?.timings?.totalMs ?? 0)
+			>= (cleanupFailureState.traces.completion?.timings?.treeCopyMs ?? Number.POSITIVE_INFINITY),
+		);
+
+		const beforeHover = cleanupFailureState;
 		const optionCursor = new vscode.Position(0, 5);
 		await requestHover(document, optionCursor);
 		const hoverState = await waitForLiveUpdate(
@@ -1271,6 +1342,8 @@ async function verifyLiveCaretAndCursorDebugInterface(): Promise<void> {
 			['--v'],
 		);
 		assert.strictEqual(hoverState.traces.hover?.outcome, 'none');
+		assert.ok((hoverState.traces.hover?.timings?.totalMs ?? -1) >= 0);
+		assert.ok(hoverState.presentation.hover.some(row => row.id === 'hover.timing'));
 		assert.strictEqual(
 			hoverState.presentation.hover.find(row => row.id === 'hover.provider-result')?.description,
 			'No hover',
@@ -2995,7 +3068,9 @@ suite('Parser and provider behavior', () => {
 	test('keeps live completion debug aligned with command-name completion', verifyCommandNameLiveDebugDoesNotResolvePrefixes);
 	test('preserves editor-facing Unicode ranges', verifyEditorFacingParserCompatibility);
 	test('reports caret parser and provider metadata', verifyCaretDebugInterface);
-	test('updates provider-critical caret/cursor metadata live', verifyLiveCaretAndCursorDebugInterface);
+	test('updates provider-critical caret/cursor metadata live', async () => {
+		await verifyLiveCaretAndCursorDebugInterface(parser);
+	});
 	test('keeps live provider traces bound to their originating requests', verifyLiveProviderTraceRaces);
 	test('handles providers around redirects and parser recovery regions', verifyProviderSuppressionRegions);
 	test('preserves caret behavior across incremental edits', async () => {

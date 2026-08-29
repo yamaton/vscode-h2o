@@ -50,6 +50,14 @@ import {
   type LineTextProvider,
   type ProviderSuppressionReason,
 } from './providerContext';
+import {
+  ProviderMeasurement,
+  ProviderPerformanceRecorder,
+  type ProviderAccumulatedPhase,
+  type ProviderPerformanceKind,
+  type ProviderPerformanceSample,
+  type ProviderPhaseTimings,
+} from './providerPerformance';
 
 export type { ProviderSuppressionReason } from './providerContext';
 
@@ -97,12 +105,22 @@ export async function initializeParser(
   }
 }
 
-async function withTreeCopy<T>(tree: Tree, operation: (copy: Tree) => Promise<T>): Promise<T> {
-  const copy = tree.copy();
+async function withTreeCopy<T>(
+  tree: Tree,
+  operation: (copy: Tree) => Promise<T>,
+  measurement?: ProviderMeasurement,
+): Promise<T> {
+  const copy = measurement
+    ? measurement.measure('treeCopyMs', () => tree.copy())
+    : tree.copy();
   try {
     return await operation(copy);
   } finally {
-    copy.delete();
+    if (measurement) {
+      measurement.measure('treeCopyMs', () => copy.delete());
+    } else {
+      copy.delete();
+    }
   }
 }
 
@@ -321,6 +339,20 @@ async function registerExtension(
     },
   });
   activationRegistrations.push(documentTrees);
+  const performanceRecorder = process.env.VSCODE_H2O_PERFORMANCE === '1'
+    ? new ProviderPerformanceRecorder()
+    : undefined;
+  if (performanceRecorder) {
+    activationRegistrations.push(
+      vscode.commands.registerCommand(
+        'h2o.getProviderPerformanceSamples',
+        (): ProviderPerformanceSample[] => performanceRecorder.snapshot(),
+      ),
+      vscode.commands.registerCommand('h2o.clearProviderPerformanceSamples', () => {
+        performanceRecorder.clear();
+      }),
+    );
+  }
   const cacheDirectory = context.globalStorageUri;
   const cacheStorage = new GzipCommandCacheStorage(vscode.workspace.fs, {
     directory: cacheDirectory,
@@ -344,137 +376,160 @@ async function registerExtension(
     {
       async provideCompletionItems(document, caret, token, context) {
         const liveTraceRequest = trackLiveCompletionRequest(document, caret);
-        if (!parser) {
-          console.error("[Completion] Parser is unavailable!");
-          trackLiveCompletionResult(liveTraceRequest, 'error', {
-            error: 'Parser unavailable!',
-          });
-          return Promise.reject("Parser unavailable!");
-        }
-        const treeRequest = await waitForValueOrCancellation(documentTrees.get(document), token);
-        if (!treeRequest.completed) {
-          trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
-          return [];
-        }
-        const tree = treeRequest.value;
-        if (!tree) {
-          trackLiveCompletionResult(liveTraceRequest, 'suppressed', { itemCount: 0 });
-          return [];
-        }
-        return withTreeCopy(tree, async requestTree => {
-          const completionAnalysis = getCompletionRequestAnalysis(
-            document,
-            requestTree.rootNode,
-            caret,
+        try {
+          if (!parser) {
+            console.error("[Completion] Parser is unavailable!");
+            trackLiveCompletionResult(liveTraceRequest, 'error', {
+              error: 'Parser unavailable!',
+            });
+            return Promise.reject("Parser unavailable!");
+          }
+          const treeRequest = await measureProviderAsync(
+            liveTraceRequest,
+            'treeWaitMs',
+            () => waitForValueOrCancellation(documentTrees.getWithTiming(document), token),
           );
-          const caretDecision = completionAnalysis.decision;
-          if (!caretDecision.enabled) {
+          if (!treeRequest.completed) {
+            trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
+            return [];
+          }
+          const treeAccess = treeRequest.value;
+          liveTraceRequest?.measurement.add('parseMs', treeAccess.parseMs);
+          const tree = treeAccess.tree;
+          if (!tree) {
             trackLiveCompletionResult(liveTraceRequest, 'suppressed', { itemCount: 0 });
             return [];
           }
-
-          const resolvedPosition = caretDecision.position;
-          const isCaretTouchingWord = caretDecision.touchingCommandToken;
-          console.log(`[Completion] isCaretTouchingWord: ${isCaretTouchingWord}`);
-
-          if (completionAnalysis.lookupTarget.kind === 'none') {
-            trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
-            return [];
-          }
-
-          if (completionAnalysis.lookupTarget.kind === 'command-name') {
-            const commandName = completionAnalysis.lookupTarget.context;
-            let snapshot = fetcher.getCommandNameSnapshot();
-            let matchingNames = snapshot.names.filter(name =>
-              isPrefixOf(commandName.word.text, name)
+          return await withTreeCopy(tree, async requestTree => {
+            const completionAnalysis = measureProvider(
+              liveTraceRequest,
+              'analysisMs',
+              () => getCompletionRequestAnalysis(
+                document,
+                requestTree.rootNode,
+                caret,
+              ),
             );
-            if (matchingNames.length === 0 && snapshot.initialCuratedPending) {
-              const available = await waitForPromiseOrCancellation(
-                fetcher.waitForInitialCuratedAvailability(),
-                token,
-              );
-              if (!available) {
-                trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
-                return [];
-              }
-              snapshot = fetcher.getCommandNameSnapshot();
-              matchingNames = snapshot.names.filter(name =>
-                isPrefixOf(commandName.word.text, name)
-              );
-            }
-            if (token.isCancellationRequested) {
-              trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
+            const caretDecision = completionAnalysis.decision;
+            if (!caretDecision.enabled) {
+              trackLiveCompletionResult(liveTraceRequest, 'suppressed', { itemCount: 0 });
               return [];
             }
 
-            const replacing = rangeOfWord(commandName.word);
-            const compItems = matchingNames.map(name => {
-              const item = new vscode.CompletionItem(name);
-              item.range = replacing;
-              return item;
-            });
-            trackLiveCompletionResult(liveTraceRequest, 'items', {
-              itemCount: compItems.length,
-            });
-            return new vscode.CompletionList(compItems, snapshot.initialCuratedPending);
-          }
+            const resolvedPosition = caretDecision.position;
+            const isCaretTouchingWord = caretDecision.touchingCommandToken;
+            console.log(`[Completion] isCaretTouchingWord: ${isCaretTouchingWord}`);
 
-          try {
-            const includeCurrentArgument = completionAnalysis.includeArgumentAtPosition;
-            const commandContext = await getCommandNodeResolution(
-              caretDecision.commandNode,
-              resolvedPosition,
-              fetcher,
-              includeCurrentArgument,
-              token,
-            );
-            if (!commandContext) {
+            if (completionAnalysis.lookupTarget.kind === 'none') {
               trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
               return [];
             }
-            const cmdSeq = commandContext.resolution.path;
-            if (!!cmdSeq && cmdSeq.length) {
-              const deepestCmd = cmdSeq[cmdSeq.length - 1];
-              const compSubcommands = commandContext.resolution.stopReason === undefined
-                ? getCompletionsSubcommands(deepestCmd)
-                : [];
-              let compOptions = commandContext.resolution.stopReason === 'end-of-options'
-                ? []
-                : getCompletionsOptions(commandContext);
-              let compItems = [
-                ...compSubcommands,
-                ...compOptions,
-              ];
 
-              if (isCaretTouchingWord) {
-                const currentNode = getCurrentNode(requestTree.rootNode, caret);
-                const currentWord = currentNode.text;
-                compItems = compItems.filter(compItem => isPrefixOf(currentWord, getLabelString(compItem.label)));
-                compItems.forEach(compItem => {
-                  compItem.range = range(currentNode);
-                });
-                console.info(`[Completion] currentWord: ${currentWord}`);
+            if (completionAnalysis.lookupTarget.kind === 'command-name') {
+              const commandName = completionAnalysis.lookupTarget.context;
+              let snapshot = fetcher.getCommandNameSnapshot();
+              let matchingNames = snapshot.names.filter(name =>
+                isPrefixOf(commandName.word.text, name)
+              );
+              if (matchingNames.length === 0 && snapshot.initialCuratedPending) {
+                const available = await waitForPromiseOrCancellation(
+                  fetcher.waitForInitialCuratedAvailability(),
+                  token,
+                );
+                if (!available) {
+                  trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
+                  return [];
+                }
+                snapshot = fetcher.getCommandNameSnapshot();
+                matchingNames = snapshot.names.filter(name =>
+                  isPrefixOf(commandName.word.text, name)
+                );
               }
+              if (token.isCancellationRequested) {
+                trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
+                return [];
+              }
+
+              const replacing = rangeOfWord(commandName.word);
+              const compItems = matchingNames.map(name => {
+                const item = new vscode.CompletionItem(name);
+                item.range = replacing;
+                return item;
+              });
               trackLiveCompletionResult(liveTraceRequest, 'items', {
                 itemCount: compItems.length,
               });
-              return compItems;
-            } else {
-              throw new Error("unknown command");
+              return new vscode.CompletionList(compItems, snapshot.initialCuratedPending);
             }
-          } catch (e) {
-            if (e instanceof CommandFetchCancelledError) {
-              trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
+
+            try {
+              const includeCurrentArgument = completionAnalysis.includeArgumentAtPosition;
+              const commandContext = await getCommandNodeResolution(
+                caretDecision.commandNode,
+                resolvedPosition,
+                fetcher,
+                includeCurrentArgument,
+                token,
+                liveTraceRequest?.measurement,
+              );
+              if (!commandContext) {
+                trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
+                return [];
+              }
+              const cmdSeq = commandContext.resolution.path;
+              if (!!cmdSeq && cmdSeq.length) {
+                const compItems = measureProvider(liveTraceRequest, 'analysisMs', () => {
+                  const deepestCmd = cmdSeq[cmdSeq.length - 1];
+                  const compSubcommands = commandContext.resolution.stopReason === undefined
+                    ? getCompletionsSubcommands(deepestCmd)
+                    : [];
+                  const compOptions = commandContext.resolution.stopReason === 'end-of-options'
+                    ? []
+                    : getCompletionsOptions(commandContext);
+                  let items = [
+                    ...compSubcommands,
+                    ...compOptions,
+                  ];
+
+                  if (isCaretTouchingWord) {
+                    const currentNode = getCurrentNode(requestTree.rootNode, caret);
+                    const currentWord = currentNode.text;
+                    items = items.filter(compItem => isPrefixOf(currentWord, getLabelString(compItem.label)));
+                    items.forEach(compItem => {
+                      compItem.range = range(currentNode);
+                    });
+                    console.info(`[Completion] currentWord: ${currentWord}`);
+                  }
+                  return items;
+                });
+                trackLiveCompletionResult(liveTraceRequest, 'items', {
+                  itemCount: compItems.length,
+                });
+                return compItems;
+              } else {
+                throw new Error("unknown command");
+              }
+            } catch (e) {
+              if (e instanceof CommandFetchCancelledError) {
+                trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
+                return [];
+              }
+              console.warn("[Completion] No completion item is available (1)", e);
+              trackLiveCompletionResult(liveTraceRequest, 'error', {
+                itemCount: 0,
+                error: debugError(e),
+              });
               return [];
             }
-            console.warn("[Completion] No completion item is available (1)", e);
-            trackLiveCompletionResult(liveTraceRequest, 'items', {
-              itemCount: 0,
-              error: debugError(e),
-            });
-            return [];
-          }
-        });
+          }, liveTraceRequest?.measurement);
+        } catch (error) {
+          trackLiveCompletionResult(liveTraceRequest, 'error', {
+            error: debugError(error),
+          });
+          throw error;
+        } finally {
+          finalizeLiveCompletionRequest(liveTraceRequest);
+        }
       }
     },
     ' ',  // triggerCharacter
@@ -484,98 +539,116 @@ async function registerExtension(
   const hoverprovider = vscode.languages.registerHoverProvider(supportedLanguages, {
     async provideHover(document, cursor, token) {
       const liveTraceRequest = trackLiveHoverRequest(document, cursor);
+      try {
 
-      if (!parser) {
-        console.error("[Hover] Parser is unavailable!");
-        trackLiveHoverResult(liveTraceRequest, 'error', 'Parser is unavailable!');
-        return Promise.reject("Parser is unavailable!");
-      }
+        if (!parser) {
+          console.error("[Hover] Parser is unavailable!");
+          trackLiveHoverResult(liveTraceRequest, 'error', 'Parser is unavailable!');
+          return Promise.reject("Parser is unavailable!");
+        }
 
-      const treeRequest = await waitForValueOrCancellation(documentTrees.get(document), token);
-      if (!treeRequest.completed) {
-        trackLiveHoverResult(liveTraceRequest, 'cancelled');
-        return undefined;
-      }
-      const tree = treeRequest.value;
-      if (!tree) {
-        trackLiveHoverResult(liveTraceRequest, 'suppressed');
-        return undefined;
-      }
-      return withTreeCopy(tree, async requestTree => {
-        const cursorDecision = getHoverCursorDecision(requestTree.rootNode, cursor);
-        if (!cursorDecision.enabled) {
+        const treeRequest = await measureProviderAsync(
+          liveTraceRequest,
+          'treeWaitMs',
+          () => waitForValueOrCancellation(documentTrees.getWithTiming(document), token),
+        );
+        if (!treeRequest.completed) {
+          trackLiveHoverResult(liveTraceRequest, 'cancelled');
+          return undefined;
+        }
+        const treeAccess = treeRequest.value;
+        liveTraceRequest?.measurement.add('parseMs', treeAccess.parseMs);
+        const tree = treeAccess.tree;
+        if (!tree) {
           trackLiveHoverResult(liveTraceRequest, 'suppressed');
           return undefined;
         }
-        const currentWord = getCurrentNode(requestTree.rootNode, cursor).text;
-        let commandContext: ResolvedCommandContext | undefined;
-        try {
-          commandContext = await getCommandNodeResolution(
-            cursorDecision.commandNode,
-            cursor,
-            fetcher,
-            true,
-            token,
+        return await withTreeCopy(tree, async requestTree => {
+          const cursorDecision = measureProvider(
+            liveTraceRequest,
+            'analysisMs',
+            () => getHoverCursorDecision(requestTree.rootNode, cursor),
           );
-        } catch (e) {
-          if (e instanceof CommandFetchCancelledError) {
-            trackLiveHoverResult(liveTraceRequest, 'cancelled');
+          if (!cursorDecision.enabled) {
+            trackLiveHoverResult(liveTraceRequest, 'suppressed');
             return undefined;
           }
-          trackLiveHoverResult(liveTraceRequest, 'error', debugError(e));
-          return undefined;
-        }
-        if (!commandContext) {
-          trackLiveHoverResult(liveTraceRequest, 'none');
-          return undefined;
-        }
+          const currentWord = getCurrentNode(requestTree.rootNode, cursor).text;
+          let commandContext: ResolvedCommandContext | undefined;
+          try {
+            commandContext = await getCommandNodeResolution(
+              cursorDecision.commandNode,
+              cursor,
+              fetcher,
+              true,
+              token,
+              liveTraceRequest?.measurement,
+            );
+          } catch (e) {
+            if (e instanceof CommandFetchCancelledError) {
+              trackLiveHoverResult(liveTraceRequest, 'cancelled');
+              return undefined;
+            }
+            trackLiveHoverResult(liveTraceRequest, 'error', debugError(e));
+            return undefined;
+          }
+          if (!commandContext) {
+            trackLiveHoverResult(liveTraceRequest, 'none');
+            return undefined;
+          }
 
-        const cmdSeq = commandContext.resolution.path;
-        const name = cmdSeq[0].name;
-        const subcommandStepIndex = commandContext.resolution.steps.findIndex(
-          step => rangeOfWord(step.source).contains(cursor),
-        );
-        const subcommandStep = commandContext.resolution.steps[subcommandStepIndex];
-        if (rangeOfWord(commandContext.invocation.name).contains(cursor)) {
-          // Display root-level command
-          const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
-          const thisCmd = cmdSeq[0];
-          const tldrText = formatTldr(thisCmd.tldr);
-          const usageText = formatUsage(thisCmd.usage);
-          const descText = (thisCmd.description !== thisCmd.name && !tldrText) ? formatDescription(thisCmd.description) : "";
-          const msg = new vscode.MarkdownString(`\`${name}\`${descText}${usageText}${tldrText}\n\n[Reset](${clearCacheCommandUri})`);
-          msg.isTrusted = {
-            enabledCommands: ['h2o.clearCache'],
-          };
-          trackLiveHoverResult(liveTraceRequest, 'hover');
-          return new vscode.Hover(msg);
-        }
-        if (subcommandStep) {
-          // Display a subcommand
-          const thatCmd = subcommandStep.command;
-          const cmdPrefixName = cmdSeq
-            .slice(0, subcommandStepIndex + 1)
-            .map(command => command.name)
-            .join(" ");
-          const description = subcommandStep.matchedBy === 'alias'
-            ? `(Alias of ${thatCmd.name}) ${thatCmd.description}`
-            : thatCmd.description;
-          const usageText = formatUsage(thatCmd.usage);
-          const msg = `${cmdPrefixName} **${subcommandStep.source.text}**\n\n${description}${usageText}`;
-          trackLiveHoverResult(liveTraceRequest, 'hover');
-          return new vscode.Hover(new vscode.MarkdownString(msg));
-        }
-        if (commandContext.resolution.stopReason !== 'end-of-options') {
-          const opts = getMatchingOption(currentWord, name, cmdSeq);
-          if (opts.length > 0) {
-            const msg = optsToMessage(opts);
+          const cmdSeq = commandContext.resolution.path;
+          const name = cmdSeq[0].name;
+          const subcommandStepIndex = commandContext.resolution.steps.findIndex(
+            step => rangeOfWord(step.source).contains(cursor),
+          );
+          const subcommandStep = commandContext.resolution.steps[subcommandStepIndex];
+          if (rangeOfWord(commandContext.invocation.name).contains(cursor)) {
+            // Display root-level command
+            const clearCacheCommandUri = vscode.Uri.parse(`command:h2o.clearCache?${encodeURIComponent(JSON.stringify(name))}`);
+            const thisCmd = cmdSeq[0];
+            const tldrText = formatTldr(thisCmd.tldr);
+            const usageText = formatUsage(thisCmd.usage);
+            const descText = (thisCmd.description !== thisCmd.name && !tldrText) ? formatDescription(thisCmd.description) : "";
+            const msg = new vscode.MarkdownString(`\`${name}\`${descText}${usageText}${tldrText}\n\n[Reset](${clearCacheCommandUri})`);
+            msg.isTrusted = {
+              enabledCommands: ['h2o.clearCache'],
+            };
+            trackLiveHoverResult(liveTraceRequest, 'hover');
+            return new vscode.Hover(msg);
+          }
+          if (subcommandStep) {
+            // Display a subcommand
+            const thatCmd = subcommandStep.command;
+            const cmdPrefixName = cmdSeq
+              .slice(0, subcommandStepIndex + 1)
+              .map(command => command.name)
+              .join(" ");
+            const description = subcommandStep.matchedBy === 'alias'
+              ? `(Alias of ${thatCmd.name}) ${thatCmd.description}`
+              : thatCmd.description;
+            const usageText = formatUsage(thatCmd.usage);
+            const msg = `${cmdPrefixName} **${subcommandStep.source.text}**\n\n${description}${usageText}`;
             trackLiveHoverResult(liveTraceRequest, 'hover');
             return new vscode.Hover(new vscode.MarkdownString(msg));
           }
-        }
-        trackLiveHoverResult(liveTraceRequest, 'none');
-        return undefined;
-      });
+          if (commandContext.resolution.stopReason !== 'end-of-options') {
+            const opts = getMatchingOption(currentWord, name, cmdSeq);
+            if (opts.length > 0) {
+              const msg = optsToMessage(opts);
+              trackLiveHoverResult(liveTraceRequest, 'hover');
+              return new vscode.Hover(new vscode.MarkdownString(msg));
+            }
+          }
+          trackLiveHoverResult(liveTraceRequest, 'none');
+          return undefined;
+        }, liveTraceRequest?.measurement);
+      } catch (error) {
+        trackLiveHoverResult(liveTraceRequest, 'error', debugError(error));
+        throw error;
+      } finally {
+        finalizeLiveHoverRequest(liveTraceRequest);
+      }
     }
   });
   activationRegistrations.push(hoverprovider);
@@ -644,6 +717,18 @@ async function registerExtension(
     documentUri: string;
     documentVersion: number;
     position: DebugPosition;
+    measurement: ProviderMeasurement;
+    timings?: ProviderPhaseTimings;
+    completionResult?: {
+      outcome: LiveCompletionProviderTrace['outcome'];
+      itemCount: number | null;
+      fallback: boolean;
+      error: string | null;
+    };
+    hoverResult?: {
+      outcome: LiveHoverProviderTrace['outcome'];
+      error: string | null;
+    };
   }
   let liveDebugTraceRequestSequence = 0;
   let liveDebugCompletionRequestId: number | undefined;
@@ -686,17 +771,53 @@ async function registerExtension(
       documentUri: document.uri.toString(),
       documentVersion: document.version,
       position: debugPosition(position),
+      measurement: new ProviderMeasurement(),
     };
+  }
+
+  function measureProvider<T>(
+    request: LiveTraceRequest | undefined,
+    phase: ProviderAccumulatedPhase,
+    operation: () => T,
+  ): T {
+    return request ? request.measurement.measure(phase, operation) : operation();
+  }
+
+  async function measureProviderAsync<T>(
+    request: LiveTraceRequest | undefined,
+    phase: ProviderAccumulatedPhase,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    return request ? request.measurement.measureAsync(phase, operation) : operation();
+  }
+
+  function finishProviderRequest(
+    request: LiveTraceRequest | undefined,
+    kind: ProviderPerformanceKind,
+    outcome: string,
+  ): ProviderPhaseTimings | null {
+    if (!request) {
+      return null;
+    }
+    if (!request.timings) {
+      request.timings = request.measurement.finish();
+      performanceRecorder?.record(kind, outcome, request.timings);
+    }
+    return request.timings;
   }
 
   function trackLiveCompletionRequest(
     document: vscode.TextDocument,
     caret: vscode.Position,
   ): LiveTraceRequest | undefined {
-    if (!liveDebugEnabled || liveDebugPaused) {
+    const updateLiveDebug = liveDebugEnabled && !liveDebugPaused;
+    if (!updateLiveDebug && !performanceRecorder) {
       return undefined;
     }
     const request = traceRequest(document, caret);
+    if (!updateLiveDebug) {
+      return request;
+    }
     liveDebugCompletionRequestId = request.id;
     liveDebugCompletionTrace = {
       documentUri: request.documentUri,
@@ -707,6 +828,7 @@ async function registerExtension(
       itemCount: null,
       fallback: false,
       error: null,
+      timings: null,
     };
     renderLiveDebugViews();
     return request;
@@ -721,9 +843,30 @@ async function registerExtension(
       error?: string;
     } = {},
   ): void {
+    if (!request) {
+      return;
+    }
+    request.completionResult = {
+      outcome,
+      itemCount: details.itemCount ?? null,
+      fallback: details.fallback ?? false,
+      error: details.error ?? null,
+    };
+  }
+
+  function finalizeLiveCompletionRequest(request: LiveTraceRequest | undefined): void {
+    if (!request) {
+      return;
+    }
+    const result = request.completionResult ?? {
+      outcome: 'error' as const,
+      itemCount: null,
+      fallback: false,
+      error: 'Completion provider finished without recording a result.',
+    };
+    const timings = finishProviderRequest(request, 'completion', result.outcome);
     if (
-      !request
-      || !liveDebugEnabled
+      !liveDebugEnabled
       || liveDebugPaused
       || request.id !== liveDebugCompletionRequestId
     ) {
@@ -734,10 +877,8 @@ async function registerExtension(
       documentVersion: request.documentVersion,
       position: request.position,
       observedAt: new Date().toISOString(),
-      outcome,
-      itemCount: details.itemCount ?? null,
-      fallback: details.fallback ?? false,
-      error: details.error ?? null,
+      ...result,
+      timings,
     };
     renderLiveDebugViews();
   }
@@ -746,10 +887,14 @@ async function registerExtension(
     document: vscode.TextDocument,
     cursor: vscode.Position,
   ): LiveTraceRequest | undefined {
-    if (!liveDebugEnabled || liveDebugPaused) {
+    const updateLiveDebug = liveDebugEnabled && !liveDebugPaused;
+    if (!updateLiveDebug && !performanceRecorder) {
       return undefined;
     }
     const request = traceRequest(document, cursor);
+    if (!updateLiveDebug) {
+      return request;
+    }
     liveDebugHoverRequestId = request.id;
     liveDebugCursor = {
       documentUri: request.documentUri,
@@ -763,6 +908,7 @@ async function registerExtension(
       observedAt: new Date().toISOString(),
       outcome: 'pending',
       error: null,
+      timings: null,
     };
     renderLiveDebugViews();
     scheduleLiveDebug();
@@ -774,9 +920,26 @@ async function registerExtension(
     outcome: LiveHoverProviderTrace['outcome'],
     error?: string,
   ): void {
+    if (!request) {
+      return;
+    }
+    request.hoverResult = {
+      outcome,
+      error: error ?? null,
+    };
+  }
+
+  function finalizeLiveHoverRequest(request: LiveTraceRequest | undefined): void {
+    if (!request) {
+      return;
+    }
+    const result = request.hoverResult ?? {
+      outcome: 'error' as const,
+      error: 'Hover provider finished without recording a result.',
+    };
+    const timings = finishProviderRequest(request, 'hover', result.outcome);
     if (
-      !request
-      || !liveDebugEnabled
+      !liveDebugEnabled
       || liveDebugPaused
       || request.id !== liveDebugHoverRequestId
     ) {
@@ -787,8 +950,8 @@ async function registerExtension(
       documentVersion: request.documentVersion,
       position: request.position,
       observedAt: new Date().toISOString(),
-      outcome,
-      error: error ?? null,
+      ...result,
+      timings,
     };
     renderLiveDebugViews();
   }
@@ -1833,20 +1996,30 @@ async function getCommandNodeResolution(
   fetcher: CachingFetcher,
   includeArgumentAtPosition = true,
   cancellationToken?: vscode.CancellationToken,
+  measurement?: ProviderMeasurement,
 ): Promise<ResolvedCommandContext | undefined> {
-  const invocation = getCommandInvocationToPosition(
+  const getInvocation = () => getCommandInvocationToPosition(
     commandNode,
     asPoint(position),
     includeArgumentAtPosition,
   );
+  const invocation = measurement
+    ? measurement.measure('analysisMs', getInvocation)
+    : getInvocation();
   if (!invocation) {
     return undefined;
   }
 
-  const command = await fetcher.fetch(invocation.name.text, cancellationToken);
+  const fetchCommand = () => fetcher.fetch(invocation.name.text, cancellationToken);
+  const command = measurement
+    ? await measurement.measureAsync('commandFetchMs', fetchCommand)
+    : await fetchCommand();
+  const resolvePath = () => resolveCommandPath(command, invocation.arguments);
   return {
     invocation,
-    resolution: resolveCommandPath(command, invocation.arguments),
+    resolution: measurement
+      ? measurement.measure('pathResolveMs', resolvePath)
+      : resolvePath(),
   };
 }
 

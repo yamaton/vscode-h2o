@@ -149,6 +149,39 @@ suite('document tree cache', () => {
     disposeTrees(trees);
   });
 
+  test('reports only synchronous parser time for initial and incremental access', async () => {
+    const trees: TreeCache = {};
+    const scheduler = new ManualScheduler();
+    const readings = [10, 14, 20, 26];
+    const cache = new DocumentTreeCache(parser, trees, {
+      schedule: scheduler.schedule,
+      cancelSchedule: scheduler.cancel,
+      now: () => readings.shift()!,
+    });
+    const document = new TestDocument('test:timing', 'git status');
+
+    const initial = await cache.getWithTiming(document);
+    assert.ok(initial.tree);
+    assert.strictEqual(initial.parseMs, 4);
+
+    const cached = await cache.getWithTiming(document);
+    assert.strictEqual(cached.tree, initial.tree);
+    assert.strictEqual(cached.parseMs, 0);
+
+    assert.strictEqual(cache.update(document.replace([
+      { offset: 4, length: 6, text: 'log --oneline' },
+    ])), true);
+    const pending = cache.getWithTiming(document);
+    scheduler.runAll();
+    const incremental = await pending;
+    assert.ok(incremental.tree);
+    assert.strictEqual(incremental.parseMs, 6);
+    assert.deepStrictEqual(readings, []);
+
+    cache.dispose();
+    disposeTrees(trees);
+  });
+
   test('coalesces sequential edits into one pending incremental parse', async () => {
     const trees: TreeCache = {};
     const scheduler = new ManualScheduler();

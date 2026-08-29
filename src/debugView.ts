@@ -5,6 +5,7 @@ import type {
   LiveDebugProviderDecision,
   LiveEditorDebugSnapshot,
 } from './extension';
+import type { ProviderPhaseTimings } from './providerPerformance';
 
 export const completionDebugViewId = 'h2o.debug.completion';
 export const hoverDebugViewId = 'h2o.debug.hover';
@@ -20,6 +21,7 @@ export interface LiveCompletionProviderTrace {
   itemCount: number | null;
   fallback: boolean;
   error: string | null;
+  timings: ProviderPhaseTimings | null;
 }
 
 export interface LiveHoverProviderTrace {
@@ -29,6 +31,7 @@ export interface LiveHoverProviderTrace {
   observedAt: string;
   outcome: 'pending' | 'suppressed' | 'hover' | 'none' | 'cancelled' | 'error';
   error: string | null;
+  timings: ProviderPhaseTimings | null;
 }
 
 export interface LiveProviderTraces {
@@ -179,6 +182,35 @@ function providerResultRow(
   };
 }
 
+function providerTimingRow(
+  kind: 'completion' | 'hover',
+  timings: ProviderPhaseTimings | null,
+): DebugViewRow[] {
+  if (!timings) {
+    return [];
+  }
+  const phases: Array<[string, keyof Omit<ProviderPhaseTimings, 'totalMs'>]> = [
+    ['Tree wait (includes parse)', 'treeWaitMs'],
+    ['Parse (inside tree wait)', 'parseMs'],
+    ['Tree copy/delete', 'treeCopyMs'],
+    ['Analysis', 'analysisMs'],
+    ['Command fetch', 'commandFetchMs'],
+    ['Path resolve', 'pathResolveMs'],
+    ['Unclassified', 'unclassifiedMs'],
+  ];
+  return [{
+    id: `${kind}.timing`,
+    label: 'Timing',
+    description: `${timings.totalMs.toFixed(2)} ms total`,
+    icon: 'watch',
+    children: phases.map(([label, phase]) => ({
+      id: `${kind}.timing.${phase}`,
+      label,
+      description: `${timings[phase].toFixed(2)} ms`,
+    })),
+  }];
+}
+
 function providerRows(
   kind: 'completion' | 'hover',
   snapshot: LiveEditorDebugSnapshot,
@@ -202,6 +234,7 @@ function providerRows(
       icon: state.icon,
     },
     providerResultRow(kind, snapshot, trace),
+    ...providerTimingRow(kind, trace?.timings ?? null),
     {
       id: `${kind}.position`,
       label: kind === 'completion' ? 'Caret' : 'Cursor',

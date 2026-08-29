@@ -1,4 +1,5 @@
 import { Edit, Parser, Tree } from 'web-tree-sitter';
+import { performance } from 'node:perf_hooks';
 
 export const supportedTreeLanguages = ['shellscript', 'bitbake'] as const;
 export const defaultTreeParseDebounceMs = 100;
@@ -38,8 +39,8 @@ export interface TreeDocumentChangeLike {
 
 interface PendingParse {
   document: TreeDocumentLike;
-  promise: Promise<Tree | undefined>;
-  resolve(tree: Tree | undefined): void;
+  promise: Promise<DocumentTreeAccess>;
+  resolve(access: DocumentTreeAccess): void;
   timer: ReturnType<typeof setTimeout> | undefined;
 }
 
@@ -48,11 +49,18 @@ interface LimitedDocument {
   characters: number;
 }
 
+export interface DocumentTreeAccess {
+  readonly tree: Tree | undefined;
+  /** Time spent inside web-tree-sitter's synchronous Parser.parse call. */
+  readonly parseMs: number;
+}
+
 export interface DocumentTreeCacheOptions {
   debounceMs?: number;
   maximumDocumentCharacters?(document: TreeDocumentLike): number;
   schedule?(callback: () => void, delayMs: number): ReturnType<typeof setTimeout>;
   cancelSchedule?(timer: ReturnType<typeof setTimeout>): void;
+  now?(): number;
   onDocumentLimited?(document: TreeDocumentLike, characters: number, maximum: number): void;
   onError?(error: unknown, document: TreeDocumentLike): void;
 }
@@ -138,6 +146,7 @@ export class DocumentTreeCache {
   private readonly maximumDocumentCharacters: (document: TreeDocumentLike) => number;
   private readonly scheduleCallback: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
   private readonly cancelCallback: (timer: ReturnType<typeof setTimeout>) => void;
+  private readonly now: () => number;
   private readonly onDocumentLimited: DocumentTreeCacheOptions['onDocumentLimited'];
   private readonly onError: DocumentTreeCacheOptions['onError'];
   private disposed = false;
@@ -152,6 +161,7 @@ export class DocumentTreeCache {
       ?? (() => defaultMaximumDocumentCharacters);
     this.scheduleCallback = options.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs));
     this.cancelCallback = options.cancelSchedule ?? (timer => clearTimeout(timer));
+    this.now = options.now ?? (() => performance.now());
     this.onDocumentLimited = options.onDocumentLimited;
     this.onError = options.onError;
   }
@@ -169,8 +179,12 @@ export class DocumentTreeCache {
   }
 
   public async get(document: TreeDocumentLike): Promise<Tree | undefined> {
+    return (await this.getWithTiming(document)).tree;
+  }
+
+  public async getWithTiming(document: TreeDocumentLike): Promise<DocumentTreeAccess> {
     if (this.disposed || document.isClosed) {
-      return undefined;
+      return { tree: undefined, parseMs: 0 };
     }
 
     const key = document.uri.toString();
@@ -182,14 +196,14 @@ export class DocumentTreeCache {
       && knownLimitation?.version === document.version
       && this.isOverLimit(knownLimitation.characters, configuredMaximum)
     ) {
-      return undefined;
+      return { tree: undefined, parseMs: 0 };
     }
     if (cached && this.exceedsLimit(document, cached.rootNode.endIndex, configuredMaximum)) {
       const pending = this.takePending(key);
-      pending?.resolve(undefined);
+      pending?.resolve({ tree: undefined, parseMs: 0 });
       this.dirtyDocuments.delete(key);
       this.dropTree(key, document);
-      return undefined;
+      return { tree: undefined, parseMs: 0 };
     }
 
     if (!cached) {
@@ -197,7 +211,7 @@ export class DocumentTreeCache {
     }
     this.limitedDocuments.delete(key);
     if (!this.dirtyDocuments.has(key)) {
-      return cached;
+      return { tree: cached, parseMs: 0 };
     }
     return this.pendingParses.get(key)?.promise ?? this.schedule(document);
   }
@@ -205,15 +219,15 @@ export class DocumentTreeCache {
   public flush(document: TreeDocumentLike): Tree | undefined {
     const key = document.uri.toString();
     const pending = this.takePending(key);
-    const tree = this.refresh(document);
-    pending?.resolve(tree);
-    return tree;
+    const access = this.refresh(document);
+    pending?.resolve(access);
+    return access.tree;
   }
 
   public close(document: TreeDocumentLike): void {
     const key = document.uri.toString();
     const pending = this.takePending(key);
-    pending?.resolve(undefined);
+    pending?.resolve({ tree: undefined, parseMs: 0 });
     this.dirtyDocuments.delete(key);
     this.limitedDocuments.delete(key);
     this.dropTree(key, document);
@@ -226,18 +240,18 @@ export class DocumentTreeCache {
     this.disposed = true;
     for (const key of [...this.pendingParses.keys()]) {
       const pending = this.takePending(key);
-      pending?.resolve(undefined);
+      pending?.resolve({ tree: undefined, parseMs: 0 });
     }
     this.dirtyDocuments.clear();
     this.limitedDocuments.clear();
   }
 
-  private schedule(document: TreeDocumentLike): Promise<Tree | undefined> {
+  private schedule(document: TreeDocumentLike): Promise<DocumentTreeAccess> {
     const key = document.uri.toString();
     let pending = this.pendingParses.get(key);
     if (!pending) {
-      let resolve!: (tree: Tree | undefined) => void;
-      const promise = new Promise<Tree | undefined>(resolvePromise => {
+      let resolve!: (access: DocumentTreeAccess) => void;
+      const promise = new Promise<DocumentTreeAccess>(resolvePromise => {
         resolve = resolvePromise;
       });
       pending = { document, promise, resolve, timer: undefined };
@@ -256,19 +270,20 @@ export class DocumentTreeCache {
       }
       this.pendingParses.delete(key);
       current.timer = undefined;
-      const tree = this.refresh(current.document);
-      current.resolve(tree);
+      const access = this.refresh(current.document);
+      current.resolve(access);
     }, this.debounceMs);
     return pending.promise;
   }
 
-  private refresh(document: TreeDocumentLike): Tree | undefined {
+  private refresh(document: TreeDocumentLike): DocumentTreeAccess {
     if (this.disposed || document.isClosed) {
-      return undefined;
+      return { tree: undefined, parseMs: 0 };
     }
     const key = document.uri.toString();
     if (!this.dirtyDocuments.has(key)) {
-      return this.trees[key] ?? this.parseNow(document);
+      const tree = this.trees[key];
+      return tree ? { tree, parseMs: 0 } : this.parseNow(document);
     }
     return this.parseNow(document);
   }
@@ -276,31 +291,34 @@ export class DocumentTreeCache {
   private parseNow(
     document: TreeDocumentLike,
     configuredMaximum = this.maximumDocumentCharacters(document),
-  ): Tree | undefined {
+  ): DocumentTreeAccess {
     const key = document.uri.toString();
     const oldTree = this.trees[key];
     const knownLength = oldTree?.rootNode.endIndex;
     if (knownLength !== undefined && this.exceedsLimit(document, knownLength, configuredMaximum)) {
       this.dirtyDocuments.delete(key);
       this.dropTree(key, document);
-      return undefined;
+      return { tree: undefined, parseMs: 0 };
     }
 
     const source = document.getText();
     if (this.exceedsLimit(document, source.length, configuredMaximum)) {
       this.dirtyDocuments.delete(key);
       this.dropTree(key, document);
-      return undefined;
+      return { tree: undefined, parseMs: 0 };
     }
     this.limitedDocuments.delete(key);
 
     let tree: Tree | null;
+    const parseStartedAt = this.now();
     try {
       tree = this.parser.parse(source, oldTree);
     } catch (error) {
+      const parseMs = Math.max(0, this.now() - parseStartedAt);
       this.handleParseFailure(key, document, oldTree, error);
-      return undefined;
+      return { tree: undefined, parseMs };
     }
+    const parseMs = Math.max(0, this.now() - parseStartedAt);
     if (!tree) {
       try {
         this.parser.reset();
@@ -313,7 +331,7 @@ export class DocumentTreeCache {
         oldTree,
         new Error('[Parser] Parsing was cancelled.'),
       );
-      return undefined;
+      return { tree: undefined, parseMs };
     }
 
     this.trees[key] = tree;
@@ -325,7 +343,7 @@ export class DocumentTreeCache {
         this.onError?.(error, document);
       }
     }
-    return tree;
+    return { tree, parseMs };
   }
 
   private isOverLimit(characters: number, configuredMaximum: number): boolean {
