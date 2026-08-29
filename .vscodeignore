@@ -22,3 +22,4 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 bin/h2o-*
+node_modules/web-tree-sitter/debug/**

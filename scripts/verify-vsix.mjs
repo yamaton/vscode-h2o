@@ -95,6 +95,10 @@ assert.ok(
   dependencyEntries.every(entry => productionPackages.some(package_ => entry.startsWith(`${package_.archivePath}/`))),
   'VSIX contains files outside locked production packages',
 );
+assert.ok(
+  entries.every(entry => !entry.startsWith('extension/node_modules/web-tree-sitter/debug/')),
+  'VSIX contains the unused web-tree-sitter debug runtime',
+);
 assert.ok(entries.every((entry) => !/\.(?:map|ts)$/i.test(entry)), 'VSIX must not contain TypeScript or source maps');
 assert.ok(entries.every((entry) => !/(?:^|\/)(?:test|tests|coverage|artifacts|scripts)(?:\/|$)/i.test(entry)), 'VSIX contains test or build-only files');
 assert.ok(entries.every((entry) => !/(?:^|\/).*copy(?:\.[^/]*)?$/i.test(entry)), 'VSIX contains a stale copy artifact');
