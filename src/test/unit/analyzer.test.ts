@@ -184,9 +184,28 @@ suite('shell command analysis', () => {
         source: 'for file in a b; do echo "$file"; done',
         expected: [{ name: 'echo', arguments: ['"$file"'] }],
       },
+      {
+        source: 'until test -f ready; do sleep 1; done',
+        expected: [
+          { name: 'test', arguments: ['-f', 'ready'] },
+          { name: 'sleep', arguments: ['1'] },
+        ],
+      },
+      {
+        source: 'select choice in a b; do echo "$choice"; done',
+        expected: [{ name: 'echo', arguments: ['"$choice"'] }],
+      },
     ]) {
       assertCompleteCommandAnalyses(source, expected);
     }
+  });
+
+  test('does not invent commands inside arithmetic syntax', () => {
+    assertCompleteCommandAnalyses(
+      'echo $((1 + 2))',
+      [{ name: 'echo', arguments: ['$((1 + 2))'] }],
+    );
+    assertCompleteCommandAnalyses('((a += 1))', []);
   });
 
   test('analyzes substitutions and redirected command bodies', () => {

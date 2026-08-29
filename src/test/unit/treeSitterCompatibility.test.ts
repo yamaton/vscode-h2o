@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import { Edit, Parser } from 'web-tree-sitter';
 import {
   createBashParser,
+  descendantsOfType,
   parseTree,
   snapshotNode,
   withParsedTree,
@@ -101,6 +102,73 @@ suite('web-tree-sitter compatibility', () => {
       withTree(parseTree(parser, updated, editedTree), incremental => {
         withParsedTree(parser, updated, fresh => {
           assert.deepStrictEqual(snapshotNode(incremental.rootNode), snapshotNode(fresh.rootNode));
+        });
+      });
+    });
+  });
+
+  test('rebuilds heredoc scanner state when quoting the delimiter', () => {
+    const original = 'cat <<EOF\n$(git status)\nEOF';
+    const updated = 'cat <<"EOF"\n$(git status)\nEOF';
+
+    withParsedTree(parser, original, editedTree => {
+      assert.deepStrictEqual(
+        descendantsOfType(editedTree.rootNode, 'command').map(node => node.text),
+        ['cat', 'git status'],
+      );
+      editedTree.edit(new Edit({
+        startIndex: 6,
+        oldEndIndex: 9,
+        newEndIndex: 11,
+        startPosition: { row: 0, column: 6 },
+        oldEndPosition: { row: 0, column: 9 },
+        newEndPosition: { row: 0, column: 11 },
+      }));
+
+      withTree(parseTree(parser, updated, editedTree), incremental => {
+        withParsedTree(parser, updated, fresh => {
+          assert.deepStrictEqual(snapshotNode(incremental.rootNode), snapshotNode(fresh.rootNode));
+          assert.deepStrictEqual(
+            descendantsOfType(incremental.rootNode, 'command').map(node => node.text),
+            ['cat'],
+          );
+        });
+      });
+    });
+  });
+
+  test('rebuilds pending heredoc state when renaming the delimiter', () => {
+    const original = 'cat <<EOF\nbody\nEOF';
+    const updated = 'cat <<TAG\nbody\nEOF\nTAG';
+
+    withParsedTree(parser, original, editedTree => {
+      editedTree.edit(new Edit({
+        startIndex: 6,
+        oldEndIndex: 9,
+        newEndIndex: 9,
+        startPosition: { row: 0, column: 6 },
+        oldEndPosition: { row: 0, column: 9 },
+        newEndPosition: { row: 0, column: 9 },
+      }));
+      editedTree.edit(new Edit({
+        startIndex: 18,
+        oldEndIndex: 18,
+        newEndIndex: 22,
+        startPosition: { row: 2, column: 3 },
+        oldEndPosition: { row: 2, column: 3 },
+        newEndPosition: { row: 3, column: 3 },
+      }));
+      assert.strictEqual(editedTree.rootNode.endIndex, updated.length);
+      assert.deepStrictEqual(editedTree.rootNode.endPosition, { row: 3, column: 3 });
+
+      withTree(parseTree(parser, updated, editedTree), incremental => {
+        withParsedTree(parser, updated, fresh => {
+          assert.strictEqual(incremental.rootNode.hasError, false);
+          assert.deepStrictEqual(snapshotNode(incremental.rootNode), snapshotNode(fresh.rootNode));
+          assert.deepStrictEqual(
+            descendantsOfType(incremental.rootNode, 'command').map(node => node.text),
+            ['cat'],
+          );
         });
       });
     });
