@@ -16,7 +16,7 @@ export interface LiveCompletionProviderTrace {
   documentVersion: number;
   position: DebugPosition;
   observedAt: string;
-  outcome: 'pending' | 'suppressed' | 'items' | 'error';
+  outcome: 'pending' | 'suppressed' | 'items' | 'cancelled' | 'error';
   itemCount: number | null;
   fallback: boolean;
   error: string | null;
@@ -27,7 +27,7 @@ export interface LiveHoverProviderTrace {
   documentVersion: number;
   position: DebugPosition;
   observedAt: string;
-  outcome: 'pending' | 'suppressed' | 'hover' | 'none' | 'error';
+  outcome: 'pending' | 'suppressed' | 'hover' | 'none' | 'cancelled' | 'error';
   error: string | null;
 }
 
@@ -135,6 +135,9 @@ function providerResultRow(
     } else if (completion.outcome === 'suppressed') {
       description = 'Suppressed; 0 items';
       icon = 'circle-slash';
+    } else if (completion.outcome === 'cancelled') {
+      description = 'Cancelled';
+      icon = 'circle-slash';
     } else {
       description = 'Error';
       icon = 'error';
@@ -153,6 +156,9 @@ function providerResultRow(
     } else if (hover.outcome === 'none') {
       description = 'No hover';
       icon = 'circle-outline';
+    } else if (hover.outcome === 'cancelled') {
+      description = 'Cancelled';
+      icon = 'circle-slash';
     } else {
       description = 'Error';
       icon = 'error';

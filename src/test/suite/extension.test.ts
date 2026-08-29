@@ -20,7 +20,11 @@ import type {
 	LiveEditorDebugToggleResult,
 	TreeCache,
 } from '../../extension';
-import { CachingFetcher, CachingFetcherDependencies } from '../../cacheFetcher';
+import {
+	CachingFetcher,
+	CachingFetcherDependencies,
+	CommandFetchCancelledError,
+} from '../../cacheFetcher';
 import type { CommandCacheStorage } from '../../cacheStorage';
 import type { Command } from '../../command';
 import { parseTree, withParsedTree } from '../parserTestUtils';
@@ -37,6 +41,7 @@ interface InitialCuratedProbe {
 }
 
 let initialCuratedProbe: InitialCuratedProbe | undefined;
+let registeredCompletionProvider: vscode.CompletionItemProvider | undefined;
 let registeredHoverProvider: vscode.HoverProvider | undefined;
 
 async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Promise<T> {
@@ -605,6 +610,58 @@ async function verifyHoverNoResultContract(): Promise<void> {
 		assert.match(errorState.traces.hover?.error ?? '', /controlled hover lookup failure/);
 	} finally {
 		await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
+		CachingFetcher.prototype.fetch = originalFetch;
+	}
+}
+
+async function verifyProviderCancellationPropagation(): Promise<void> {
+	assert.ok(registeredCompletionProvider);
+	assert.ok(registeredHoverProvider);
+	const originalFetch = CachingFetcher.prototype.fetch;
+	let lookupStarted = deferred<void>();
+	CachingFetcher.prototype.fetch = async function fetch(_name, token): Promise<Command> {
+		assert.ok(token, 'provider cancellation token must reach the command fetch');
+		lookupStarted.resolve();
+		return new Promise<Command>((_resolve, reject) => {
+			token.onCancellationRequested(() => reject(new CommandFetchCancelledError()));
+		});
+	};
+
+	try {
+		const completionDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git --',
+		});
+		const completionCancellation = new vscode.CancellationTokenSource();
+		const completion = Promise.resolve(registeredCompletionProvider.provideCompletionItems(
+			completionDocument,
+			new vscode.Position(0, 6),
+			completionCancellation.token,
+			{ triggerKind: vscode.CompletionTriggerKind.Invoke, triggerCharacter: undefined },
+		));
+		await lookupStarted.promise;
+		completionCancellation.cancel();
+		const completionResult = await withTimeout(completion, 5000);
+		assert.ok(Array.isArray(completionResult));
+		assert.strictEqual(completionResult.length, 0);
+		completionCancellation.dispose();
+
+		lookupStarted = deferred<void>();
+		const hoverDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git',
+		});
+		const hoverCancellation = new vscode.CancellationTokenSource();
+		const hover = Promise.resolve(registeredHoverProvider.provideHover(
+			hoverDocument,
+			new vscode.Position(0, 1),
+			hoverCancellation.token,
+		));
+		await lookupStarted.promise;
+		hoverCancellation.cancel();
+		assert.strictEqual(await withTimeout(hover, 5000), undefined);
+		hoverCancellation.dispose();
+	} finally {
 		CachingFetcher.prototype.fetch = originalFetch;
 	}
 }
@@ -2830,9 +2887,24 @@ function verifyParserResourceDisposalContinuesAfterFailure(): void {
 
 suiteSetup(async () => {
 	const languages = vscode.languages as unknown as {
+		registerCompletionItemProvider: typeof vscode.languages.registerCompletionItemProvider;
 		registerHoverProvider: typeof vscode.languages.registerHoverProvider;
 	};
+	const originalRegisterCompletionItemProvider = languages.registerCompletionItemProvider;
 	const originalRegisterHoverProvider = languages.registerHoverProvider;
+	languages.registerCompletionItemProvider = ((
+		selector: vscode.DocumentSelector,
+		provider: vscode.CompletionItemProvider,
+		...triggerCharacters: string[]
+	) => {
+		registeredCompletionProvider = provider;
+		return originalRegisterCompletionItemProvider.call(
+			vscode.languages,
+			selector,
+			provider,
+			...triggerCharacters,
+		);
+	}) as typeof vscode.languages.registerCompletionItemProvider;
 	languages.registerHoverProvider = ((
 		selector: vscode.DocumentSelector,
 		provider: vscode.HoverProvider,
@@ -2844,8 +2916,10 @@ suiteSetup(async () => {
 	try {
 		await activateExtension();
 	} finally {
+		languages.registerCompletionItemProvider = originalRegisterCompletionItemProvider;
 		languages.registerHoverProvider = originalRegisterHoverProvider;
 	}
+	assert.ok(registeredCompletionProvider, 'activation must register a completion provider');
 	assert.ok(registeredHoverProvider, 'activation must register a hover provider');
 });
 
@@ -2892,6 +2966,7 @@ suite('Parser and provider behavior', () => {
 		});
 	});
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
+	test('propagates provider cancellation into command lookup', verifyProviderCancellationPropagation);
 	test('resolves normal hover misses without rejecting', verifyHoverNoResultContract);
 	test('separates command names from command-spec resolution', verifyCommandNameCompletionLifecycle);
 	test('keeps live completion debug aligned with command-name completion', verifyCommandNameLiveDebugDoesNotResolvePrefixes);

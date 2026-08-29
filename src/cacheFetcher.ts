@@ -1,10 +1,12 @@
-import { spawnSync } from 'child_process';
-import * as path from 'path';
 import type { Memento } from 'vscode';
-import type * as Vscode from 'vscode';
 import { Command } from './command';
 import fetch from 'node-fetch';
 import type { Response } from 'node-fetch';
+import {
+  CancellationTokenLike,
+  waitForValueOrCancellation,
+} from './cancellable';
+import { ProcessExecutionError, runH2o } from './h2oRunner';
 import {
   CommandCacheSnapshot,
   CommandCacheStorage,
@@ -15,26 +17,9 @@ import {
   validateCommandsYielding,
 } from './cacheStorage';
 
-let neverNotifiedError = true;
-
-
-interface SpawnResult {
-  error?: Error;
-  status: number | null;
-  stdout?: string | Buffer;
-}
-
-export interface H2oRuntime {
-  extensionDir: string;
-  platform: NodeJS.Platform;
-  getConfiguredPath(): string;
-  showErrorMessage(message: string): void;
-  spawn(command: string, args: string[]): SpawnResult;
-}
-
 export interface CachingFetcherDependencies {
   fetch(url: string, timeoutMs: number): Promise<Response>;
-  runLocalCommand(name: string): Command | undefined;
+  runLocalCommand(name: string, signal: AbortSignal): Promise<Command | undefined>;
   requestTimeoutMs: number;
   cacheStorage?: CommandCacheStorage;
 }
@@ -44,75 +29,37 @@ export interface CommandNameSnapshot {
   initialCuratedPending: boolean;
 }
 
-function createDefaultH2oRuntime(): H2oRuntime {
-  // `vscode` is only available inside the extension host. Loading it lazily
-  // keeps the command runner testable in a plain Node.js process.
-  const vscode = require('vscode') as typeof Vscode;
-  return {
-    extensionDir: __dirname,
-    platform: process.platform,
-    getConfiguredPath: () => vscode.workspace.getConfiguration('shellCompletion').get('h2oPath') as string,
-    showErrorMessage: (message: string) => {
-      void vscode.window.showErrorMessage(message);
-    },
-    spawn: (command: string, args: string[]) => spawnSync(command, args, { encoding: 'utf8', timeout: 10000 }),
-  };
-}
-
 const defaultDependencies: CachingFetcherDependencies = {
   // node-fetch v2 implements its own timeout, so this remains compatible with
   // the Node.js version embedded in the minimum supported VS Code (1.101).
   fetch: (url: string, timeoutMs: number) => fetch(url, { timeout: timeoutMs }),
-  runLocalCommand: (name: string) => runH2o(name),
+  runLocalCommand: (name: string, signal: AbortSignal) => runH2o(name, undefined, signal),
   requestTimeoutMs: 10000,
   cacheStorage: undefined,
 };
 
+export class CommandFetchCancelledError extends Error {
+  constructor(message = 'Command fetch was cancelled.') {
+    super(message);
+    this.name = 'CommandFetchCancelledError';
+  }
+}
 
-// -----
-// Call H2O executable and get command information from the local environment
-export function runH2o(name: string, runtime: H2oRuntime = createDefaultH2oRuntime()): Command | undefined {
-  let h2opath = runtime.getConfiguredPath();
-  if (h2opath === '<bundled>') {
-    if (runtime.platform !== 'linux' && runtime.platform !== 'darwin') {
-      if (neverNotifiedError) {
-        const msg = "Bundled help scanner (H2O) supports Linux and MacOS. Please set the H2O path.";
-        runtime.showErrorMessage(msg);
-      }
-      neverNotifiedError = false;
-      return undefined;
-    }
-    h2opath = path.join(runtime.extensionDir, '../bin/h2o');
-  }
+type LocalFetchState = 'queued' | 'running' | 'persisting' | 'settled';
 
-  const wrapperPath = path.join(runtime.extensionDir, '../bin/wrap-h2o');
-  console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
-  const proc = runtime.spawn(wrapperPath, [h2opath, name]);
-  if (proc.error) {
-    console.warn(`[CacheFetcher.runH2o] Failed to run H2O for ${name}: ${proc.error.message}`);
-    return undefined;
-  }
-  if (proc.status !== 0) {
-    console.log(`[CacheFetcher.runH2o] H2O raises error for ${name}`);
-    return undefined;
-  }
-  console.log(`[CacheFetcher.runH2o] proc.status = ${proc.status}`);
-  const out = proc.stdout;
-  if (out) {
-    try {
-      const command = validateCommands([JSON.parse(out.toString()) as unknown])[0];
-      if (command.name !== name) {
-        throw new Error(`H2O returned ${command.name} for requested command ${name}.`);
-      }
-      console.log(`[CacheFetcher.runH2o] Got command output: ${command.name}`);
-      return command;
-    } catch (error) {
-      console.warn('[CacheFetcher.runH2o] Failed to parse H2O result as JSON:', name, error);
-    }
-  } else {
-    console.warn('[CacheFetcher.runH2o] Failed to get H2O output:', name);
-  }
-  return undefined;
+interface LocalFetchEntry {
+  readonly name: string;
+  readonly controller: AbortController;
+  readonly promise: Promise<Command>;
+  readonly resolve: (command: Command) => void;
+  readonly reject: (error: unknown) => void;
+  state: LocalFetchState;
+  subscribers: number;
+}
+
+interface CacheMutation {
+  readonly revision: number;
+  readonly persistence: Promise<void>;
 }
 
 
@@ -126,12 +73,17 @@ export class CachingFetcher {
 
   private readonly dependencies: CachingFetcherDependencies;
   private commands = new Map<string, Command>();
+  private cacheRevision = 0;
   private readonly removedNames = new Set<string>();
   private saveChain: Promise<void> = Promise.resolve();
   private persistenceEnabled = true;
   private initialCuratedAvailability: Promise<void> | undefined;
   private initialCuratedCompletion: Promise<void> | undefined;
   private initialCuratedPending = false;
+  private readonly localFetches = new Map<string, LocalFetchEntry>();
+  private readonly localFetchQueue: LocalFetchEntry[] = [];
+  private activeLocalFetch: LocalFetchEntry | undefined;
+  private disposed = false;
 
   constructor(
     private memento: Memento,
@@ -212,7 +164,17 @@ export class CachingFetcher {
     return save;
   }
 
-  private async updateCache(name: string, command: Command | undefined, logging: boolean = false): Promise<void> {
+  private commitCommands(commands: Map<string, Command>): CacheMutation {
+    this.commands = commands;
+    const revision = ++this.cacheRevision;
+    return { revision, persistence: this.persist() };
+  }
+
+  private commitCacheUpdate(
+    name: string,
+    command: Command | undefined,
+    logging: boolean = false,
+  ): CacheMutation {
     if (command && command.name !== name) {
       throw new Error(`Received command ${command.name} for requested command ${name}.`);
     }
@@ -228,18 +190,27 @@ export class CachingFetcher {
       next.delete(name);
       this.removedNames.add(name);
     }
-    this.commands = next;
-    await this.persist();
-    if (logging) {
-      console.log(`[CacheFetcher.update] ${name}: Cache snapshot update took ${Date.now() - startedAt} ms.`);
-    }
+    const mutation = this.commitCommands(next);
+    const persistence = mutation.persistence.then(() => {
+      if (logging) {
+        console.log(`[CacheFetcher.update] ${name}: Cache snapshot update took ${Date.now() - startedAt} ms.`);
+      }
+    });
+    return { revision: mutation.revision, persistence };
+  }
+
+  private async updateCache(name: string, command: Command | undefined, logging: boolean = false): Promise<void> {
+    await this.commitCacheUpdate(name, command, logging).persistence;
   }
 
 
-  // Get command data from cache first, then run H2O if fails.
-  public async fetch(name: string): Promise<Command> {
+  // Get command data from cache first, then run H2O if it is unavailable.
+  public async fetch(name: string, cancellationToken?: CancellationTokenLike): Promise<Command> {
     if (name.length < 2) {
       return Promise.reject(`Command name too short: ${name}`);
+    }
+    if (this.disposed || cancellationToken?.isCancellationRequested) {
+      throw new CommandFetchCancelledError();
     }
 
     let cached = this.commands.get(name);
@@ -249,7 +220,17 @@ export class CachingFetcher {
     }
 
     if (this.initialCuratedAvailability) {
-      await this.initialCuratedAvailability;
+      if (cancellationToken) {
+        const availability = await waitForValueOrCancellation(
+          this.initialCuratedAvailability,
+          cancellationToken,
+        );
+        if (!availability.completed) {
+          throw new CommandFetchCancelledError();
+        }
+      } else {
+        await this.initialCuratedAvailability;
+      }
       cached = this.commands.get(name);
       if (cached) {
         console.log('[CacheFetcher.fetch] Fetching from newly available curated cache:', name);
@@ -257,34 +238,222 @@ export class CachingFetcher {
       }
     }
 
-    console.log('[CacheFetcher.fetch] Fetching from H2O:', name);
-    try {
-      const command = this.dependencies.runLocalCommand(name);
-      if (!command) {
-        console.warn(`[CacheFetcher.fetch] Failed to fetch command ${name} from H2O`);
-        return Promise.reject(`Failed to fetch command ${name} from H2O`);
-      }
-      if (command.name !== name) {
-        console.warn(`[CacheFetcher.fetch] H2O returned ${command.name} for requested command ${name}`);
-        return Promise.reject(`H2O returned ${command.name} for requested command ${name}`);
-      }
-      let validated: Command;
-      try {
-        validated = validateCommands([command])[0];
-      } catch (error) {
-        console.warn(`[CacheFetcher.fetch] H2O returned invalid command data for ${name}:`, error);
-        return Promise.reject(`H2O returned invalid command data for ${name}`);
-      }
-      try {
-        await this.updateCache(name, validated, true);
-      } catch (e) {
-        console.log("Failed to update:", e);
-      }
-      return validated;
+    if (this.disposed || cancellationToken?.isCancellationRequested) {
+      throw new CommandFetchCancelledError();
+    }
 
-    } catch (e) {
-      console.log("[CacheFetcher.fetch] Error: ", e);
-      return Promise.reject(`[CacheFetcher.fetch] Failed in CacheFetcher.update() with name = ${name}`);
+    let entry = this.localFetches.get(name);
+    if (entry?.controller.signal.aborted) {
+      entry = undefined;
+    }
+    if (entry) {
+      entry.subscribers += 1;
+    } else {
+      entry = this.createLocalFetch(name);
+    }
+
+    try {
+      if (!cancellationToken) {
+        return await entry.promise;
+      }
+      const result = await waitForValueOrCancellation(entry.promise, cancellationToken);
+      if (!result.completed) {
+        throw new CommandFetchCancelledError();
+      }
+      return result.value;
+    } finally {
+      this.releaseLocalFetch(entry);
+    }
+  }
+
+  private createLocalFetch(name: string): LocalFetchEntry {
+    let resolve!: (command: Command) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<Command>((resolvePromise, rejectPromise) => {
+      resolve = resolvePromise;
+      reject = rejectPromise;
+    });
+    // Cancellation can settle the subscriber before the scan observes its
+    // AbortSignal. Keep that later rejection from becoming unhandled.
+    void promise.catch(() => undefined);
+    const entry: LocalFetchEntry = {
+      name,
+      controller: new AbortController(),
+      promise,
+      resolve,
+      reject,
+      state: 'queued',
+      subscribers: 1,
+    };
+    this.localFetches.set(name, entry);
+    this.localFetchQueue.push(entry);
+    this.startNextLocalFetch();
+    return entry;
+  }
+
+  private startNextLocalFetch(): void {
+    if (this.activeLocalFetch || this.disposed) {
+      return;
+    }
+    let entry: LocalFetchEntry | undefined;
+    while ((entry = this.localFetchQueue.shift())) {
+      if (entry.state === 'queued' && entry.subscribers > 0) {
+        break;
+      }
+      entry = undefined;
+    }
+    if (!entry) {
+      return;
+    }
+
+    this.activeLocalFetch = entry;
+    entry.state = 'running';
+    void this.executeLocalFetch(entry).then(command => {
+      entry.state = 'settled';
+      entry.resolve(command);
+    }, error => {
+      entry.state = 'settled';
+      entry.reject(error);
+    }).finally(() => {
+      if (this.localFetches.get(entry.name) === entry) {
+        this.localFetches.delete(entry.name);
+      }
+      if (this.activeLocalFetch === entry) {
+        this.activeLocalFetch = undefined;
+      }
+      this.startNextLocalFetch();
+    });
+  }
+
+  private async executeLocalFetch(entry: LocalFetchEntry): Promise<Command> {
+    const cached = this.commands.get(entry.name);
+    if (cached) {
+      return cached;
+    }
+
+    console.log('[CacheFetcher.fetch] Fetching from H2O:', entry.name);
+    let command: Command | undefined;
+    try {
+      command = await this.dependencies.runLocalCommand(entry.name, entry.controller.signal);
+    } catch (error) {
+      if (entry.controller.signal.aborted
+        || (error instanceof ProcessExecutionError && error.kind === 'aborted')) {
+        throw new CommandFetchCancelledError();
+      }
+      console.log('[CacheFetcher.fetch] Error:', error);
+      throw new Error(`[CacheFetcher.fetch] Failed in CacheFetcher.update() with name = ${entry.name}`);
+    }
+
+    if (entry.controller.signal.aborted) {
+      throw new CommandFetchCancelledError();
+    }
+    if (!command) {
+      console.warn(`[CacheFetcher.fetch] Failed to fetch command ${entry.name} from H2O`);
+      throw new Error(`Failed to fetch command ${entry.name} from H2O`);
+    }
+    if (command.name !== entry.name) {
+      console.warn(`[CacheFetcher.fetch] H2O returned ${command.name} for requested command ${entry.name}`);
+      throw new Error(`H2O returned ${command.name} for requested command ${entry.name}`);
+    }
+
+    let validated: Command;
+    try {
+      validated = validateCommands([command])[0];
+    } catch (error) {
+      console.warn(`[CacheFetcher.fetch] H2O returned invalid command data for ${entry.name}:`, error);
+      throw new Error(`H2O returned invalid command data for ${entry.name}`);
+    }
+
+    // Curated or explicitly downloaded data that arrived during the scan is
+    // authoritative and must not be replaced by a stale local result.
+    const newlyCached = this.commands.get(entry.name);
+    if (newlyCached) {
+      return newlyCached;
+    }
+    if (entry.controller.signal.aborted) {
+      throw new CommandFetchCancelledError();
+    }
+
+    entry.state = 'persisting';
+    const mutation = this.commitCacheUpdate(entry.name, validated, true);
+    try {
+      await mutation.persistence;
+    } catch (error) {
+      console.log('[CacheFetcher.fetch] Failed to persist command cache:', error);
+    }
+    return this.resolveCommittedLocalResult(entry, validated, mutation.revision);
+  }
+
+  private async resolveCommittedLocalResult(
+    entry: LocalFetchEntry,
+    local: Command,
+    localRevision: number,
+  ): Promise<Command> {
+    while (true) {
+      if (entry.controller.signal.aborted) {
+        throw new CommandFetchCancelledError();
+      }
+      const observedRevision = this.cacheRevision;
+      if (observedRevision === localRevision) {
+        return local;
+      }
+
+      // A curated download, explicit download, or removal published a newer
+      // snapshot while the local snapshot was being saved. Wait for the newest
+      // observed snapshot's persistence before returning its authoritative value.
+      const persistence = this.saveChain;
+      try {
+        await persistence;
+      } catch {
+        // Cache reads continue to use the in-memory snapshot when persistence
+        // is unavailable, matching updateCache's existing behavior.
+      }
+      if (observedRevision !== this.cacheRevision) {
+        continue;
+      }
+      if (entry.controller.signal.aborted) {
+        throw new CommandFetchCancelledError();
+      }
+      const current = this.commands.get(entry.name);
+      if (!current) {
+        throw new CommandFetchCancelledError();
+      }
+      return current;
+    }
+  }
+
+  private releaseLocalFetch(entry: LocalFetchEntry): void {
+    entry.subscribers = Math.max(0, entry.subscribers - 1);
+    if (entry.subscribers !== 0) {
+      return;
+    }
+
+    if (entry.state === 'queued') {
+      entry.state = 'settled';
+      entry.controller.abort();
+      entry.reject(new CommandFetchCancelledError());
+      if (this.localFetches.get(entry.name) === entry) {
+        this.localFetches.delete(entry.name);
+      }
+      this.startNextLocalFetch();
+      return;
+    }
+    if (entry.state === 'running' || entry.state === 'persisting') {
+      entry.controller.abort();
+    }
+  }
+
+  private cancelLocalFetch(name: string): void {
+    const entry = this.localFetches.get(name);
+    if (!entry || entry.state === 'settled') {
+      return;
+    }
+    entry.controller.abort();
+    if (entry.state === 'queued') {
+      entry.state = 'settled';
+      entry.reject(new CommandFetchCancelledError());
+      this.localFetches.delete(name);
+      this.startNextLocalFetch();
     }
   }
 
@@ -323,6 +492,9 @@ export class CachingFetcher {
     isForcing: boolean,
     markAvailable?: () => void,
   ): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
     console.log("[CacheFetcher.fetchAllCurated] Started running...");
     const url = `https://github.com/yamaton/h2o-curated-data/raw/main/${kind}.json.gz`;
     const response = await this.fetchResponse(url);
@@ -338,6 +510,10 @@ export class CachingFetcher {
     }
     console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Command #:", commands.length);
 
+    if (this.disposed) {
+      return;
+    }
+
     const next = new Map(this.commands);
     let inserted = false;
     for (const cmd of commands) {
@@ -349,16 +525,21 @@ export class CachingFetcher {
         }
       }
     }
-    this.commands = next;
-    markAvailable?.();
     if (isForcing || inserted) {
-      await this.persist();
+      const mutation = this.commitCommands(next);
+      markAvailable?.();
+      await mutation.persistence;
+    } else {
+      markAvailable?.();
     }
   }
 
 
   // Download the command `name` from the remote repository
   public async downloadCommandToCache(name: string, kind = 'experimental'): Promise<void> {
+    if (this.disposed) {
+      return;
+    }
     console.log(`[CacheFetcher.downloadCommand] Started getting ${name} in ${kind}...`);
     const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}/json/${name}.json`;
     const response = await this.fetchResponse(url);
@@ -374,6 +555,9 @@ export class CachingFetcher {
       return Promise.reject(msg);
     }
 
+    if (this.disposed) {
+      return;
+    }
     console.log(`[CacheFetcher.downloadCommand] Loading: ${cmd.name}`);
     await this.updateCache(name, cmd, true);
   }
@@ -424,6 +608,7 @@ export class CachingFetcher {
 
   // Unset cache data of command `name` by assigning undefined
   public async unset(name: string): Promise<void> {
+    this.cancelLocalFetch(name);
     if (!this.commands.has(name)) {
       this.removedNames.add(name);
       console.log(`[CacheFetcher.unset] ${name} was not cached`);
@@ -437,12 +622,14 @@ export class CachingFetcher {
     const next = new Map(this.commands);
     let removed = false;
     for (const name of names) {
+      this.cancelLocalFetch(name);
       removed = next.delete(name) || removed;
       this.removedNames.add(name);
     }
-    this.commands = next;
     if (removed) {
-      await this.persist();
+      await this.commitCommands(next).persistence;
+    } else {
+      this.commands = next;
     }
     console.log(`[CacheFetcher.unsetAll] Unset ${names.length} commands`);
   }
@@ -461,6 +648,26 @@ export class CachingFetcher {
 
   public waitForInitialCuratedAvailability(): Promise<void> {
     return this.initialCuratedAvailability ?? Promise.resolve();
+  }
+
+  public dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    this.activeLocalFetch?.controller.abort();
+    for (const entry of this.localFetchQueue) {
+      if (entry.state !== 'queued') {
+        continue;
+      }
+      entry.state = 'settled';
+      entry.controller.abort();
+      entry.reject(new CommandFetchCancelledError());
+      if (this.localFetches.get(entry.name) === entry) {
+        this.localFetches.delete(entry.name);
+      }
+    }
+    this.localFetchQueue.length = 0;
   }
 
 }

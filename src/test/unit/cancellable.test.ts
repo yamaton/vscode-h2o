@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { waitForPromiseOrCancellation } from '../../cancellable';
+import { waitForPromiseOrCancellation, waitForValueOrCancellation } from '../../cancellable';
 
 class FakeCancellationToken {
   public isCancellationRequested = false;
@@ -61,6 +61,16 @@ suite('cancellable promise waiting', () => {
 
     operation.resolve();
     assert.strictEqual(await waiting, true);
+    assert.strictEqual(token.listenerCount, 0);
+  });
+
+  test('returns a completed operation value', async () => {
+    const token = new FakeCancellationToken();
+
+    assert.deepStrictEqual(await waitForValueOrCancellation(Promise.resolve(42), token), {
+      completed: true,
+      value: 42,
+    });
     assert.strictEqual(token.listenerCount, 0);
   });
 });

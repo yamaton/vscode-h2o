@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import { Edit, Language, Node, Parser, Point, Tree } from 'web-tree-sitter';
-import { CachingFetcher } from './cacheFetcher';
+import { CachingFetcher, CommandFetchCancelledError } from './cacheFetcher';
 import { GzipCommandCacheStorage } from './cacheStorage';
 import { Option, Command } from './command';
 import {
@@ -309,6 +309,7 @@ async function registerExtension(
     ),
   });
   const fetcher = new CachingFetcher(context.globalState, { cacheStorage });
+  activationRegistrations.push(fetcher);
   await fetcher.init();
   const initialCuratedFetch = fetcher.startInitialCuratedFetch("general");
   void initialCuratedFetch.catch(() => {
@@ -366,7 +367,7 @@ async function registerExtension(
                 token,
               );
               if (!available) {
-                trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
+                trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
                 return [];
               }
               snapshot = fetcher.getCommandNameSnapshot();
@@ -375,7 +376,7 @@ async function registerExtension(
               );
             }
             if (token.isCancellationRequested) {
-              trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
+              trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
               return [];
             }
 
@@ -398,6 +399,7 @@ async function registerExtension(
               resolvedPosition,
               fetcher,
               includeCurrentArgument,
+              token,
             );
             if (!commandContext) {
               trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
@@ -434,6 +436,10 @@ async function registerExtension(
               throw new Error("unknown command");
             }
           } catch (e) {
+            if (e instanceof CommandFetchCancelledError) {
+              trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
+              return [];
+            }
             console.warn("[Completion] No completion item is available (1)", e);
             trackLiveCompletionResult(liveTraceRequest, 'items', {
               itemCount: 0,
@@ -476,8 +482,14 @@ async function registerExtension(
             cursorDecision.commandNode,
             cursor,
             fetcher,
+            true,
+            token,
           );
         } catch (e) {
+          if (e instanceof CommandFetchCancelledError) {
+            trackLiveHoverResult(liveTraceRequest, 'cancelled');
+            return undefined;
+          }
           trackLiveHoverResult(liveTraceRequest, 'error', debugError(e));
           return undefined;
         }
@@ -1825,6 +1837,7 @@ async function getCommandNodeResolution(
   position: vscode.Position,
   fetcher: CachingFetcher,
   includeArgumentAtPosition = true,
+  cancellationToken?: vscode.CancellationToken,
 ): Promise<ResolvedCommandContext | undefined> {
   const invocation = getCommandInvocationToPosition(
     commandNode,
@@ -1835,7 +1848,7 @@ async function getCommandNodeResolution(
     return undefined;
   }
 
-  const command = await fetcher.fetch(invocation.name.text);
+  const command = await fetcher.fetch(invocation.name.text, cancellationToken);
   return {
     invocation,
     resolution: resolveCommandPath(command, invocation.arguments),

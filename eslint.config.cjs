@@ -32,4 +32,17 @@ module.exports = [
       semi: 'error',
     },
   },
+  {
+    files: ['src/**/*.ts'],
+    ignores: ['src/test/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [{
+          name: 'child_process',
+          importNames: ['execFileSync', 'execSync', 'spawnSync'],
+          message: 'Synchronous child processes block the VS Code Extension Host.',
+        }],
+      }],
+    },
+  },
 ];

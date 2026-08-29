@@ -114,7 +114,7 @@ async function runPhase(context: vscode.ExtensionContext, phase: string): Promis
     const restoreMode = Number(process.env.VSCODE_H2O_STORAGE_RESTORE_MODE);
     const fetcher = new CachingFetcher(context.globalState, {
       cacheStorage: storage,
-      runLocalCommand: () => command('git', 'session only'),
+      runLocalCommand: async () => command('git', 'session only'),
     });
     try {
       await fetcher.init();
@@ -131,7 +131,7 @@ async function runPhase(context: vscode.ExtensionContext, phase: string): Promis
     const mismatchSnapshot = vscode.Uri.joinPath(context.globalStorageUri, 'mismatch.json.gz');
     const mismatchFetcher = new CachingFetcher(context.globalState, {
       cacheStorage: storageFor(context, 'mismatch.json.gz'),
-      runLocalCommand: () => command('wrong-local'),
+      runLocalCommand: async () => command('wrong-local'),
       fetch: async () => new Response(JSON.stringify(command('wrong-remote')), { status: 200 }),
     });
     await mismatchFetcher.init();

@@ -45,6 +45,7 @@ const requiredFiles = [
   'extension/out/completionTarget.js',
   'extension/out/debugView.js',
   'extension/out/extension.js',
+  'extension/out/h2oRunner.js',
   'extension/out/parserLanguage.js',
   'extension/out/providerContext.js',
   'extension/out/utils.js',
