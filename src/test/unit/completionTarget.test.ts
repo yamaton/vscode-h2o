@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { Node, Point } from 'web-tree-sitter';
-import { getCommandNameCompletionContext } from '../../completionTarget';
+import { getCompletionLookupTarget } from '../../completionTarget';
 import { createBashParser, withFirstNamedNode } from '../parserTestUtils';
 
 suite('command-name completion targets', () => {
@@ -20,26 +20,29 @@ suite('command-name completion targets', () => {
     const source = markedSource.slice(0, caretOffset) + markedSource.slice(caretOffset + 1);
     const position: Point = { row: 0, column: caretOffset };
     return withFirstNamedNode(parser, source, (command: Node) =>
-      getCommandNameCompletionContext(command, position)
+      getCompletionLookupTarget(command, position)
     );
   }
 
-  test('recognizes a mid-word caret but does not mark it as a completion target', () => {
-    const completion = target('mamb|x');
-    assert.deepStrictEqual(completion, {
-      atWordEnd: false,
-      word: {
-        text: 'mambx',
-        startPosition: { row: 0, column: 0 },
-        endPosition: { row: 0, column: 5 },
-      },
-    });
+  test('suppresses completion in the middle of an effective command name', () => {
+    assert.deepStrictEqual(target('mamb|x'), { kind: 'none' });
   });
 
   test('recognizes one-character, partial, and exact command names', () => {
-    assert.strictEqual(target('m|')?.atWordEnd, true);
-    assert.strictEqual(target('mamb|')?.atWordEnd, true);
-    assert.strictEqual(target('mamba|')?.atWordEnd, true);
+    for (const markedSource of ['m|', 'mamb|', 'mamba|']) {
+      assert.strictEqual(target(markedSource).kind, 'command-name', markedSource);
+    }
+    assert.deepStrictEqual(target('mamb|'), {
+      kind: 'command-name',
+      context: {
+        atWordEnd: true,
+        word: {
+          text: 'mamb',
+          startPosition: { row: 0, column: 0 },
+          endPosition: { row: 0, column: 4 },
+        },
+      },
+    });
   });
 
   test('uses effective names behind assignments and transparent wrappers', () => {
@@ -50,18 +53,31 @@ suite('command-name completion targets', () => {
       'sudo -- mamb|',
       'nohup sudo -u root -- mamb|',
     ]) {
-      assert.strictEqual(target(markedSource)?.atWordEnd, true, markedSource);
+      assert.strictEqual(target(markedSource).kind, 'command-name', markedSource);
     }
   });
 
   test('keeps an incomplete transparent wrapper available as a command name', () => {
-    assert.strictEqual(target('sudo|')?.atWordEnd, true);
-    assert.strictEqual(target('nohup|')?.atWordEnd, true);
+    assert.strictEqual(target('sudo|').kind, 'command-name');
+    assert.strictEqual(target('nohup|').kind, 'command-name');
   });
 
-  test('does not treat command arguments or wrapper options as command names', () => {
-    assert.strictEqual(target('mamba ar|g'), undefined);
-    assert.strictEqual(target('sudo -u ro|ot'), undefined);
-    assert.strictEqual(target('nohup --he|lp'), undefined);
+  test('suppresses lookup before an effective command name', () => {
+    for (const markedSource of [
+      'sudo| mamba',
+      'sudo | mamba',
+      'nohup| git',
+      'FOO=bar sudo| mamba',
+      'sudo nohup| mamba',
+      'sudo -u ro|ot mamba',
+    ]) {
+      assert.deepStrictEqual(target(markedSource), { kind: 'none' }, markedSource);
+    }
+  });
+
+  test('uses command-spec lookup for arguments and unresolved wrapper options', () => {
+    assert.deepStrictEqual(target('mamba ar|g'), { kind: 'command-spec' });
+    assert.deepStrictEqual(target('sudo -u ro|ot'), { kind: 'command-spec' });
+    assert.deepStrictEqual(target('nohup --he|lp'), { kind: 'command-spec' });
   });
 });

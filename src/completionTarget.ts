@@ -9,6 +9,11 @@ export interface CommandNameCompletionContext {
   atWordEnd: boolean;
 }
 
+export type CompletionLookupTarget =
+  | { kind: 'command-name'; context: CommandNameCompletionContext }
+  | { kind: 'command-spec' }
+  | { kind: 'none' };
+
 function comparePoints(left: Point, right: Point): number {
   return left.row === right.row ? left.column - right.column : left.row - right.row;
 }
@@ -36,16 +41,21 @@ function completionContext(
   };
 }
 
-export function getCommandNameCompletionContext(
+export function getCompletionLookupTarget(
   commandNode: Node | null | undefined,
   position: Point,
-): CommandNameCompletionContext | undefined {
+): CompletionLookupTarget {
   const invocation = getCommandInvocationToPosition(commandNode, position, true);
   if (invocation) {
     const effectiveContext = completionContext(invocation.name, position);
     if (effectiveContext) {
-      return effectiveContext;
+      return effectiveContext.atWordEnd
+        ? { kind: 'command-name', context: effectiveContext }
+        : { kind: 'none' };
     }
+    return comparePoints(position, invocation.name.startPosition) < 0
+      ? { kind: 'none' }
+      : { kind: 'command-spec' };
   }
 
   // A standalone transparent wrapper (for example `sudo|`) has no effective
@@ -53,11 +63,17 @@ export function getCommandNameCompletionContext(
   // target.
   const syntaxName = commandNode?.childForFieldName('name');
   if (!syntaxName) {
-    return undefined;
+    return { kind: 'command-spec' };
   }
-  return completionContext({
+  const syntaxContext = completionContext({
     text: syntaxName.text,
     startPosition: syntaxName.startPosition,
     endPosition: syntaxName.endPosition,
   }, position);
+  if (!syntaxContext) {
+    return { kind: 'command-spec' };
+  }
+  return syntaxContext.atWordEnd
+    ? { kind: 'command-name', context: syntaxContext }
+    : { kind: 'none' };
 }

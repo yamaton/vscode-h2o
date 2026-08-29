@@ -634,15 +634,17 @@ async function verifyCommandNameCompletionLifecycle(): Promise<void> {
 	const originalGetCommandNameSnapshot = CachingFetcher.prototype.getCommandNameSnapshot;
 	const originalWaitForInitialCuratedAvailability = CachingFetcher.prototype.waitForInitialCuratedAvailability;
 	let commandNameSnapshot = {
-		names: ['conda', 'make', 'mamba'],
+		names: ['conda', 'make', 'mamba', 'nohup', 'sudo', 'sudoedit'],
 		initialCuratedPending: true,
 	};
 	let availability = deferred<void>();
 	let availabilityRequested = deferred<void>();
 	let availabilityWaits = 0;
+	let commandNameSnapshotReads = 0;
 	const fetchedNames: string[] = [];
 
 	CachingFetcher.prototype.getCommandNameSnapshot = function getCommandNameSnapshot() {
+		commandNameSnapshotReads += 1;
 		return commandNameSnapshot;
 	};
 	CachingFetcher.prototype.waitForInitialCuratedAvailability = function waitForInitialCuratedAvailability() {
@@ -660,6 +662,10 @@ async function verifyCommandNameCompletionLifecycle(): Promise<void> {
 			subcommands: [{
 				name: 'create',
 				description: 'controlled mamba subcommand',
+				options: [],
+			}, {
+				name: 'sudo-run',
+				description: 'must not be offered while editing a wrapper',
 				options: [],
 			}],
 		};
@@ -680,6 +686,8 @@ async function verifyCommandNameCompletionLifecycle(): Promise<void> {
 			{ content: 'm', expected: 'mamba' },
 			{ content: 'mamba', expected: 'mamba' },
 			{ content: 'cond', expected: 'conda' },
+			{ content: 'sudo', expected: 'sudo' },
+			{ content: 'nohup', expected: 'nohup' },
 			{ content: 'sudo mamb', expected: 'mamba' },
 			{ content: 'FOO=bar mamb', expected: 'mamba' },
 		]) {
@@ -691,6 +699,25 @@ async function verifyCommandNameCompletionLifecycle(): Promise<void> {
 		}
 		assert.strictEqual(availabilityWaits, 0);
 		assert.deepStrictEqual(fetchedNames, []);
+
+		const snapshotReadsBeforeBlockedPositions = commandNameSnapshotReads;
+		for (const scenario of [
+			{ content: 'sudo mamba', position: new vscode.Position(0, 4) },
+			{ content: 'sudo  mamba', position: new vscode.Position(0, 5) },
+			{ content: 'sudo \\\n  mamba', position: new vscode.Position(1, 1) },
+			{ content: 'nohup git', position: new vscode.Position(0, 5) },
+			{ content: 'sudo nohup mamba', position: new vscode.Position(0, 10) },
+			{ content: 'sudo -u root mamba', position: new vscode.Position(0, 10) },
+		]) {
+			const document = await vscode.workspace.openTextDocument({
+				language: 'shellscript',
+				content: scenario.content,
+			});
+			await completionLabelsAt(document, scenario.position);
+		}
+		assert.deepStrictEqual(fetchedNames, []);
+		assert.strictEqual(commandNameSnapshotReads, snapshotReadsBeforeBlockedPositions);
+		assert.strictEqual(availabilityWaits, 0);
 
 		const midwordDocument = await vscode.workspace.openTextDocument({
 			language: 'shellscript',
@@ -792,6 +819,36 @@ async function verifyCommandNameLiveDebugDoesNotResolvePrefixes(): Promise<void>
 		assert.strictEqual(enabled.snapshot?.completion.invocation?.name.text, 'mamb');
 		assert.strictEqual(enabled.snapshot?.completion.resolution, null);
 		assert.strictEqual(enabled.snapshot?.completion.lookupError, null);
+
+		await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
+		const blockedDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'sudo mamba',
+		});
+		const blockedEditor = await vscode.window.showTextDocument(blockedDocument, { preview: false });
+		const wrapperEnd = new vscode.Position(0, 4);
+		blockedEditor.selection = new vscode.Selection(wrapperEnd, wrapperEnd);
+		const blocked = await withTimeout(
+			vscode.commands.executeCommand<LiveEditorDebugToggleResult>(
+				'h2o.toggleLiveCaretAndCursorContext',
+				true,
+			),
+			5000,
+		);
+		assert.strictEqual(fetchCalls, 0);
+		assert.strictEqual(blocked.snapshot?.completion.lookupKind, 'none');
+		assert.strictEqual(blocked.snapshot?.completion.invocation?.name.text, 'mamba');
+		assert.strictEqual(blocked.snapshot?.completion.resolution, null);
+		assert.strictEqual(blocked.snapshot?.completion.lookupError, null);
+
+		await completionLabelsAt(blockedDocument, wrapperEnd);
+		const blockedState = await vscode.commands.executeCommand<LiveEditorDebugState>(
+			'h2o.getLiveCaretAndCursorContextState',
+		);
+		assert.strictEqual(fetchCalls, 0);
+		assert.strictEqual(blockedState.traces.completion?.documentUri, blockedDocument.uri.toString());
+		assert.strictEqual(blockedState.traces.completion?.outcome, 'items');
+		assert.strictEqual(blockedState.traces.completion?.itemCount, 0);
 	} finally {
 		await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
 		CachingFetcher.prototype.fetch = originalFetch;
