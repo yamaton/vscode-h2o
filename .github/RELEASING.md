@@ -8,7 +8,7 @@ dependency-only lockfile updates run the quality gate but never publish.
 1. Create a Visual Studio Marketplace token that can manage the `tetradresearch` publisher.
 2. Create a GitHub Environment named `marketplace`, require a release maintainer's approval, and store the token there as `VSCE_PAT`.
 3. Protect `main` and require the quality workflow checks before merging a version bump.
-4. Add tag rulesets for `*.*.*`. Permit the GitHub Actions app to create version tags, and prevent everyone from updating or deleting an existing version tag.
+4. Add a tag ruleset for `*.*.*` that prevents updating or deleting an existing version tag.
 
 The current workflow uses a Marketplace PAT. Azure DevOps global PATs retire on December 1, 2026, so migrate the
 publish job to Microsoft Entra ID authentication before that date.
