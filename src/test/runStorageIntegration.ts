@@ -35,7 +35,11 @@ async function main(): Promise<void> {
 	const vscodeExecutablePath = process.env.VSCODE_EXECUTABLE_PATH
 		|| await downloadAndUnzipVSCode({ version: process.env.VSCODE_VERSION || 'stable' });
 	const fixturePath = path.resolve(__dirname, '../../test/storage-integration');
-	const profileRoot = mkdtempSync(path.join(tmpdir(), 'vscode-h2o-storage-integration-'));
+	// VS Code derives a Unix-domain socket path from --user-data-dir. The long
+	// per-user directory returned by macOS tmpdir() can exceed its 103-byte
+	// socket-path limit before the storage fixture starts.
+	const profileParent = process.platform === 'darwin' ? '/tmp' : tmpdir();
+	const profileRoot = mkdtempSync(path.join(profileParent, 'h2o-storage-'));
 	const userDataDir = path.join(profileRoot, 'user-data');
 	const extensionsDir = path.join(profileRoot, 'extensions');
 	mkdirSync(userDataDir, { recursive: true });
