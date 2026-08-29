@@ -39,6 +39,11 @@ export interface CachingFetcherDependencies {
   cacheStorage?: CommandCacheStorage;
 }
 
+export interface CommandNameSnapshot {
+  names: string[];
+  initialCuratedPending: boolean;
+}
+
 function createDefaultH2oRuntime(): H2oRuntime {
   // `vscode` is only available inside the extension host. Loading it lazily
   // keeps the command runner testable in a plain Node.js process.
@@ -126,6 +131,7 @@ export class CachingFetcher {
   private persistenceEnabled = true;
   private initialCuratedAvailability: Promise<void> | undefined;
   private initialCuratedCompletion: Promise<void> | undefined;
+  private initialCuratedPending = false;
 
   constructor(
     private memento: Memento,
@@ -289,8 +295,17 @@ export class CachingFetcher {
     }
 
     let markAvailable!: () => void;
+    let availabilityMarked = false;
+    this.initialCuratedPending = true;
     this.initialCuratedAvailability = new Promise<void>(resolve => {
-      markAvailable = resolve;
+      markAvailable = () => {
+        if (availabilityMarked) {
+          return;
+        }
+        availabilityMarked = true;
+        this.initialCuratedPending = false;
+        resolve();
+      };
     });
     const completion = this.fetchAllCuratedInternal(kind, false, markAvailable);
     void completion.then(markAvailable, markAvailable);
@@ -435,6 +450,17 @@ export class CachingFetcher {
   // Load a list of registered commands from the in-memory snapshot.
   public getList(): string[] {
     return [...this.commands.keys()];
+  }
+
+  public getCommandNameSnapshot(): CommandNameSnapshot {
+    return {
+      names: this.getList(),
+      initialCuratedPending: this.initialCuratedPending,
+    };
+  }
+
+  public waitForInitialCuratedAvailability(): Promise<void> {
+    return this.initialCuratedAvailability ?? Promise.resolve();
   }
 
 }

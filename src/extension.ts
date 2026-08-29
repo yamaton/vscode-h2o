@@ -20,6 +20,11 @@ import {
 import { loadLanguageOnce } from './parserLanguage';
 import { formatTldr, isPrefixOf, getLabelString, formatUsage, formatDescription } from './utils';
 import {
+  CommandNameCompletionContext,
+  getCommandNameCompletionContext,
+} from './completionTarget';
+import { waitForPromiseOrCancellation } from './cancellable';
+import {
   debugDocumentScheme,
   LiveDebugViewManager,
   type LiveCompletionProviderTrace,
@@ -159,6 +164,7 @@ export interface DebugResolution {
 
 export interface DebugProviderDecision {
   enabled: boolean;
+  lookupKind: ProviderLookupKind;
   requestedPosition: DebugPosition;
   resolvedPosition: DebugPosition;
   moved: boolean;
@@ -203,6 +209,7 @@ export type LiveDebugNode = DebugNode;
 
 export interface LiveDebugProviderDecision {
   enabled: boolean;
+  lookupKind: ProviderLookupKind;
   resolvedPosition: DebugPosition;
   moved: boolean;
   walkbackUnchanged: boolean;
@@ -259,6 +266,14 @@ interface ProviderPositionDecision {
   resumedAfterHerestring: boolean;
   requestSuppressionReasons: ProviderSuppressionReason[];
   resolvedSuppressionReasons: ProviderSuppressionReason[];
+}
+
+export type ProviderLookupKind = 'none' | 'command-name' | 'command-spec';
+
+interface CompletionRequestAnalysis {
+  decision: ProviderPositionDecision;
+  commandNameContext: CommandNameCompletionContext | undefined;
+  includeArgumentAtPosition: boolean;
 }
 
 interface LineTextProvider {
@@ -324,11 +339,12 @@ async function registerExtension(
         }
         const tree = trees[document.uri.toString()];
         return withTreeCopy(tree, async requestTree => {
-          const caretDecision = getCompletionCaretDecision(
+          const completionAnalysis = getCompletionRequestAnalysis(
             document,
             requestTree.rootNode,
             caret,
           );
+          const caretDecision = completionAnalysis.decision;
           if (!caretDecision.enabled) {
             trackLiveCompletionResult(liveTraceRequest, 'suppressed', { itemCount: 0 });
             return [];
@@ -338,8 +354,53 @@ async function registerExtension(
           const isCaretTouchingWord = caretDecision.walkbackUnchanged;
           console.log(`[Completion] isCaretTouchingWord: ${isCaretTouchingWord}`);
 
+          if (completionAnalysis.commandNameContext) {
+            const commandName = completionAnalysis.commandNameContext;
+            // Editing inside an existing command word is not treated as typing
+            // a command name. Do not replace text after the caret or resolve
+            // the partially edited word through H2O.
+            if (!commandName.atWordEnd) {
+              trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
+              return [];
+            }
+
+            let snapshot = fetcher.getCommandNameSnapshot();
+            let matchingNames = snapshot.names.filter(name =>
+              isPrefixOf(commandName.word.text, name)
+            );
+            if (matchingNames.length === 0 && snapshot.initialCuratedPending) {
+              const available = await waitForPromiseOrCancellation(
+                fetcher.waitForInitialCuratedAvailability(),
+                token,
+              );
+              if (!available) {
+                trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
+                return [];
+              }
+              snapshot = fetcher.getCommandNameSnapshot();
+              matchingNames = snapshot.names.filter(name =>
+                isPrefixOf(commandName.word.text, name)
+              );
+            }
+            if (token.isCancellationRequested) {
+              trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
+              return [];
+            }
+
+            const replacing = rangeOfWord(commandName.word);
+            const compItems = matchingNames.map(name => {
+              const item = new vscode.CompletionItem(name);
+              item.range = replacing;
+              return item;
+            });
+            trackLiveCompletionResult(liveTraceRequest, 'items', {
+              itemCount: compItems.length,
+            });
+            return new vscode.CompletionList(compItems, snapshot.initialCuratedPending);
+          }
+
           try {
-            const includeCurrentArgument = !isCaretTouchingWord;
+            const includeCurrentArgument = completionAnalysis.includeArgumentAtPosition;
             const commandContext = await getContextCommandResolution(
               requestTree.rootNode,
               resolvedPosition,
@@ -382,28 +443,12 @@ async function registerExtension(
               throw new Error("unknown command");
             }
           } catch (e) {
-            const currentNode = getCurrentNode(requestTree.rootNode, caret);
-            const currentWord = currentNode.text;
-            const compCommands = fetcher.getList().map(name => new vscode.CompletionItem(name));
-            console.info(`[Completion] currentWord = ${currentWord}`);
-            if (resolvedPosition === caret && currentWord.length >= 2) {
-              console.info("[Completion] Only command completion is available (2)");
-              let compItems = compCommands.filter(cmd => isPrefixOf(currentWord, getLabelString(cmd.label)));
-              compItems.forEach(compItem => {
-                compItem.range = range(currentNode);
-              });
-              trackLiveCompletionResult(liveTraceRequest, 'items', {
-                itemCount: compItems.length,
-                fallback: true,
-                error: debugError(e),
-              });
-              return compItems;
-            }
             console.warn("[Completion] No completion item is available (1)", e);
-            trackLiveCompletionResult(liveTraceRequest, 'error', {
+            trackLiveCompletionResult(liveTraceRequest, 'items', {
+              itemCount: 0,
               error: debugError(e),
             });
-            return Promise.reject("Error: No completion item is available");
+            return [];
           }
         });
       }
@@ -1255,6 +1300,24 @@ function getCompletionCaretDecision(
   };
 }
 
+function getCompletionRequestAnalysis(
+  document: LineTextProvider,
+  root: Node,
+  caret: vscode.Position,
+): CompletionRequestAnalysis {
+  const decision = getCompletionCaretDecision(document, root, caret);
+  const commandNode = decision.enabled && decision.walkbackUnchanged
+    ? _getContextCommandNode(root, caret)
+    : undefined;
+  return {
+    decision,
+    commandNameContext: commandNode
+      ? getCommandNameCompletionContext(commandNode, asPoint(caret))
+      : undefined,
+    includeArgumentAtPosition: !decision.walkbackUnchanged,
+  };
+}
+
 function getHoverCursorDecision(root: Node, cursor: vscode.Position): ProviderPositionDecision {
   const suppressionReasons = getProviderSuppressionReasons(root, cursor);
   return {
@@ -1428,12 +1491,20 @@ async function inspectProviderDecision(
   decision: ProviderPositionDecision,
   fetcher: CachingFetcher,
   includeArgumentAtPosition: boolean,
+  commandNameContext?: CommandNameCompletionContext,
 ): Promise<DebugProviderDecision> {
   const commandNode = decision.enabled
     ? _getContextCommandNode(root, decision.position)
     : undefined;
   const report: DebugProviderDecision = {
     enabled: decision.enabled,
+    lookupKind: !decision.enabled
+      ? 'none'
+      : commandNameContext?.atWordEnd
+        ? 'command-name'
+        : commandNameContext
+          ? 'none'
+          : 'command-spec',
     requestedPosition: debugPosition(requestedPosition),
     resolvedPosition: debugPosition(decision.position),
     moved: !decision.position.isEqual(requestedPosition),
@@ -1450,6 +1521,16 @@ async function inspectProviderDecision(
   };
 
   if (!decision.enabled) {
+    return report;
+  }
+
+  if (commandNameContext) {
+    const invocation = getCommandInvocationToPosition(
+      commandNode,
+      asPoint(decision.position),
+      includeArgumentAtPosition,
+    );
+    report.invocation = invocation ? debugInvocation(invocation) : null;
     return report;
   }
 
@@ -1481,7 +1562,7 @@ async function inspectTreeAtPosition(
   fetcher: CachingFetcher,
 ): Promise<DebugTreeReport> {
   const currentNode = getCurrentNode(root, position);
-  const completionDecision = getCompletionCaretDecision(document, root, position);
+  const completionAnalysis = getCompletionRequestAnalysis(document, root, position);
   const hoverDecision = getHoverCursorDecision(root, position);
 
   return {
@@ -1491,9 +1572,10 @@ async function inspectTreeAtPosition(
     completion: await inspectProviderDecision(
       root,
       position,
-      completionDecision,
+      completionAnalysis.decision,
       fetcher,
-      !completionDecision.walkbackUnchanged,
+      completionAnalysis.includeArgumentAtPosition,
+      completionAnalysis.commandNameContext,
     ),
     hover: await inspectProviderDecision(root, position, hoverDecision, fetcher, true),
   };
@@ -1519,6 +1601,7 @@ function syntaxComparisonProjection(report: DebugTreeReport): unknown {
 function providerComparisonProjection(decision: DebugProviderDecision): unknown {
   return {
     enabled: decision.enabled,
+    lookupKind: decision.lookupKind,
     requestedPosition: decision.requestedPosition,
     resolvedPosition: decision.resolvedPosition,
     moved: decision.moved,
@@ -1614,6 +1697,7 @@ function liveProviderDecision(
 ): LiveDebugProviderDecision {
   return {
     enabled: decision.enabled,
+    lookupKind: decision.lookupKind,
     resolvedPosition: decision.resolvedPosition,
     moved: decision.moved,
     walkbackUnchanged: decision.walkbackUnchanged,
@@ -1646,13 +1730,14 @@ async function createLiveEditorDebugSnapshot(
   return withTreeCopy(cachedTree, async treeCopy => {
     const root = treeCopy.rootNode;
     const caretNode = getCurrentNode(root, caret);
-    const completionDecision = getCompletionCaretDecision(lineProvider, root, caret);
+    const completionAnalysis = getCompletionRequestAnalysis(lineProvider, root, caret);
     const completion = await inspectProviderDecision(
       root,
       caret,
-      completionDecision,
+      completionAnalysis.decision,
       fetcher,
-      !completionDecision.walkbackUnchanged,
+      completionAnalysis.includeArgumentAtPosition,
+      completionAnalysis.commandNameContext,
     );
     const cursorNode = cursor ? getCurrentNode(root, cursor) : undefined;
     const hoverDecision = cursor ? getHoverCursorDecision(root, cursor) : undefined;

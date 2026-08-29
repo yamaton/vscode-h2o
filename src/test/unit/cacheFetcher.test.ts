@@ -623,18 +623,69 @@ suite('CachingFetcher', () => {
     void initialFetch.then(() => {
       initialSettled = true;
     });
+    assert.deepStrictEqual(fetcher.getCommandNameSnapshot(), {
+      names: [],
+      initialCuratedPending: true,
+    });
+    const initialAvailability = fetcher.waitForInitialCuratedAvailability();
+    let availabilitySettled = false;
+    void initialAvailability.then(() => {
+      availabilitySettled = true;
+    });
     const commandFetch = fetcher.fetch('git');
     await new Promise<void>(resolve => setImmediate(resolve));
     assert.strictEqual(localCalls, 0);
+    assert.strictEqual(availabilitySettled, false);
 
     releaseResponse(responseWithGzip([command('git', 'curated')]));
     assert.deepStrictEqual(await commandFetch, command('git', 'curated'));
+    await initialAvailability;
+    assert.deepStrictEqual(fetcher.getCommandNameSnapshot(), {
+      names: ['git'],
+      initialCuratedPending: false,
+    });
     assert.strictEqual(localCalls, 0);
     assert.strictEqual(initialSettled, false);
 
     releaseSave();
     await initialFetch;
     assert.deepStrictEqual(storage.stored?.commands, [command('git', 'curated')]);
+  });
+
+  test('exposes cached command names while the initial refresh is pending', async () => {
+    let releaseResponse!: (response: Response) => void;
+    const response = new Promise<Response>(resolve => {
+      releaseResponse = resolve;
+    });
+    const cached = command('mamba', 'cached');
+    const storage = new FakeCacheStorage({
+      version: commandCacheSnapshotVersion,
+      commands: [cached],
+    });
+    const fetcher = new CachingFetcher(new FakeMemento(), dependencies({
+      cacheStorage: storage,
+      fetch: async () => response,
+    }));
+    await fetcher.init();
+
+    const initialFetch = fetcher.startInitialCuratedFetch();
+    assert.deepStrictEqual(fetcher.getCommandNameSnapshot(), {
+      names: ['mamba'],
+      initialCuratedPending: true,
+    });
+    let availabilitySettled = false;
+    void fetcher.waitForInitialCuratedAvailability().then(() => {
+      availabilitySettled = true;
+    });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.strictEqual(availabilitySettled, false);
+
+    releaseResponse(responseWithGzip([]));
+    await initialFetch;
+    assert.deepStrictEqual(fetcher.getCommandNameSnapshot(), {
+      names: ['mamba'],
+      initialCuratedPending: false,
+    });
   });
 
   test('falls back to H2O after the initial curated request fails', async () => {
@@ -650,6 +701,11 @@ suite('CachingFetcher', () => {
 
     const initialFetch = fetcher.startInitialCuratedFetch();
     const handledFailure = initialFetch.catch(() => undefined);
+    await fetcher.waitForInitialCuratedAvailability();
+    assert.deepStrictEqual(fetcher.getCommandNameSnapshot(), {
+      names: [],
+      initialCuratedPending: false,
+    });
     assert.deepStrictEqual(await fetcher.fetch('git'), command('git', 'local'));
     await handledFailure;
     assert.strictEqual(localCalls, 1);

@@ -7,6 +7,7 @@
 - Use a POSIX `sh` wrapper so the bundled scanner works in minimal Linux environments such as Alpine.
 - Keep extension activation responsive while common command specifications download in the background.
 - Batch curated command updates and coordinate initial cache availability before local help fallback.
+- Complete partial command names directly from the available command list, including one-character and wrapped command input, without resolving partial names through H2O.
 - Store command specifications as a versioned compressed snapshot in VS Code global storage instead of Memento. The snapshot is replaced through a unique temporary file and a best-effort overwrite rename. Existing command caches are reset once on upgrade and rebuilt from curated data or the local H2O scanner.
 - Add a 10-second timeout to remote specification requests and wait for cache writes and bulk removals to finish.
 - Add automated unit, integration, native-binary, VSIX-content, dependency, and Marketplace release checks.

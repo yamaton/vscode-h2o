@@ -629,42 +629,172 @@ async function verifyProviderTreeOwnership(parser: Parser): Promise<void> {
 	}
 }
 
-async function verifyCompletionRefreshesCommandList(): Promise<void> {
+async function verifyCommandNameCompletionLifecycle(): Promise<void> {
 	const originalFetch = CachingFetcher.prototype.fetch;
-	const originalGetList = CachingFetcher.prototype.getList;
-	const fetchStarted = deferred<void>();
-	const releaseFetch = deferred<void>();
-	let commandListAvailable = false;
-
-	CachingFetcher.prototype.getList = function getList(): string[] {
-		return commandListAvailable ? ['git'] : [];
+	const originalGetCommandNameSnapshot = CachingFetcher.prototype.getCommandNameSnapshot;
+	const originalWaitForInitialCuratedAvailability = CachingFetcher.prototype.waitForInitialCuratedAvailability;
+	let commandNameSnapshot = {
+		names: ['conda', 'make', 'mamba'],
+		initialCuratedPending: true,
 	};
+	let availability = deferred<void>();
+	let availabilityRequested = deferred<void>();
+	let availabilityWaits = 0;
+	const fetchedNames: string[] = [];
+
+	CachingFetcher.prototype.getCommandNameSnapshot = function getCommandNameSnapshot() {
+		return commandNameSnapshot;
+	};
+	CachingFetcher.prototype.waitForInitialCuratedAvailability = function waitForInitialCuratedAvailability() {
+		availabilityWaits += 1;
+		availabilityRequested.resolve();
+		return availability.promise;
+	};
+	CachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+		fetchedNames.push(name);
+		assert.strictEqual(name, 'mamba');
+		return {
+			name: 'mamba',
+			description: 'controlled mamba command',
+			options: [],
+			subcommands: [{
+				name: 'create',
+				description: 'controlled mamba subcommand',
+				options: [],
+			}],
+		};
+	};
+
+	try {
+		const partialDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'mamb',
+		});
+		const partialList = await completionLabelsAt(partialDocument);
+		assert.ok(partialList.labels.includes('mamba'));
+		assert.ok(!partialList.labels.includes('make'));
+		assert.strictEqual(availabilityWaits, 0);
+		assert.deepStrictEqual(fetchedNames, []);
+
+		for (const scenario of [
+			{ content: 'm', expected: 'mamba' },
+			{ content: 'mamba', expected: 'mamba' },
+			{ content: 'cond', expected: 'conda' },
+			{ content: 'sudo mamb', expected: 'mamba' },
+			{ content: 'FOO=bar mamb', expected: 'mamba' },
+		]) {
+			const document = await vscode.workspace.openTextDocument({
+				language: 'shellscript',
+				content: scenario.content,
+			});
+			assert.ok((await completionLabelsAt(document)).labels.includes(scenario.expected), scenario.content);
+		}
+		assert.strictEqual(availabilityWaits, 0);
+		assert.deepStrictEqual(fetchedNames, []);
+
+		const midwordDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'mambx',
+		});
+		const midwordPosition = new vscode.Position(0, 4);
+		const midwordEditor = await vscode.window.showTextDocument(midwordDocument, { preview: false });
+		midwordEditor.selection = new vscode.Selection(midwordPosition, midwordPosition);
+		await vscode.commands.executeCommand<LiveEditorDebugToggleResult>(
+			'h2o.toggleLiveCaretAndCursorContext',
+			true,
+		);
+		try {
+			await completionLabelsAt(midwordDocument, midwordPosition);
+			const liveState = await vscode.commands.executeCommand<LiveEditorDebugState>(
+				'h2o.getLiveCaretAndCursorContextState',
+			);
+			assert.strictEqual(liveState.traces.completion?.documentUri, midwordDocument.uri.toString());
+			assert.deepStrictEqual(liveState.traces.completion?.position, {
+				line: 0,
+				character: 4,
+			});
+			assert.strictEqual(liveState.traces.completion?.outcome, 'items');
+			assert.strictEqual(liveState.traces.completion?.itemCount, 0);
+		} finally {
+			await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
+		}
+		assert.deepStrictEqual(fetchedNames, []);
+		assert.strictEqual(availabilityWaits, 0);
+
+		commandNameSnapshot = { names: ['git'], initialCuratedPending: true };
+		availability = deferred<void>();
+		availabilityRequested = deferred<void>();
+		const incompleteCacheDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'mamb',
+		});
+		const incompleteCacheCompletion = completionLabelsAt(incompleteCacheDocument);
+		await withTimeout(availabilityRequested.promise, 5000);
+		assert.strictEqual(availabilityWaits, 1);
+		commandNameSnapshot = { names: ['git', 'mamba'], initialCuratedPending: false };
+		availability.resolve();
+		assert.ok((await incompleteCacheCompletion).labels.includes('mamba'));
+
+		commandNameSnapshot = { names: [], initialCuratedPending: true };
+		availability = deferred<void>();
+		availabilityRequested = deferred<void>();
+		const coldDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'mamb',
+		});
+		const coldCompletion = completionLabelsAt(coldDocument);
+		await withTimeout(availabilityRequested.promise, 5000);
+		assert.strictEqual(availabilityWaits, 2);
+		assert.deepStrictEqual(fetchedNames, []);
+		commandNameSnapshot = { names: ['mamba'], initialCuratedPending: false };
+		availability.resolve();
+		assert.ok((await coldCompletion).labels.includes('mamba'));
+
+		const argumentDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'mamba ',
+		});
+		assert.ok((await completionLabelsAt(argumentDocument)).labels.includes('create'));
+		assert.deepStrictEqual(fetchedNames, ['mamba']);
+	} finally {
+		availability.resolve();
+		CachingFetcher.prototype.fetch = originalFetch;
+		CachingFetcher.prototype.getCommandNameSnapshot = originalGetCommandNameSnapshot;
+		CachingFetcher.prototype.waitForInitialCuratedAvailability = originalWaitForInitialCuratedAvailability;
+	}
+}
+
+async function verifyCommandNameLiveDebugDoesNotResolvePrefixes(): Promise<void> {
+	const originalFetch = CachingFetcher.prototype.fetch;
+	let fetchCalls = 0;
 	CachingFetcher.prototype.fetch = async function fetch(): Promise<Command> {
-		fetchStarted.resolve();
-		await releaseFetch.promise;
-		commandListAvailable = true;
-		throw new Error('controlled command lookup failure');
+		fetchCalls += 1;
+		throw new Error('partial command names must not be resolved by completion debug analysis');
 	};
 
 	try {
 		const document = await vscode.workspace.openTextDocument({
 			language: 'shellscript',
-			content: 'gi',
+			content: 'mamb',
 		});
-		const completion = vscode.commands.executeCommand<vscode.CompletionList>(
-			'vscode.executeCompletionItemProvider',
-			document.uri,
-			new vscode.Position(0, 2),
+		const editor = await vscode.window.showTextDocument(document, { preview: false });
+		const caret = document.positionAt(document.getText().length);
+		editor.selection = new vscode.Selection(caret, caret);
+		const enabled = await withTimeout(
+			vscode.commands.executeCommand<LiveEditorDebugToggleResult>(
+				'h2o.toggleLiveCaretAndCursorContext',
+				true,
+			),
+			5000,
 		);
-		await withTimeout(fetchStarted.promise, 5000);
-		releaseFetch.resolve();
-		const completionList = await withTimeout(completion, 5000);
-
-		assert.ok(completionList.items.some(item => completionLabel(item) === 'git'));
+		assert.strictEqual(fetchCalls, 0);
+		assert.strictEqual(enabled.snapshot?.completion.lookupKind, 'command-name');
+		assert.strictEqual(enabled.snapshot?.completion.invocation?.name.text, 'mamb');
+		assert.strictEqual(enabled.snapshot?.completion.resolution, null);
+		assert.strictEqual(enabled.snapshot?.completion.lookupError, null);
 	} finally {
-		releaseFetch.resolve();
+		await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
 		CachingFetcher.prototype.fetch = originalFetch;
-		CachingFetcher.prototype.getList = originalGetList;
 	}
 }
 
@@ -2550,7 +2680,8 @@ suite('Parser and provider behavior', () => {
 		});
 	});
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
-	test('refreshes command names after asynchronous lookup', verifyCompletionRefreshesCommandList);
+	test('separates command names from command-spec resolution', verifyCommandNameCompletionLifecycle);
+	test('keeps live completion debug aligned with command-name completion', verifyCommandNameLiveDebugDoesNotResolvePrefixes);
 	test('preserves editor-facing Unicode ranges', verifyEditorFacingParserCompatibility);
 	test('reports caret parser and provider metadata', verifyCaretDebugInterface);
 	test('updates provider-critical caret/cursor metadata live', verifyLiveCaretAndCursorDebugInterface);

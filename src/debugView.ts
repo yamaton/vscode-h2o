@@ -232,6 +232,11 @@ function providerRows(
       icon: 'list-tree',
       children: [
         {
+          id: `${kind}.details.lookup-kind`,
+          label: 'Lookup kind',
+          description: decision.lookupKind,
+        },
+        {
           id: `${kind}.details.walkback`,
           label: 'Walkback unchanged',
           description: String(decision.walkbackUnchanged),
