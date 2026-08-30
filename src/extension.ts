@@ -491,7 +491,6 @@ async function registerExtension(
 
             const resolvedPosition = caretDecision.position;
             const isCaretTouchingWord = caretDecision.touchingCommandToken;
-            console.log(`[Completion] isCaretTouchingWord: ${isCaretTouchingWord}`);
 
             if (completionAnalysis.lookupTarget.kind === 'none') {
               trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
@@ -571,7 +570,6 @@ async function registerExtension(
                     items.forEach(compItem => {
                       compItem.range = range(currentNode);
                     });
-                    console.info(`[Completion] currentWord: ${currentWord}`);
                   }
                   return items;
                 });
@@ -1304,7 +1302,6 @@ async function registerExtension(
   }
 
   function close(document: vscode.TextDocument) {
-    console.log("[Close] removing a tree");
     documentTrees.close(document);
     scheduleLiveDebug();
   }
@@ -1318,12 +1315,10 @@ async function registerExtension(
     }
 
     if (!cmd || !cmd.trim()) {
-      console.info("[h2o.loadCommand] Cancelled operation.");
       return;
     }
 
     try {
-      console.log(`[Command] Downloading ${cmd} data...`);
       await fetcher.downloadCommandToCache(cmd);
       const msg = `[Shell Completion] Added ${cmd}.`;
       void vscode.window.showInformationMessage(msg);
@@ -1344,12 +1339,10 @@ async function registerExtension(
     }
 
     if (!cmd || !cmd.trim()) {
-      console.info("[h2o.clearCacheCommand] Cancelled operation.");
       return;
     }
 
     try {
-      console.log(`[h2o.clearCacheCommand] Clearing cache for ${cmd}`);
       await fetcher.unset(cmd);
       const msg = `[Shell Completion] Cleared ${cmd}`;
       void vscode.window.showInformationMessage(msg);
@@ -1364,7 +1357,6 @@ async function registerExtension(
   // h2o.loadCommon: Download the package bundle "common"
   const invokeDownloadingCommon = vscode.commands.registerCommand('h2o.loadCommon', async () => {
     try {
-      console.log('[h2o.loadCommon] Load common CLI data');
       const msg1 = `[Shell Completion] Loading common CLI data...`;
       void vscode.window.showInformationMessage(msg1);
 
@@ -1386,7 +1378,6 @@ async function registerExtension(
   // h2o.loadBio: Download the command bundle "bio"
   const invokeDownloadingBio = vscode.commands.registerCommand('h2o.loadBio', async () => {
     try {
-      console.log('[h2o.loadBio] Load Bioinformatics CLI data');
       const msg1 = `[Shell Completion] Loading bioinformatics CLI specs...`;
       void vscode.window.showInformationMessage(msg1);
 
@@ -1406,7 +1397,6 @@ async function registerExtension(
   // h2o.removeBio: Remove the command bundle "bio"
   const removeBio = vscode.commands.registerCommand('h2o.removeBio', async () => {
     try {
-      console.log('[h2o.removeBio] Remove Bioinformatics CLI data');
       const msg1 = `[Shell Completion] Removing bioinformatics CLI specs...`;
       void vscode.window.showInformationMessage(msg1);
 
@@ -1437,7 +1427,6 @@ async function registerExtension(
   activationRegistrations.push(vscode.commands.registerCommand('registeredCommands.removeEntry', async (item: vscode.TreeItem) => {
     if (!!item && !!item.label) {
       const name = item.label as string;
-      console.log(`[registeredCommands.removeEntry] Remove ${name}`);
       await fetcher.unset(name);
       commandListProvider.refresh();
     }
@@ -1457,7 +1446,7 @@ async function registerExtension(
     ),
     prompt: async () => {
       const choice = await vscode.window.showWarningMessage(
-        'Shell Completion can complete uncached commands by running commands referenced in Shell Script or BitBake files with --help on this Extension Host. Allow local command scans on this machine? Downloaded and cached specifications remain available when disabled.',
+        'Allow Shell Completion to run unknown commands with --help to provide completions?',
         enableLocalScansLabel,
         keepLocalScansDisabledLabel,
       );
@@ -1665,9 +1654,6 @@ export function walkbackCompletionCaretIfNeeded(
   caret: vscode.Position,
 ): vscode.Position {
   const anchor = resolveCompletionAnchor(document, root, asPoint(caret));
-  if (anchor.moved) {
-    console.debug('[walkbackCompletionCaretIfNeeded] moved to a scope-aware completion anchor.');
-  }
   return asPosition(anchor.point);
 }
 

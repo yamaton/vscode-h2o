@@ -120,17 +120,6 @@ export class CachingFetcher {
     }
 
     await this.cleanupLegacyState();
-
-    if (this.commands.size === 0) {
-      console.log(">>>---------------------------------------");
-      console.log("  Clean state");
-      console.log("<<<---------------------------------------");
-    } else {
-      console.log(">>>---------------------------------------");
-      console.log("  Command cache entries already exist");
-      console.log("    # of command specs in the local DB:", this.commands.size);
-      console.log("<<<---------------------------------------");
-    }
   }
 
   // Get Memento key of the command `name`
@@ -182,7 +171,6 @@ export class CachingFetcher {
   private commitCacheUpdate(
     name: string,
     command: Command | undefined,
-    logging: boolean = false,
   ): CacheMutation {
     if (command && command.name !== name) {
       throw new Error(`Received command ${command.name} for requested command ${name}.`);
@@ -190,7 +178,6 @@ export class CachingFetcher {
     if (command) {
       command = validateCommands([command])[0];
     }
-    const startedAt = Date.now();
     const next = new Map(this.commands);
     if (command) {
       next.set(name, command);
@@ -199,17 +186,11 @@ export class CachingFetcher {
       next.delete(name);
       this.removedNames.add(name);
     }
-    const mutation = this.commitCommands(next);
-    const persistence = mutation.persistence.then(() => {
-      if (logging) {
-        console.log(`[CacheFetcher.update] ${name}: Cache snapshot update took ${Date.now() - startedAt} ms.`);
-      }
-    });
-    return { revision: mutation.revision, persistence };
+    return this.commitCommands(next);
   }
 
-  private async updateCache(name: string, command: Command | undefined, logging: boolean = false): Promise<void> {
-    await this.commitCacheUpdate(name, command, logging).persistence;
+  private async updateCache(name: string, command: Command | undefined): Promise<void> {
+    await this.commitCacheUpdate(name, command).persistence;
   }
 
   public setScanUnknownCommands(enabled: boolean): void {
@@ -254,7 +235,6 @@ export class CachingFetcher {
 
     let cached = this.commands.get(name);
     if (cached) {
-      console.log('[CacheFetcher.fetch] Fetching from cache:', name);
       return cached;
     }
 
@@ -272,7 +252,6 @@ export class CachingFetcher {
       }
       cached = this.commands.get(name);
       if (cached) {
-        console.log('[CacheFetcher.fetch] Fetching from newly available curated cache:', name);
         return cached;
       }
     }
@@ -420,7 +399,7 @@ export class CachingFetcher {
     }
 
     entry.state = 'persisting';
-    const mutation = this.commitCacheUpdate(entry.name, validated, true);
+    const mutation = this.commitCacheUpdate(entry.name, validated);
     try {
       await mutation.persistence;
     } catch (error) {
@@ -540,10 +519,8 @@ export class CachingFetcher {
     if (this.disposed) {
       return;
     }
-    console.log("[CacheFetcher.fetchAllCurated] Started running...");
     const url = `https://github.com/yamaton/h2o-curated-data/raw/main/${kind}.json.gz`;
     const response = await this.fetchResponse(url);
-    console.log("[CacheFetcher.fetchAllCurated] received HTTP response");
 
     let commands: Command[];
     try {
@@ -553,8 +530,6 @@ export class CachingFetcher {
       console.error("[fetchAllCurated] Error: ", err);
       return Promise.reject("Failed to inflate and parse the content as JSON.");
     }
-    console.log("[CacheFetcher.fetchAllCurated] Done inflating and parsing. Command #:", commands.length);
-
     if (this.disposed) {
       return;
     }
@@ -585,10 +560,8 @@ export class CachingFetcher {
     if (this.disposed) {
       return;
     }
-    console.log(`[CacheFetcher.downloadCommand] Started getting ${name} in ${kind}...`);
     const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}/json/${name}.json`;
     const response = await this.fetchResponse(url);
-    console.log("[CacheFetcher.downloadCommand] received HTTP response");
 
     let cmd: Command;
     try {
@@ -603,18 +576,15 @@ export class CachingFetcher {
     if (this.disposed) {
       return;
     }
-    console.log(`[CacheFetcher.downloadCommand] Loading: ${cmd.name}`);
-    await this.updateCache(name, cmd, true);
+    await this.updateCache(name, cmd);
   }
 
 
   // Get a list of the command bundle `kind`.
   // This is used for removal of bundled commands.
   public async fetchList(kind = 'bio'): Promise<string[]> {
-    console.log("[CacheFetcher.fetchList] Started running...");
     const url = `https://raw.githubusercontent.com/yamaton/h2o-curated-data/main/${kind}.txt`;
     const response = await this.fetchResponse(url);
-    console.log("[CacheFetcher.fetchList] received HTTP response");
 
     let names: string[] = [];
     try {
@@ -625,7 +595,6 @@ export class CachingFetcher {
       console.error(msg);
       return Promise.reject(msg);
     }
-    names.forEach((name) => console.log("    Received ", name));
     return names;
   }
 
@@ -656,11 +625,9 @@ export class CachingFetcher {
     this.cancelLocalFetch(name);
     if (!this.commands.has(name)) {
       this.removedNames.add(name);
-      console.log(`[CacheFetcher.unset] ${name} was not cached`);
       return;
     }
     await this.updateCache(name, undefined);
-    console.log(`[CacheFetcher.unset] Unset ${name}`);
   }
 
   public async unsetAll(names: readonly string[]): Promise<void> {
@@ -676,7 +643,6 @@ export class CachingFetcher {
     } else {
       this.commands = next;
     }
-    console.log(`[CacheFetcher.unsetAll] Unset ${names.length} commands`);
   }
 
   // Load a list of registered commands from the in-memory snapshot.

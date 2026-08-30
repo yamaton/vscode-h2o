@@ -169,7 +169,7 @@ async function verifyRegisteredCommands(): Promise<void> {
 
 function verifyUnknownCommandScanConsentPrompt(): void {
 	assert.deepStrictEqual(unknownCommandScanConsentPrompts, [{
-		message: 'Shell Completion can complete uncached commands by running commands referenced in Shell Script or BitBake files with --help on this Extension Host. Allow local command scans on this machine? Downloaded and cached specifications remain available when disabled.',
+		message: 'Allow Shell Completion to run unknown commands with --help to provide completions?',
 		items: ['Allow Local Scans', 'Keep Disabled'],
 	}]);
 	const configuration = vscode.workspace.getConfiguration('shellCompletion');

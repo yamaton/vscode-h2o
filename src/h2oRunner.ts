@@ -285,7 +285,6 @@ export async function runH2o(
   }
 
   const wrapperPath = path.join(runtime.extensionDir, '../bin/wrap-h2o');
-  console.log(`[CacheFetcher.runH2o] spawning h2o: ${name}`);
   let output: ProcessOutput;
   try {
     output = await runtime.execute(wrapperPath, [h2opath, name], {
@@ -307,7 +306,6 @@ export async function runH2o(
     if (command.name !== name) {
       throw new Error(`H2O returned ${command.name} for requested command ${name}.`);
     }
-    console.log(`[CacheFetcher.runH2o] Got command output: ${command.name}`);
     return command;
   } catch (error) {
     console.warn('[CacheFetcher.runH2o] Failed to parse H2O result as JSON:', name, error);

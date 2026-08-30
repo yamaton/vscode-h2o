@@ -34,7 +34,6 @@ export class CommandListProvider implements vscode.TreeDataProvider<CommandName>
     const toCommandName = (name: string): CommandName => {
       return new CommandName(name, vscode.TreeItemCollapsibleState.None);
     };
-    console.info(`getCommandNames(): xs = ${xs}`);
     return xs.map(toCommandName);
   }
 }
