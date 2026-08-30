@@ -37,6 +37,7 @@ async function main(): Promise<void> {
 		execFileSync(cliPath, [...profileArguments, '--install-extension', vsixPath, '--force'], {
 			encoding: 'utf8',
 			env: cliEnvironment,
+			shell: process.platform === 'win32',
 			stdio: 'inherit',
 		});
 
