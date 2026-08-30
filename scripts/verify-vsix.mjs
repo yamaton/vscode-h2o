@@ -10,6 +10,7 @@ import {
   verifyGrammarArtifact,
   verifyGrammarRuntimeCompatibility,
 } from './lib/tree-sitter-grammar.mjs';
+import { requiredExtensionFiles } from './lib/vsix-file-contract.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const h2oLock = loadH2oLock(path.join(projectRoot, 'h2o.lock.json'));
@@ -20,41 +21,6 @@ const vsixTarget = process.argv[3] || 'linux-x64';
 const h2oTarget = h2oTargetForVsix(h2oLock, vsixTarget);
 const maxVsixBytes = 12 * 1024 * 1024;
 
-const requiredFiles = [
-  '[Content_Types].xml',
-  'extension.vsixmanifest',
-  'extension/bin/h2o',
-  'extension/bin/profile.sb',
-  'extension/bin/wrap-h2o',
-  'extension/changelog.md',
-  'extension/images/animal_chara_computer_penguin.png',
-  'extension/images/debug.svg',
-  'extension/images/demo-autocomplete.gif',
-  'extension/images/demo-mouseover.gif',
-  'extension/images/vscode-h2o-completion.gif',
-  'extension/images/vscode-h2o-hover.gif',
-  'extension/images/vscode-shell-command-explorer.png',
-  'extension/LICENSE.txt',
-  'extension/out/analyzer.js',
-  'extension/out/cacheFetcher.js',
-  'extension/out/cacheStorage.js',
-  'extension/out/cancellable.js',
-  'extension/out/command.js',
-  'extension/out/commandExplorer.js',
-  'extension/out/commandResolver.js',
-  'extension/out/completionTarget.js',
-  'extension/out/debugView.js',
-  'extension/out/extension.js',
-  'extension/out/h2oRunner.js',
-  'extension/out/parserLanguage.js',
-  'extension/out/providerContext.js',
-  'extension/out/providerPerformance.js',
-  'extension/out/treeCache.js',
-  'extension/out/utils.js',
-  'extension/package.json',
-  'extension/readme.md',
-  'extension/tree-sitter-bash.wasm',
-];
 const productionPackages = Object.entries(packageLock.packages)
   .filter(([packagePath, metadata]) => packagePath.startsWith('node_modules/') && metadata.dev !== true)
   .map(([packagePath, metadata]) => ({
@@ -82,7 +48,11 @@ assert.strictEqual(new Set(entries).size, entries.length, 'VSIX contains duplica
 
 const dependencyEntries = entries.filter(entry => entry.startsWith('extension/node_modules/'));
 const extensionEntries = entries.filter(entry => !entry.startsWith('extension/node_modules/'));
-assert.deepStrictEqual([...extensionEntries].sort(), [...requiredFiles].sort(), 'VSIX contains missing or unexpected extension files');
+assert.deepStrictEqual(
+  [...extensionEntries].sort(),
+  [...requiredExtensionFiles].sort(),
+  'VSIX contains missing or unexpected extension files',
+);
 
 const expectedPackageManifests = productionPackages.map(package_ => `${package_.archivePath}/package.json`);
 const actualPackageManifests = dependencyEntries.filter(entry => entry.endsWith('/package.json'));
