@@ -26,6 +26,26 @@ async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Pro
 	}
 }
 
+async function updateGlobalConfiguration<T>(
+	configuration: vscode.WorkspaceConfiguration,
+	key: string,
+	value: T | undefined,
+): Promise<void> {
+	if (Object.is(configuration.inspect<T>(key)?.globalValue, value)) {
+		return;
+	}
+	const changed = new Promise<void>(resolve => {
+		const registration = vscode.workspace.onDidChangeConfiguration(event => {
+			if (event.affectsConfiguration(`shellCompletion.${key}`)) {
+				registration.dispose();
+				resolve();
+			}
+		});
+	});
+	await configuration.update(key, value, vscode.ConfigurationTarget.Global);
+	await withTimeout(changed, 10000);
+}
+
 export async function run(): Promise<void> {
 	const expectScannerlessWindows = process.env.VSCODE_H2O_EXPECT_SCANNERLESS_WINDOWS === '1';
 	if (expectScannerlessWindows) {
@@ -34,15 +54,15 @@ export async function run(): Promise<void> {
 	const extension = vscode.extensions.getExtension(extensionId);
 	assert.ok(extension, `${extensionId} must be installed from the VSIX`);
 	const completionConfiguration = vscode.workspace.getConfiguration('shellCompletion');
-	await completionConfiguration.update(
+	await updateGlobalConfiguration(
+		completionConfiguration,
 		'enableCompletion',
 		false,
-		vscode.ConfigurationTarget.Global,
 	);
-	await completionConfiguration.update(
+	await updateGlobalConfiguration(
+		completionConfiguration,
 		'scanUnknownCommands',
 		expectScannerlessWindows ? undefined : false,
-		vscode.ConfigurationTarget.Global,
 	);
 
 	const sourceRoot = path.resolve(process.env.VSCODE_H2O_SOURCE_ROOT!);
@@ -88,15 +108,15 @@ export async function run(): Promise<void> {
 				0,
 				'the scannerless Windows package must not start the local scan consent flow',
 			);
-			await completionConfiguration.update(
+			await updateGlobalConfiguration(
+				completionConfiguration,
 				'scanUnknownCommands',
 				true,
-				vscode.ConfigurationTarget.Global,
 			);
-			await completionConfiguration.update(
+			await updateGlobalConfiguration(
+				completionConfiguration,
 				'enableCompletion',
 				true,
-				vscode.ConfigurationTarget.Global,
 			);
 			const unknownDocument = await vscode.workspace.openTextDocument({
 				language: 'shellscript',
@@ -119,15 +139,15 @@ export async function run(): Promise<void> {
 		} finally {
 			packagedH2oRunnerModule.runH2o = originalRunH2o;
 			packagedScanConsentModule.requestUnknownCommandScanConsent = originalRequestUnknownCommandScanConsent;
-			await completionConfiguration.update(
+			await updateGlobalConfiguration(
+				completionConfiguration,
 				'scanUnknownCommands',
 				undefined,
-				vscode.ConfigurationTarget.Global,
 			);
-			await completionConfiguration.update(
+			await updateGlobalConfiguration(
+				completionConfiguration,
 				'enableCompletion',
 				false,
-				vscode.ConfigurationTarget.Global,
 			);
 		}
 	}
@@ -213,10 +233,10 @@ export async function run(): Promise<void> {
 		);
 		assert.strictEqual(fetchCalls, 0);
 
-		await completionConfiguration.update(
+		await updateGlobalConfiguration(
+			completionConfiguration,
 			'enableCompletion',
 			true,
-			vscode.ConfigurationTarget.Global,
 		);
 		const completion = await withTimeout(
 			vscode.commands.executeCommand<vscode.CompletionList>(

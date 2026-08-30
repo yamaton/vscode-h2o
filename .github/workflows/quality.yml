@@ -335,6 +335,7 @@ jobs:
     needs:
       - unit-and-package
       - package-platforms
+      - integration-windows
       - integration-linux
       - integration-macos-intel
       - performance-shadow
@@ -345,11 +346,12 @@ jobs:
         env:
           UNIT_AND_PACKAGE: ${{ needs.unit-and-package.result }}
           PACKAGE_PLATFORMS: ${{ needs.package-platforms.result }}
+          INTEGRATION_WINDOWS: ${{ needs.integration-windows.result }}
           INTEGRATION_LINUX: ${{ needs.integration-linux.result }}
           INTEGRATION_MACOS_INTEL: ${{ needs.integration-macos-intel.result }}
           PERFORMANCE_SHADOW: ${{ needs.performance-shadow.result }}
         run: |
-          for result in "${UNIT_AND_PACKAGE}" "${PACKAGE_PLATFORMS}" "${INTEGRATION_LINUX}" "${INTEGRATION_MACOS_INTEL}"; do
+          for result in "${UNIT_AND_PACKAGE}" "${PACKAGE_PLATFORMS}" "${INTEGRATION_WINDOWS}" "${INTEGRATION_LINUX}" "${INTEGRATION_MACOS_INTEL}"; do
             if [[ "${result}" != success ]]; then
               echo "A required quality job concluded with: ${result}" >&2
               exit 1
