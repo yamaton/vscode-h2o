@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] (2026-08-30)
+
 - Distribute platform-specific packages, adding Linux arm64, Alpine x64, and macOS arm64 support while retaining Linux x64 and macOS x64.
 - Update the bundled command-help parser to the pinned and verified v0.6.0 release.
 - Use a POSIX `sh` wrapper so the bundled command-help parser works in minimal Linux environments such as Alpine.
