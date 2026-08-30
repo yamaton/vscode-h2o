@@ -18,7 +18,7 @@ Write shell commands in VS Code with completions for commands, subcommands, opti
 
 Common command specifications are downloaded automatically and cached by the extension. The first download requires an internet connection.
 
-The bundled help scanner supports Linux/WSL and macOS. See [Supported Platforms](#supported-platforms) for the exact combinations and current exclusions.
+Completion and hover from downloaded or cached command specifications also work on Windows. Only automatic generation for uncached commands—which runs `<command> --help` and parses its output—is limited to Linux/WSL and macOS; see [Supported Platforms](#supported-platforms) for the exact combinations.
 
 Set `shellCompletion.enableCompletion` to `false` to turn off completion suggestions from this extension for the current VS Code window or workspace. Hover information and command-specification management remain available, and the change takes effect without reloading the extension.
 
@@ -84,7 +84,7 @@ For a compact view that follows caret movement, document edits, and hover reques
 
 While live inspection is enabled, a single status bar item shows only the high-level state, for example `H2O C✓ H— TS:word`. `C` is completion, `H` is hover, and `TS` is the tree-sitter node at the caret. Click it to reveal the debug views. The view toolbar can pause and resume updates. Each view also has an **Open Debug Snapshot** action that opens its full current data as a read-only virtual JSON document for searching and copying; live JSON is no longer streamed through an Output channel. Run **Shell Completion: Toggle Live Caret and Cursor Context** to disable or re-enable the interface.
 
-The H2O executable can also be selected with the `shellCompletion.h2oPath` setting. Its default value, `<bundled>`, uses the scanner packaged for the current platform. Like the unknown-command scan policy, this is a machine setting and is configured separately for a remote Extension Host.
+The executable that parses local command `--help` output can also be selected with the `shellCompletion.h2oPath` setting. Its default value, `<bundled>`, uses the parser packaged for the current platform. Like the unknown-command scan policy, this is a machine setting and is configured separately for a remote Extension Host.
 
 Completion suggestions can be enabled or disabled independently with `shellCompletion.enableCompletion`. This window-scoped setting can be configured in user, workspace, or remote settings; disabling it does not disable hover or remove cached specifications.
 
@@ -92,24 +92,24 @@ Parser-backed completion, hover, and debug features are enabled by default for S
 
 ## Supported Platforms
 
-The Visual Studio Marketplace selects a package containing the native H2O scanner for the Extension Host that runs VS Code:
+Completion and hover based on downloaded or previously cached command specifications do not run local commands and are available on Windows. The following support matrix applies only to generating a specification for an uncached command by running `<command> --help` and parsing its output:
 
-| Extension Host | Architecture | Support |
+| Extension Host | Architecture | Local `--help` scanning |
 | --- | --- | --- |
 | Linux, including glibc-based distributions and Alpine | x64 | Supported |
 | Linux on glibc-based distributions | arm64 | Supported |
 | macOS | x64, arm64 | Supported |
 | Alpine | arm64 | Not currently supported |
-| Windows | x64, arm64 | Not currently supported |
+| Windows | x64, arm64 | Not supported; use downloaded or cached specifications |
 
-Remote environments such as WSL use the platform of their VS Code Extension Host. VS Code 1.101 or later is required.
+Remote environments such as WSL use the platform of their VS Code Extension Host to determine unknown-command scanning support. VS Code 1.101 or later is required.
 
 ## How It Works
 
 * [tree-sitter](https://tree-sitter.github.io/tree-sitter/) identifies the command, subcommand, and option at the provider's requested position.
 * The extension first looks for a command specification in its in-memory cache, restored from a compressed snapshot in VS Code global storage. This on-disk cache is regenerable and is not synchronized through Settings Sync.
 * The common curated collection is downloaded in the background when the extension activates. Existing cached entries are preserved unless you explicitly reload the collection.
-* When `shellCompletion.scanUnknownCommands` is enabled, an unknown command available in the local environment is passed to the bundled [H2O](https://github.com/yamaton/h2o) scanner, which runs `<command> --help`, parses the output, and caches the result.
+* When `shellCompletion.scanUnknownCommands` is enabled, an uncached command available in the local environment is passed to the [bundled command-help parser](https://github.com/yamaton/h2o), which runs `<command> --help`, parses the output, and caches the result.
 * Network requests and local help scans have a 10-second timeout.
 
 When upgrading from a version that stored command specifications in VS Code global state, the extension discards those legacy cache entries instead of migrating them. It then rebuilds the cache from curated data or locally scanned help output.

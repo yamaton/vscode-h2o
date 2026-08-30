@@ -195,7 +195,7 @@
                     "type": "string",
                     "default": "<bundled>",
                     "scope": "machine",
-                    "markdownDescription": "Path to the H2O executable on the Extension Host. Use `<bundled>` for the scanner packaged with the extension."
+                    "markdownDescription": "Path on the Extension Host to the executable that parses local command `--help` output into command specifications. Use `<bundled>` for the parser packaged with the extension."
                 },
                 "shellCompletion.maxDocumentCharacters": {
                     "type": "integer",
