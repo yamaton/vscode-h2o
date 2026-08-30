@@ -10,7 +10,7 @@ import {
   verifyGrammarArtifact,
   verifyGrammarRuntimeCompatibility,
 } from './lib/tree-sitter-grammar.mjs';
-import { requiredExtensionFiles } from './lib/vsix-file-contract.mjs';
+import { requiredExtensionFilesForVsix } from './lib/vsix-file-contract.mjs';
 
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 const h2oLock = loadH2oLock(path.join(projectRoot, 'h2o.lock.json'));
@@ -19,6 +19,7 @@ const packageLock = JSON.parse(readFileSync(path.join(projectRoot, 'package-lock
 const vsixPath = path.resolve(projectRoot, process.argv[2] || 'artifacts/vscode-h2o-linux-x64.vsix');
 const vsixTarget = process.argv[3] || 'linux-x64';
 const h2oTarget = h2oTargetForVsix(h2oLock, vsixTarget);
+const bundledScanner = h2oTarget !== null;
 const maxVsixBytes = 12 * 1024 * 1024;
 
 const productionPackages = Object.entries(packageLock.packages)
@@ -50,7 +51,7 @@ const dependencyEntries = entries.filter(entry => entry.startsWith('extension/no
 const extensionEntries = entries.filter(entry => !entry.startsWith('extension/node_modules/'));
 assert.deepStrictEqual(
   [...extensionEntries].sort(),
-  [...requiredExtensionFiles].sort(),
+  [...requiredExtensionFilesForVsix(bundledScanner)].sort(),
   'VSIX contains missing or unexpected extension files',
 );
 
@@ -90,13 +91,15 @@ assert.ok(vsixManifest.includes(`Publisher="${sourceManifest.publisher}"`), 'VSI
 assert.ok(vsixManifest.includes(`Version="${sourceManifest.version}"`), 'VSIX manifest has the wrong version');
 assert.ok(vsixManifest.includes(`TargetPlatform="${vsixTarget}"`), 'VSIX manifest has the wrong target platform');
 
-const packagedH2o = archivedFile('extension/bin/h2o');
-const expectedH2o = h2oLock.assets[h2oTarget];
-assert.strictEqual(packagedH2o.length, expectedH2o.binarySize, 'bin/h2o has an unexpected size');
-assert.strictEqual(sha256(packagedH2o), expectedH2o.binarySha256, 'bin/h2o differs from h2o.lock.json');
-verifyBinaryHeader(packagedH2o, h2oTarget);
-if (expectedH2o.static) {
-  verifyStaticElf(packagedH2o, h2oTarget);
+if (bundledScanner) {
+  const packagedH2o = archivedFile('extension/bin/h2o');
+  const expectedH2o = h2oLock.assets[h2oTarget];
+  assert.strictEqual(packagedH2o.length, expectedH2o.binarySize, 'bin/h2o has an unexpected size');
+  assert.strictEqual(sha256(packagedH2o), expectedH2o.binarySha256, 'bin/h2o differs from h2o.lock.json');
+  verifyBinaryHeader(packagedH2o, h2oTarget);
+  if (expectedH2o.static) {
+    verifyStaticElf(packagedH2o, h2oTarget);
+  }
 }
 
 const packagedWasm = archivedFile(`extension/${grammarLock.file}`);
@@ -104,12 +107,14 @@ verifyGrammarArtifact(packagedWasm, grammarLock, `extension/${grammarLock.file}`
 await verifyGrammarRuntimeCompatibility(packagedWasm, grammarLock, `extension/${grammarLock.file}`);
 
 const zipListing = execFileSync('zipinfo', ['-l', vsixPath], { encoding: 'utf8' });
-for (const file of [
-  'extension/bin/h2o',
-  'extension/bin/wrap-h2o',
-]) {
-  const listingLine = zipListing.split(/\r?\n/).find((line) => line.endsWith(file));
-  assert.ok(listingLine?.startsWith('-rwx'), `${file} lost its executable mode in the VSIX`);
+if (bundledScanner) {
+  for (const file of [
+    'extension/bin/h2o',
+    'extension/bin/wrap-h2o',
+  ]) {
+    const listingLine = zipListing.split(/\r?\n/).find((line) => line.endsWith(file));
+    assert.ok(listingLine?.startsWith('-rwx'), `${file} lost its executable mode in the VSIX`);
+  }
 }
 
 console.log(`VSIX contract checks passed for ${entries.length} files (${statSync(vsixPath).size} bytes).`);

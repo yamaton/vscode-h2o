@@ -26,19 +26,57 @@ async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Pro
 	}
 }
 
+async function updateGlobalConfiguration<T>(
+	configuration: vscode.WorkspaceConfiguration,
+	key: string,
+	value: T | undefined,
+): Promise<void> {
+	if (Object.is(configuration.inspect<T>(key)?.globalValue, value)) {
+		return;
+	}
+	const changed = new Promise<void>(resolve => {
+		const registration = vscode.workspace.onDidChangeConfiguration(event => {
+			if (event.affectsConfiguration(`shellCompletion.${key}`)) {
+				registration.dispose();
+				resolve();
+			}
+		});
+	});
+	await configuration.update(key, value, vscode.ConfigurationTarget.Global);
+	await withTimeout(changed, 10000);
+}
+
+function loadActivatedExtensionModule<T>(extensionPath: string, relativePath: string): T {
+	const expectedPath = path.resolve(extensionPath, relativePath);
+	const normalizedExpectedPath = process.platform === 'win32'
+		? expectedPath.toLowerCase()
+		: expectedPath;
+	const cachePath = Object.keys(require.cache).find(candidate => {
+		const resolvedCandidate = path.resolve(candidate);
+		return (process.platform === 'win32' ? resolvedCandidate.toLowerCase() : resolvedCandidate)
+			=== normalizedExpectedPath;
+	});
+	assert.ok(cachePath, `${relativePath} must be loaded by the installed extension`);
+	return require(cachePath) as T;
+}
+
 export async function run(): Promise<void> {
+	const expectScannerlessWindows = process.env.VSCODE_H2O_EXPECT_SCANNERLESS_WINDOWS === '1';
+	if (expectScannerlessWindows) {
+		assert.strictEqual(process.platform, 'win32', 'the scannerless Windows smoke must run on Windows');
+	}
 	const extension = vscode.extensions.getExtension(extensionId);
 	assert.ok(extension, `${extensionId} must be installed from the VSIX`);
 	const completionConfiguration = vscode.workspace.getConfiguration('shellCompletion');
-	await completionConfiguration.update(
+	await updateGlobalConfiguration(
+		completionConfiguration,
 		'enableCompletion',
-		false,
-		vscode.ConfigurationTarget.Global,
+		expectScannerlessWindows ? undefined : false,
 	);
-	await completionConfiguration.update(
+	await updateGlobalConfiguration(
+		completionConfiguration,
 		'scanUnknownCommands',
-		false,
-		vscode.ConfigurationTarget.Global,
+		expectScannerlessWindows ? undefined : false,
 	);
 
 	const sourceRoot = path.resolve(process.env.VSCODE_H2O_SOURCE_ROOT!);
@@ -47,16 +85,56 @@ export async function run(): Promise<void> {
 	assert.ok(extensionPath.startsWith(`${extensionsDir}${path.sep}`), `${extensionPath} must be inside the isolated extensions directory`);
 	assert.ok(extensionPath !== sourceRoot && !extensionPath.startsWith(`${sourceRoot}${path.sep}`), 'the source checkout must not satisfy the VSIX smoke test');
 
-	const packagedCacheFetcherModule = require(path.join(extensionPath, 'out/cacheFetcher.js')) as typeof import('../../cacheFetcher');
-	const packagedCachingFetcher = packagedCacheFetcherModule.CachingFetcher;
-	const originalStartInitialCuratedFetch = packagedCachingFetcher.prototype.startInitialCuratedFetch;
-	packagedCachingFetcher.prototype.startInitialCuratedFetch = async () => undefined;
-	try {
-		await withTimeout(extension.activate(), 10000);
-	} finally {
-		packagedCachingFetcher.prototype.startInitialCuratedFetch = originalStartInitialCuratedFetch;
-	}
+	await withTimeout(extension.activate(), 10000);
 	assert.strictEqual(extension.isActive, true);
+	const packagedCacheFetcherModule = loadActivatedExtensionModule<typeof import('../../cacheFetcher')>(
+		extensionPath,
+		'out/cacheFetcher.js',
+	);
+	const packagedCachingFetcher = packagedCacheFetcherModule.CachingFetcher;
+	if (expectScannerlessWindows) {
+		const packagedH2oRunnerModule = loadActivatedExtensionModule<{
+			runH2o: typeof import('../../h2oRunner').runH2o;
+		}>(extensionPath, 'out/h2oRunner.js');
+		const originalRunH2o = packagedH2oRunnerModule.runH2o;
+		let localScanCalls = 0;
+		try {
+			packagedH2oRunnerModule.runH2o = async () => {
+				localScanCalls += 1;
+				return undefined;
+			};
+			await updateGlobalConfiguration(
+				completionConfiguration,
+				'scanUnknownCommands',
+				true,
+			);
+			const unknownDocument = await vscode.workspace.openTextDocument({
+				language: 'shellscript',
+				content: 'vscode-h2o-scannerless-probe --v',
+			});
+			const unknownCaret = unknownDocument.positionAt(unknownDocument.getText().length);
+			await withTimeout(
+				vscode.commands.executeCommand<vscode.CompletionList>(
+					'vscode.executeCompletionItemProvider',
+					unknownDocument.uri,
+					unknownCaret,
+				),
+				10000,
+			);
+			assert.strictEqual(
+				localScanCalls,
+				0,
+				'the Windows Extension Host must ignore an enabled local scan setting',
+			);
+		} finally {
+			packagedH2oRunnerModule.runH2o = originalRunH2o;
+			await updateGlobalConfiguration(
+				completionConfiguration,
+				'scanUnknownCommands',
+				undefined,
+			);
+		}
+	}
 	const settings = extension.packageJSON.contributes.configuration.properties as Record<
 		string,
 		Record<string, unknown>
@@ -122,28 +200,30 @@ export async function run(): Promise<void> {
 		const editor = await vscode.window.showTextDocument(document, { preview: false });
 		const caret = document.positionAt(document.getText().length);
 		editor.selection = new vscode.Selection(caret, caret);
-		const disabledCompletion = await withTimeout(
-			vscode.commands.executeCommand<vscode.CompletionList>(
-				'vscode.executeCompletionItemProvider',
-				document.uri,
-				caret,
-			),
-			10000,
-		);
-		assert.ok(
-			!disabledCompletion.items.some(item =>
-				(typeof item.label === 'string' ? item.label : item.label.label)
-				=== '--vscode-h2o-packaged-smoke'
-			),
-			'the installed VSIX must not provide completion while disabled at activation',
-		);
-		assert.strictEqual(fetchCalls, 0);
+		if (!expectScannerlessWindows) {
+			const disabledCompletion = await withTimeout(
+				vscode.commands.executeCommand<vscode.CompletionList>(
+					'vscode.executeCompletionItemProvider',
+					document.uri,
+					caret,
+				),
+				10000,
+			);
+			assert.ok(
+				!disabledCompletion.items.some(item =>
+					(typeof item.label === 'string' ? item.label : item.label.label)
+					=== '--vscode-h2o-packaged-smoke'
+				),
+				'the installed VSIX must not provide completion while disabled at activation',
+			);
+			assert.strictEqual(fetchCalls, 0);
 
-		await completionConfiguration.update(
-			'enableCompletion',
-			true,
-			vscode.ConfigurationTarget.Global,
-		);
+			await updateGlobalConfiguration(
+				completionConfiguration,
+				'enableCompletion',
+				true,
+			);
+		}
 		const completion = await withTimeout(
 			vscode.commands.executeCommand<vscode.CompletionList>(
 				'vscode.executeCompletionItemProvider',
@@ -160,6 +240,29 @@ export async function run(): Promise<void> {
 			'the installed VSIX must parse a shell document and provide an option completion',
 		);
 		assert.strictEqual(fetchCalls, 1);
+
+		const hoverSource = 'git --vscode-h2o-packaged-smoke';
+		const hoverDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: hoverSource,
+		});
+		const hoverPosition = new vscode.Position(0, hoverSource.indexOf('packaged'));
+		const hovers = await withTimeout(
+			vscode.commands.executeCommand<vscode.Hover[]>(
+				'vscode.executeHoverProvider',
+				hoverDocument.uri,
+				hoverPosition,
+			),
+			10000,
+		);
+		const hoverText = hovers
+			.flatMap(hover => hover.contents)
+			.map(content => typeof content === 'string' ? content : content.value)
+			.join('\n');
+		assert.ok(
+			hoverText.includes('packaged parser smoke option'),
+			'the installed VSIX must provide hover from cached command data',
+		);
 
 		const debugReport = await withTimeout(
 			vscode.commands.executeCommand<CaretDebugReport>('h2o.inspectCaretContext'),

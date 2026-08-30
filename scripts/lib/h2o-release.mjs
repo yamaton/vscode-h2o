@@ -77,6 +77,10 @@ export function validateH2oLock(lock) {
 
   for (const [vsixTarget, h2oTarget] of Object.entries(lock.vsixTargets)) {
     assertSafeName(vsixTarget, 'VSIX target');
+    if (h2oTarget === null) {
+      assert.ok(vsixTarget.startsWith('win32-'), `only Windows VSIX targets may omit H2O: ${vsixTarget}`);
+      continue;
+    }
     assert.ok(lock.assets[h2oTarget], `VSIX target ${vsixTarget} refers to an unknown H2O target: ${h2oTarget}`);
     if (vsixTarget.startsWith('alpine-')) {
       assert.strictEqual(lock.assets[h2oTarget].static, true, `${vsixTarget} requires a static H2O asset`);
@@ -85,8 +89,14 @@ export function validateH2oLock(lock) {
 }
 
 export function h2oTargetForVsix(lock, vsixTarget) {
+  assert.ok(Object.hasOwn(lock.vsixTargets, vsixTarget), `unsupported VSIX target: ${vsixTarget}`);
   const h2oTarget = lock.vsixTargets[vsixTarget];
-  assert.ok(h2oTarget, `unsupported VSIX target: ${vsixTarget}`);
+  return h2oTarget;
+}
+
+export function requireH2oTargetForVsix(lock, vsixTarget) {
+  const h2oTarget = h2oTargetForVsix(lock, vsixTarget);
+  assert.ok(h2oTarget, `${vsixTarget} does not bundle H2O`);
   return h2oTarget;
 }
 

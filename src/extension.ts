@@ -66,6 +66,7 @@ import {
   requestUnknownCommandScanConsent,
   unknownCommandScanConsentStateKey,
 } from './scanConsent';
+import { supportsLocalCommandScanning } from './h2oRunner';
 
 export type { ProviderSuppressionReason } from './providerContext';
 
@@ -406,7 +407,7 @@ async function registerExtension(
     const enabled = vscode.workspace
       .getConfiguration('shellCompletion')
       .get<boolean>('scanUnknownCommands', false);
-    fetcher.setScanUnknownCommands(enabled);
+    fetcher.setScanUnknownCommands(supportsLocalCommandScanning() && enabled);
   };
   updateUnknownCommandScanPolicy();
   activationRegistrations.push(fetcher);
@@ -1435,38 +1436,40 @@ async function registerExtension(
 
   activationRegistrations.push(vscode.workspace.onDidChangeTextDocument(edit));
   activationRegistrations.push(vscode.workspace.onDidCloseTextDocument(close));
-  void requestUnknownCommandScanConsent({
-    configuredValue: () => vscode.workspace
-      .getConfiguration('shellCompletion')
-      .inspect<boolean>('scanUnknownCommands')?.globalValue,
-    promptedVersion: () => context.globalState.get<number>(unknownCommandScanConsentStateKey),
-    recordPromptedVersion: version => context.globalState.update(
-      unknownCommandScanConsentStateKey,
-      version,
-    ),
-    prompt: async () => {
-      const choice = await vscode.window.showWarningMessage(
-        'Allow Shell Completion to run unknown commands with --help to provide completions?',
-        enableLocalScansLabel,
-        keepLocalScansDisabledLabel,
+  if (supportsLocalCommandScanning()) {
+    void requestUnknownCommandScanConsent({
+      configuredValue: () => vscode.workspace
+        .getConfiguration('shellCompletion')
+        .inspect<boolean>('scanUnknownCommands')?.globalValue,
+      promptedVersion: () => context.globalState.get<number>(unknownCommandScanConsentStateKey),
+      recordPromptedVersion: version => context.globalState.update(
+        unknownCommandScanConsentStateKey,
+        version,
+      ),
+      prompt: async () => {
+        const choice = await vscode.window.showWarningMessage(
+          'Allow Shell Completion to run unknown commands with --help to provide completions?',
+          enableLocalScansLabel,
+          keepLocalScansDisabledLabel,
+        );
+        if (choice === enableLocalScansLabel) {
+          return 'enable';
+        }
+        if (choice === keepLocalScansDisabledLabel) {
+          return 'keep-disabled';
+        }
+        return undefined;
+      },
+      updateConfiguredValue: enabled => vscode.workspace
+        .getConfiguration('shellCompletion')
+        .update('scanUnknownCommands', enabled, vscode.ConfigurationTarget.Global),
+    }).catch(error => {
+      console.error('[Unknown command scans] Failed to handle the local scan choice:', error);
+      void vscode.window.showErrorMessage(
+        'Shell Completion could not finish local command scan setup. Check shellCompletion.scanUnknownCommands in Settings and try again.',
       );
-      if (choice === enableLocalScansLabel) {
-        return 'enable';
-      }
-      if (choice === keepLocalScansDisabledLabel) {
-        return 'keep-disabled';
-      }
-      return undefined;
-    },
-    updateConfiguredValue: enabled => vscode.workspace
-      .getConfiguration('shellCompletion')
-      .update('scanUnknownCommands', enabled, vscode.ConfigurationTarget.Global),
-  }).catch(error => {
-    console.error('[Unknown command scans] Failed to handle the local scan choice:', error);
-    void vscode.window.showErrorMessage(
-      'Shell Completion could not finish local command scan setup. Check shellCompletion.scanUnknownCommands in Settings and try again.',
-    );
-  });
+    });
+  }
   context.subscriptions.push(
     ...activationRegistrations,
     { dispose: () => disposeParserResources(parser, trees) },

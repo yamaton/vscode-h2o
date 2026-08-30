@@ -6,6 +6,7 @@ import path from 'node:path';
 import {
   loadH2oLock,
   h2oTargetForVsix,
+  requireH2oTargetForVsix,
   validateH2oLock,
   validateArchiveEntries,
   verifyBinaryHeader,
@@ -36,7 +37,10 @@ const statement = {
 verifyReleaseStatement(lock, statement);
 assert.strictEqual(h2oTargetForVsix(lock, 'linux-x64'), 'x86_64-unknown-linux-musl');
 assert.strictEqual(h2oTargetForVsix(lock, 'alpine-x64'), 'x86_64-unknown-linux-musl');
+assert.strictEqual(h2oTargetForVsix(lock, 'win32-x64'), null);
 assert.throws(() => h2oTargetForVsix(lock, 'alpine-arm64'), /unsupported VSIX target/);
+assert.strictEqual(requireH2oTargetForVsix(lock, 'linux-x64'), 'x86_64-unknown-linux-musl');
+assert.throws(() => requireH2oTargetForVsix(lock, 'win32-x64'), /does not bundle H2O/);
 
 const clonedLock = () => JSON.parse(JSON.stringify(lock));
 const wrongTag = clonedLock();
@@ -60,6 +64,10 @@ assert.throws(() => validateH2oLock(unsafeTarget), /invalid H2O target/);
 const unknownVsixAsset = clonedLock();
 unknownVsixAsset.vsixTargets['linux-riscv64'] = 'riscv64-unknown-linux-gnu';
 assert.throws(() => validateH2oLock(unknownVsixAsset), /unknown H2O target/);
+
+const scannerlessLinux = clonedLock();
+scannerlessLinux.vsixTargets['linux-riscv64'] = null;
+assert.throws(() => validateH2oLock(scannerlessLinux), /only Windows VSIX targets may omit H2O/);
 
 const dynamicAlpine = clonedLock();
 delete dynamicAlpine.assets[dynamicAlpine.vsixTargets['alpine-x64']].static;

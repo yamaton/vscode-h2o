@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { h2oTargetForVsix, loadH2oLock, verifyBinary } from './lib/h2o-release.mjs';
+import { loadH2oLock, requireH2oTargetForVsix, verifyBinary } from './lib/h2o-release.mjs';
 import {
   loadGrammarLock,
   verifyGrammarArtifact,
@@ -16,7 +16,7 @@ const lock = loadH2oLock(path.join(projectRoot, 'h2o.lock.json'));
 const grammarLock = loadGrammarLock(path.join(projectRoot, 'tree-sitter-bash.lock.json'));
 const hostTarget = `${process.platform}-${process.arch}`;
 const vsixTarget = process.argv[2] ?? hostTarget;
-const h2oTarget = h2oTargetForVsix(lock, vsixTarget);
+const h2oTarget = requireH2oTargetForVsix(lock, vsixTarget);
 const binaryPath = 'bin/h2o';
 const executable = path.join(projectRoot, binaryPath);
 verifyBinary(executable, h2oTarget, lock.assets[h2oTarget]);
