@@ -1527,6 +1527,7 @@ async function verifyCaretDebugInterface(): Promise<void> {
 }
 
 async function verifyLiveCaretAndCursorDebugInterface(parser: Parser): Promise<void> {
+	assert.ok(registeredCompletionProvider);
 	const originalFetch = CachingFetcher.prototype.fetch;
 	const liveDebugFetch = async function fetch(name: string): Promise<Command> {
 		assert.strictEqual(name, 'git');
@@ -1669,6 +1670,11 @@ async function verifyLiveCaretAndCursorDebugInterface(parser: Parser): Promise<v
 		assert.ok((failedCompletionState.traces.completion?.timings?.totalMs ?? -1) >= 0);
 		CachingFetcher.prototype.fetch = liveDebugFetch;
 
+		const cleanupDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: 'git --cleanup-failure',
+		});
+		const cleanupPosition = cleanupDocument.positionAt(cleanupDocument.getText().length);
 		const sampleTree = parseTree(parser, 'git');
 		const treePrototype = Object.getPrototypeOf(sampleTree) as {
 			copy(this: Tree): Tree;
@@ -1681,7 +1687,9 @@ async function verifyLiveCaretAndCursorDebugInterface(parser: Parser): Promise<v
 		let failNextRequestCleanup = true;
 		treePrototype.copy = function copy(this: Tree): Tree {
 			const requestTree = originalCopy.call(this);
-			requestTrees.add(requestTree);
+			if (this.rootNode.text === cleanupDocument.getText()) {
+				requestTrees.add(requestTree);
+			}
 			return requestTree;
 		};
 		treePrototype.delete = function deleteTree(this: Tree): void {
@@ -1696,14 +1704,22 @@ async function verifyLiveCaretAndCursorDebugInterface(parser: Parser): Promise<v
 			}
 			originalDelete.call(this);
 		};
+		const cleanupCancellation = new vscode.CancellationTokenSource();
 		try {
-			await completionLabelsAt(document, end);
+			await Promise.resolve(registeredCompletionProvider.provideCompletionItems(
+				cleanupDocument,
+				cleanupPosition,
+				cleanupCancellation.token,
+				{ triggerKind: vscode.CompletionTriggerKind.Invoke, triggerCharacter: undefined },
+			));
 		} catch {
-			// VS Code versions differ on whether executeCompletionItemProvider rejects.
+			// The controlled cleanup failure rejects the direct provider request.
 		} finally {
+			cleanupCancellation.dispose();
 			treePrototype.copy = originalCopy;
 			treePrototype.delete = originalDelete;
 		}
+		assert.strictEqual(failNextRequestCleanup, false);
 		const cleanupFailureState = await getLiveState();
 		assert.strictEqual(cleanupFailureState.traces.completion?.outcome, 'error');
 		assert.match(
