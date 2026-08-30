@@ -158,6 +158,19 @@ function deferred<T>(): {
   return { promise, resolve, reject };
 }
 
+async function waitForAsyncCondition(
+  condition: () => Promise<boolean>,
+  timeoutMs: number,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (!(await condition())) {
+    if (Date.now() - startedAt >= timeoutMs) {
+      throw new Error(`Condition was not met within ${timeoutMs} ms`);
+    }
+    await new Promise<void>(resolve => setTimeout(resolve, 10));
+  }
+}
+
 suite('CachingFetcher', () => {
   test('starts with unknown-command scans disabled', async () => {
     let localCalls = 0;
@@ -649,12 +662,10 @@ suite('CachingFetcher', () => {
     const pending = fetcher.fetch('git');
     await saveStarted.promise;
     const forced = fetcher.fetchAllCurated('general', true);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetcher.fetch('git')).description === remote.description) {
-        break;
-      }
-      await new Promise<void>(resolve => setImmediate(resolve));
-    }
+    await waitForAsyncCondition(
+      async () => (await fetcher.fetch('git')).description === remote.description,
+      1000,
+    );
     assert.strictEqual((await fetcher.fetch('git')).description, remote.description);
     releaseSave.resolve();
 
