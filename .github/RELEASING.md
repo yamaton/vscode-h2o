@@ -27,12 +27,16 @@ publish job to Microsoft Entra ID authentication before that date.
 The publish workflow verifies that the manifest and lockfile versions agree and increased from the previous `main`
 commit. It then re-runs the complete quality workflow, downloads its seven verified platform-specific VSIX artifacts,
 verifies them again, and waits for approval on the `marketplace` environment. After approval it verifies Marketplace
-publishing rights, creates the immutable unprefixed version tag at the merged commit, publishes all targets together,
-and confirms the new Marketplace version.
+publishing rights, creates the immutable unprefixed version tag at the merged commit, and publishes all targets
+together. A separate job outside the protected environment polls the public Marketplace for up to ten minutes until
+the new version is visible for every expected target.
 
 If publication partially succeeds because of a transient failure, re-run only the failed `publish` job. Publishing
 skips packages already present at that version and continues with the missing targets, so this recovery uses the
 original immutable tag and artifacts. Never move, delete, or recreate a version tag. If the artifacts have expired or
 their contents need to change, release a new version instead.
+
+If publication succeeds but Marketplace propagation outlasts the confirmation job, re-run only the failed `confirm`
+job. Confirmation uses no Marketplace credential or protected environment, so this retry requires no release approval.
 
 Do not publish the same extension version manually or from another workflow; duplicate recovery assumes that every existing target came from the original run's verified artifacts.
