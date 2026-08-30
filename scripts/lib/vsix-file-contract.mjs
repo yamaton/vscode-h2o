@@ -27,6 +27,7 @@ export const requiredExtensionFiles = [
   'extension/out/parserLanguage.js',
   'extension/out/providerContext.js',
   'extension/out/providerPerformance.js',
+  'extension/out/scanConsent.js',
   'extension/out/treeCache.js',
   'extension/out/utils.js',
   'extension/package.json',

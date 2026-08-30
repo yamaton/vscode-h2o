@@ -212,9 +212,9 @@
                 },
                 "shellCompletion.scanUnknownCommands": {
                     "type": "boolean",
-                    "default": true,
+                    "default": false,
                     "scope": "machine",
-                    "markdownDescription": "Whether commands missing from the command-specification cache may be executed with `--help` to generate specifications. Disable to use only downloaded or cached specifications."
+                    "markdownDescription": "Whether commands missing from the command-specification cache may be executed with `--help` to generate specifications. Local scans are disabled by default; the extension offers this choice on activation when no explicit setting or prior response exists. Downloaded and cached specifications remain available when disabled."
                 }
             }
         },

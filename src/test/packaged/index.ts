@@ -35,6 +35,11 @@ export async function run(): Promise<void> {
 		false,
 		vscode.ConfigurationTarget.Global,
 	);
+	await completionConfiguration.update(
+		'scanUnknownCommands',
+		false,
+		vscode.ConfigurationTarget.Global,
+	);
 
 	const sourceRoot = path.resolve(process.env.VSCODE_H2O_SOURCE_ROOT!);
 	const extensionsDir = path.resolve(process.env.VSCODE_H2O_EXTENSIONS_DIR!);
@@ -71,7 +76,7 @@ export async function run(): Promise<void> {
 			default: settings['shellCompletion.scanUnknownCommands']?.default,
 			scope: settings['shellCompletion.scanUnknownCommands']?.scope,
 		},
-		{ type: 'boolean', default: true, scope: 'machine' },
+		{ type: 'boolean', default: false, scope: 'machine' },
 		'the installed VSIX must expose the unknown-command scan policy as a machine setting',
 	);
 	assert.strictEqual(

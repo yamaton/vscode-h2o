@@ -91,7 +91,7 @@ export class CachingFetcher {
   private readonly localFetches = new Map<string, LocalFetchEntry>();
   private readonly localFetchQueue: LocalFetchEntry[] = [];
   private activeLocalFetch: LocalFetchEntry | undefined;
-  private scanUnknownCommandsEnabled = true;
+  private scanUnknownCommandsEnabled = false;
   private disposed = false;
 
   constructor(

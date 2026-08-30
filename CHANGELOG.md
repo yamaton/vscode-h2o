@@ -28,7 +28,7 @@
 - Correct incremental parse coordinates for shortening, batched, CRLF, and Unicode edits, and avoid stack exhaustion when walking back across long runs of whitespace.
 - Coalesce syntax-tree parsing after document edits, parse unused documents lazily, and limit parser-backed features for very large documents by default through `shellCompletion.maxDocumentCharacters` to keep the Extension Host responsive.
 - Add opt-in live Completion, Hover, and Tree-sitter diagnostic views, caret and cursor inspection commands, read-only snapshots, and pause and resume controls.
-- Add the machine-scoped `shellCompletion.scanUnknownCommands` setting to disable local `--help` execution while continuing to use downloaded and cached command specifications, with immediate cancellation of queued or running scans.
+- Add the machine-scoped `shellCompletion.scanUnknownCommands` setting, disabled by default, and offer the choice on activation when no explicit setting or prior response exists before enabling local `--help` execution. Downloaded and cached command specifications remain available while disabled, and disabling the setting immediately cancels queued or running scans.
 - Add the window-scoped `shellCompletion.enableCompletion` setting to unregister this extension's completion suggestions and space trigger without disabling hover, addressing [Issue #13](https://github.com/yamaton/vscode-h2o/issues/13).
 - Treat `shellCompletion.h2oPath` as a machine-scoped path to the local command-help parser so workspace settings cannot replace the executable used by the Extension Host.
 

@@ -26,9 +26,11 @@ Set `shellCompletion.enableCompletion` to `false` to turn off completion suggest
 
 The common collection currently contains more than 400 command specifications, including `git`, `npm`, `docker`, and `terraform`. See [general.txt](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) for the complete list.
 
-When an installed command is not in the cache, the extension can create a specification from its `--help` output and save it for later use. The bundled scanner does not consult man pages.
+When an installed command is not in the cache, the extension can create a specification from its `--help` output and save it for later use. The bundled command-help parser does not consult man pages.
 
-Set `shellCompletion.scanUnknownCommands` to `false` to prevent these local help scans. Downloaded and previously cached specifications remain available. The setting applies to the machine running the VS Code Extension Host, including an individual remote environment, and a workspace cannot override it.
+Local help scans are disabled by default. When the extension activates on an Extension Host with neither an explicit setting nor a recorded response, it asks whether it may run commands referenced by Shell Script or BitBake files with `--help` there. Choosing **Allow Local Scans** sets `shellCompletion.scanUnknownCommands` to `true`; choosing **Keep Disabled** or dismissing the notification leaves downloaded and previously cached specifications available without executing uncached commands.
+
+You can change `shellCompletion.scanUnknownCommands` later in user settings, or in remote settings when using a remote Extension Host. The machine-scoped setting is not synchronized, and a workspace cannot override it.
 
 To request another curated command specification, [open a request in h2o-curated-data](https://github.com/yamaton/h2o-curated-data/issues/1).
 
@@ -116,9 +118,9 @@ When upgrading from a version that stored command specifications in VS Code glob
 
 ## Security
 
-Creating a specification for an unknown command executes that command with `--help`. A program found in an untrusted local environment could therefore present a risk.
+Creating a specification for an unknown command executes a command referenced by the open Shell Script or BitBake file with `--help`. A program found in an untrusted local environment could therefore present a risk.
 
-To prevent the extension from executing commands that are absent from its specification cache, set `shellCompletion.scanUnknownCommands` to `false` in user settings, or in remote settings when using a remote Extension Host. Changing the setting stops queued help scans and terminates a running scan; it does not delete downloaded or previously cached specifications.
+Unknown-command scanning remains disabled unless you select **Allow Local Scans** in the activation notification or set `shellCompletion.scanUnknownCommands` to `true`. Setting it back to `false` stops queued help scans and terminates a running scan; it does not delete downloaded or previously cached specifications.
 
 The extension uses an operating-system sandbox when one is available:
 

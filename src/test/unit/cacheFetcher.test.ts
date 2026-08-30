@@ -3,7 +3,7 @@ import type { Memento } from 'vscode';
 import { Response } from 'node-fetch';
 import { gzipSync } from 'zlib';
 import {
-  CachingFetcher,
+  CachingFetcher as DefaultDisabledCachingFetcher,
   CachingFetcherDependencies,
   CommandFetchCancelledError,
   UnknownCommandScanDisabledError,
@@ -61,6 +61,19 @@ class FakeMemento implements Memento {
     } else {
       this.values.set(key, value);
     }
+  }
+}
+
+// Most cache tests exercise local scanning itself. Make that opt-in explicit
+// in the test fixture while retaining the production class for default-policy
+// coverage.
+class CachingFetcher extends DefaultDisabledCachingFetcher {
+  constructor(
+    memento: Memento,
+    dependencies: Partial<CachingFetcherDependencies> = {},
+  ) {
+    super(memento, dependencies);
+    this.setScanUnknownCommands(true);
   }
 }
 
@@ -146,6 +159,23 @@ function deferred<T>(): {
 }
 
 suite('CachingFetcher', () => {
+  test('starts with unknown-command scans disabled', async () => {
+    let localCalls = 0;
+    const fetcher = new DefaultDisabledCachingFetcher(new FakeMemento(), dependencies({
+      runLocalCommand: async name => {
+        localCalls += 1;
+        return command(name, 'local');
+      },
+    }));
+    await fetcher.init();
+
+    await assert.rejects(
+      fetcher.fetch('git'),
+      error => error instanceof UnknownCommandScanDisabledError,
+    );
+    assert.strictEqual(localCalls, 0);
+  });
+
   test('loads cached commands without invoking H2O', async () => {
     const cached = command('git', 'cached');
     const storage = new FakeCacheStorage({

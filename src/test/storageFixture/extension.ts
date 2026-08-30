@@ -116,6 +116,7 @@ async function runPhase(context: vscode.ExtensionContext, phase: string): Promis
       cacheStorage: storage,
       runLocalCommand: async () => command('git', 'session only'),
     });
+    fetcher.setScanUnknownCommands(true);
     try {
       await fetcher.init();
     } finally {
@@ -134,6 +135,7 @@ async function runPhase(context: vscode.ExtensionContext, phase: string): Promis
       runLocalCommand: async () => command('wrong-local'),
       fetch: async () => new Response(JSON.stringify(command('wrong-remote')), { status: 200 }),
     });
+    mismatchFetcher.setScanUnknownCommands(true);
     await mismatchFetcher.init();
     let localMismatchRejected = false;
     try {

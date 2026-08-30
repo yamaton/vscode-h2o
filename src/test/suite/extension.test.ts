@@ -45,6 +45,7 @@ let initialCuratedProbe: InitialCuratedProbe | undefined;
 let registeredCompletionProvider: vscode.CompletionItemProvider | undefined;
 let registeredHoverProvider: vscode.HoverProvider | undefined;
 let activatedFetcher: CachingFetcher | undefined;
+const unknownCommandScanConsentPrompts: Array<{ message: string; items: string[] }> = [];
 
 async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Promise<T> {
 	let timeout: NodeJS.Timeout | undefined;
@@ -164,6 +165,16 @@ async function verifyRegisteredCommands(): Promise<void> {
 	for (const command of expected) {
 		assert.ok(registered.has(command), `${command} must be registered during activation`);
 	}
+}
+
+function verifyUnknownCommandScanConsentPrompt(): void {
+	assert.deepStrictEqual(unknownCommandScanConsentPrompts, [{
+		message: 'Shell Completion can complete uncached commands by running commands referenced in Shell Script or BitBake files with --help on this Extension Host. Allow local command scans on this machine? Downloaded and cached specifications remain available when disabled.',
+		items: ['Allow Local Scans', 'Keep Disabled'],
+	}]);
+	const configuration = vscode.workspace.getConfiguration('shellCompletion');
+	assert.strictEqual(configuration.get<boolean>('scanUnknownCommands'), false);
+	assert.strictEqual(configuration.inspect<boolean>('scanUnknownCommands')?.globalValue, false);
 }
 
 async function verifyCommandHandlers(): Promise<void> {
@@ -783,6 +794,7 @@ async function verifyCompletionConfiguration(): Promise<void> {
 	assert.ok(registeredCompletionProvider);
 	const configuration = vscode.workspace.getConfiguration('shellCompletion');
 	const originalGlobalValue = configuration.inspect<boolean>('enableCompletion')?.globalValue;
+	const originalScanGlobalValue = configuration.inspect<boolean>('scanUnknownCommands')?.globalValue;
 	const internals = activatedFetcher as unknown as {
 		dependencies: CachingFetcherDependencies;
 	};
@@ -814,6 +826,11 @@ async function verifyCompletionConfiguration(): Promise<void> {
 	};
 
 	try {
+		await configuration.update(
+			'scanUnknownCommands',
+			true,
+			vscode.ConfigurationTarget.Global,
+		);
 		await configuration.update(
 			'enableCompletion',
 			false,
@@ -945,6 +962,11 @@ async function verifyCompletionConfiguration(): Promise<void> {
 			originalGlobalValue,
 			vscode.ConfigurationTarget.Global,
 		);
+		await configuration.update(
+			'scanUnknownCommands',
+			originalScanGlobalValue,
+			vscode.ConfigurationTarget.Global,
+		);
 	}
 }
 
@@ -953,6 +975,7 @@ async function verifyInFlightCompletionCancellationOnDisable(): Promise<void> {
 	assert.ok(registeredCompletionProvider);
 	const configuration = vscode.workspace.getConfiguration('shellCompletion');
 	const originalGlobalValue = configuration.inspect<boolean>('enableCompletion')?.globalValue;
+	const originalScanGlobalValue = configuration.inspect<boolean>('scanUnknownCommands')?.globalValue;
 	const internals = activatedFetcher as unknown as {
 		dependencies: CachingFetcherDependencies;
 	};
@@ -990,6 +1013,11 @@ async function verifyInFlightCompletionCancellationOnDisable(): Promise<void> {
 
 	try {
 		await activatedFetcher.unset(commandName);
+		await configuration.update(
+			'scanUnknownCommands',
+			true,
+			vscode.ConfigurationTarget.Global,
+		);
 		await configuration.update(
 			'enableCompletion',
 			true,
@@ -1037,6 +1065,11 @@ async function verifyInFlightCompletionCancellationOnDisable(): Promise<void> {
 		await configuration.update(
 			'enableCompletion',
 			originalGlobalValue,
+			vscode.ConfigurationTarget.Global,
+		);
+		await configuration.update(
+			'scanUnknownCommands',
+			originalScanGlobalValue,
 			vscode.ConfigurationTarget.Global,
 		);
 	}
@@ -3350,8 +3383,22 @@ suiteSetup(async () => {
 		registerCompletionItemProvider: typeof vscode.languages.registerCompletionItemProvider;
 		registerHoverProvider: typeof vscode.languages.registerHoverProvider;
 	};
+	const windowApi = vscode.window as unknown as {
+		showWarningMessage: typeof vscode.window.showWarningMessage;
+	};
 	const originalRegisterCompletionItemProvider = languages.registerCompletionItemProvider;
 	const originalRegisterHoverProvider = languages.registerHoverProvider;
+	const originalShowWarningMessage = windowApi.showWarningMessage;
+	let consentPromptObservedResolve!: () => void;
+	const consentPromptObserved = new Promise<void>(resolve => {
+		consentPromptObservedResolve = resolve;
+	});
+	assert.strictEqual(
+		vscode.workspace.getConfiguration('shellCompletion')
+			.inspect<boolean>('scanUnknownCommands')?.globalValue,
+		undefined,
+		'the isolated Extension Host must begin without an explicit scan policy',
+	);
 	languages.registerCompletionItemProvider = ((
 		selector: vscode.DocumentSelector,
 		provider: vscode.CompletionItemProvider,
@@ -3372,12 +3419,25 @@ suiteSetup(async () => {
 		registeredHoverProvider = provider;
 		return originalRegisterHoverProvider.call(vscode.languages, selector, provider);
 	}) as typeof vscode.languages.registerHoverProvider;
+	windowApi.showWarningMessage = (async (
+		message: string,
+		...items: string[]
+	): Promise<string | undefined> => {
+		unknownCommandScanConsentPrompts.push({ message, items });
+		consentPromptObservedResolve();
+		return 'Keep Disabled';
+	}) as unknown as typeof vscode.window.showWarningMessage;
 
 	try {
 		await activateExtension();
+		await withTimeout(consentPromptObserved, 5000);
+		await waitForCondition(() => vscode.workspace
+			.getConfiguration('shellCompletion')
+			.inspect<boolean>('scanUnknownCommands')?.globalValue === false, 5000);
 	} finally {
 		languages.registerCompletionItemProvider = originalRegisterCompletionItemProvider;
 		languages.registerHoverProvider = originalRegisterHoverProvider;
+		windowApi.showWarningMessage = originalShowWarningMessage;
 	}
 	assert.ok(registeredCompletionProvider, 'activation must register a completion provider');
 	assert.ok(registeredHoverProvider, 'activation must register a hover provider');
@@ -3385,6 +3445,7 @@ suiteSetup(async () => {
 
 suite('Extension activation', () => {
 	test('registers contributed commands', verifyRegisteredCommands);
+	test('offers local command scans and keeps them disabled when declined', verifyUnknownCommandScanConsentPrompt);
 	test('persists a controlled curated load as one global-storage snapshot', verifyInitialCuratedPersistence);
 	test('handles non-destructive command paths', verifyCommandHandlers);
 });
