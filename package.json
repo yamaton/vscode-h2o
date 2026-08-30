@@ -204,6 +204,12 @@
                     "scope": "resource",
                     "description": "Maximum Shell or BitBake document size, in UTF-16 characters, for parser-backed completion, hover, and debug features. Set to 0 for no limit."
                 },
+                "shellCompletion.enableCompletion": {
+                    "type": "boolean",
+                    "default": true,
+                    "scope": "window",
+                    "description": "Whether this extension provides command completion suggestions. Hover and command-spec cache features remain available when disabled."
+                },
                 "shellCompletion.scanUnknownCommands": {
                     "type": "boolean",
                     "default": true,

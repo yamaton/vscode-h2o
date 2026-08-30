@@ -19,6 +19,7 @@
 - Release superseded syntax trees, retain request-local copies during asynchronous completion and hover work, and ignore unrelated language edits to prevent WebAssembly memory growth and invalid tree access.
 - Coalesce syntax-tree parsing after document edits, parse unused documents lazily, and limit parser-backed features for very large documents by default to keep the Extension Host responsive.
 - Add the machine-scoped `shellCompletion.scanUnknownCommands` setting to disable local `--help` execution while continuing to use downloaded and cached command specifications, with immediate cancellation of queued or running scans.
+- Add the window-scoped `shellCompletion.enableCompletion` setting to unregister this extension's completion suggestions and space trigger without disabling hover, addressing [Issue #13](https://github.com/yamaton/vscode-h2o/issues/13).
 - Treat `shellCompletion.h2oPath` as a machine-scoped Extension Host executable path so workspace settings cannot replace it.
 
 ## [0.2.15] (2023-11-04)

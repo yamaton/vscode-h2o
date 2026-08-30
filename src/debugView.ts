@@ -79,6 +79,13 @@ function decisionState(decision: LiveDebugProviderDecision): {
   description: string;
   icon: string;
 } {
+  if (decision.lookupSkippedReason === 'completion-disabled') {
+    return {
+      label: 'Decision',
+      description: 'Disabled by shellCompletion.enableCompletion',
+      icon: 'circle-slash',
+    };
+  }
   if (decision.lookupSkippedReason === 'unknown-command-scanning-disabled') {
     return {
       label: 'Lookup',

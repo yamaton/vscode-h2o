@@ -204,7 +204,7 @@ export interface DebugProviderDecision {
   commandNode: DebugNode | null;
   invocation: DebugInvocation | null;
   resolution: DebugResolution | null;
-  lookupSkippedReason: 'unknown-command-scanning-disabled' | null;
+  lookupSkippedReason: 'completion-disabled' | 'unknown-command-scanning-disabled' | null;
   lookupError: string | null;
 }
 
@@ -424,12 +424,26 @@ async function registerExtension(
   });
 
 
-  const compprovider = vscode.languages.registerCompletionItemProvider(
-    supportedLanguages,
-    {
-      async provideCompletionItems(document, caret, token, context) {
-        const liveTraceRequest = trackLiveCompletionRequest(document, caret);
-        try {
+  let completionEnabled = vscode.workspace
+    .getConfiguration('shellCompletion')
+    .get<boolean>('enableCompletion', true);
+  const activeCompletionRequests = new Set<vscode.CancellationTokenSource>();
+  const completionProvider: vscode.CompletionItemProvider = {
+    async provideCompletionItems(document, caret, token, context) {
+      if (!completionEnabled) {
+        return [];
+      }
+      const requestCancellation = new vscode.CancellationTokenSource();
+      activeCompletionRequests.add(requestCancellation);
+      const editorCancellation = token.onCancellationRequested(() => {
+        requestCancellation.cancel();
+      });
+      if (token.isCancellationRequested) {
+        requestCancellation.cancel();
+      }
+      const requestToken = requestCancellation.token;
+      const liveTraceRequest = trackLiveCompletionRequest(document, caret);
+      try {
           if (!parser) {
             console.error("[Completion] Parser is unavailable!");
             trackLiveCompletionResult(liveTraceRequest, 'error', {
@@ -440,7 +454,7 @@ async function registerExtension(
           const treeRequest = await measureProviderAsync(
             liveTraceRequest,
             'treeWaitMs',
-            () => waitForValueOrCancellation(documentTrees.getWithTiming(document), token),
+            () => waitForValueOrCancellation(documentTrees.getWithTiming(document), requestToken),
           );
           if (!treeRequest.completed) {
             trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
@@ -487,7 +501,7 @@ async function registerExtension(
               if (matchingNames.length === 0 && snapshot.initialCuratedPending) {
                 const available = await waitForPromiseOrCancellation(
                   fetcher.waitForInitialCuratedAvailability(),
-                  token,
+                  requestToken,
                 );
                 if (!available) {
                   trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
@@ -498,7 +512,7 @@ async function registerExtension(
                   isPrefixOf(commandName.word.text, name)
                 );
               }
-              if (token.isCancellationRequested) {
+              if (requestToken.isCancellationRequested) {
                 trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
                 return [];
               }
@@ -522,7 +536,7 @@ async function registerExtension(
                 resolvedPosition,
                 fetcher,
                 includeCurrentArgument,
-                token,
+                requestToken,
                 liveTraceRequest?.measurement,
               );
               if (!commandContext) {
@@ -579,19 +593,57 @@ async function registerExtension(
               return [];
             }
           }, liveTraceRequest?.measurement);
-        } catch (error) {
-          trackLiveCompletionResult(liveTraceRequest, 'error', {
-            error: debugError(error),
-          });
-          throw error;
-        } finally {
-          finalizeLiveCompletionRequest(liveTraceRequest);
-        }
+      } catch (error) {
+        trackLiveCompletionResult(liveTraceRequest, 'error', {
+          error: debugError(error),
+        });
+        throw error;
+      } finally {
+        finalizeLiveCompletionRequest(liveTraceRequest);
+        editorCancellation.dispose();
+        activeCompletionRequests.delete(requestCancellation);
+        requestCancellation.dispose();
       }
     },
-    ' ',  // triggerCharacter
-  );
-  activationRegistrations.push(compprovider);
+  };
+  let completionProviderRegistration: vscode.Disposable | undefined;
+  const updateCompletionProviderRegistration = (): void => {
+    const enabled = vscode.workspace
+      .getConfiguration('shellCompletion')
+      .get<boolean>('enableCompletion', true);
+    completionEnabled = enabled;
+    if (!enabled) {
+      for (const request of activeCompletionRequests) {
+        request.cancel();
+      }
+    }
+    if (enabled && !completionProviderRegistration) {
+      completionProviderRegistration = vscode.languages.registerCompletionItemProvider(
+        supportedLanguages,
+        completionProvider,
+        ' ',
+      );
+    } else if (!enabled && completionProviderRegistration) {
+      completionProviderRegistration.dispose();
+      completionProviderRegistration = undefined;
+    }
+  };
+  updateCompletionProviderRegistration();
+  activationRegistrations.push({
+    dispose: () => {
+      for (const request of activeCompletionRequests) {
+        request.cancel();
+      }
+      completionProviderRegistration?.dispose();
+      completionProviderRegistration = undefined;
+    },
+  });
+  activationRegistrations.push(vscode.workspace.onDidChangeConfiguration(event => {
+    if (event.affectsConfiguration('shellCompletion.enableCompletion')) {
+      updateCompletionProviderRegistration();
+      scheduleLiveDebug();
+    }
+  }));
 
   const hoverprovider = vscode.languages.registerHoverProvider(supportedLanguages, {
     async provideHover(document, cursor, token) {
@@ -742,6 +794,7 @@ async function registerExtension(
         parser,
         tree,
         fetcher,
+        completionEnabled,
         {
           uri: key,
           languageId: editor.document.languageId,
@@ -1052,6 +1105,7 @@ async function registerExtension(
     const snapshot = await createLiveEditorDebugSnapshot(
       tree,
       fetcher,
+      completionEnabled,
       {
         uri: key,
         languageId: editor.document.languageId,
@@ -1692,6 +1746,7 @@ async function inspectProviderDecision(
   fetcher: CachingFetcher,
   includeArgumentAtPosition: boolean,
   lookupTarget?: CompletionLookupTarget,
+  lookupSkippedReason: DebugProviderDecision['lookupSkippedReason'] = null,
 ): Promise<DebugProviderDecision> {
   const commandNode = decision.commandNode;
   const report: DebugProviderDecision = {
@@ -1711,11 +1766,11 @@ async function inspectProviderDecision(
     commandNode: commandNode ? debugNode(commandNode) : null,
     invocation: null,
     resolution: null,
-    lookupSkippedReason: null,
+    lookupSkippedReason,
     lookupError: null,
   };
 
-  if (!decision.enabled) {
+  if (!decision.enabled || lookupSkippedReason) {
     return report;
   }
 
@@ -1761,6 +1816,7 @@ async function inspectTreeAtPosition(
   root: Node,
   position: vscode.Position,
   fetcher: CachingFetcher,
+  completionEnabled: boolean,
 ): Promise<DebugTreeReport> {
   const currentNode = getCurrentNode(root, position);
   const completionAnalysis = getCompletionRequestAnalysis(document, root, position);
@@ -1777,6 +1833,7 @@ async function inspectTreeAtPosition(
       fetcher,
       completionAnalysis.includeArgumentAtPosition,
       completionAnalysis.lookupTarget,
+      completionEnabled ? null : 'completion-disabled',
     ),
     hover: await inspectProviderDecision(root, position, hoverDecision, fetcher, true),
   };
@@ -1844,6 +1901,7 @@ async function createCaretDebugReport(
   parser: Parser,
   cachedTree: Tree,
   fetcher: CachingFetcher,
+  completionEnabled: boolean,
   document: CaretDebugReport['document'],
   source: string,
   caret: vscode.Position,
@@ -1857,8 +1915,20 @@ async function createCaretDebugReport(
   return withTreeCopy(cachedTree, async cachedCopy => {
     const freshTree = parseTree(parser, source);
     try {
-      const cached = await inspectTreeAtPosition(lineProvider, cachedCopy.rootNode, caret, fetcher);
-      const fresh = await inspectTreeAtPosition(lineProvider, freshTree.rootNode, caret, fetcher);
+      const cached = await inspectTreeAtPosition(
+        lineProvider,
+        cachedCopy.rootNode,
+        caret,
+        fetcher,
+        completionEnabled,
+      );
+      const fresh = await inspectTreeAtPosition(
+        lineProvider,
+        freshTree.rootNode,
+        caret,
+        fetcher,
+        completionEnabled,
+      );
       return {
         generatedAt: new Date().toISOString(),
         document,
@@ -1918,6 +1988,7 @@ function liveProviderDecision(
 async function createLiveEditorDebugSnapshot(
   cachedTree: Tree,
   fetcher: CachingFetcher,
+  completionEnabled: boolean,
   document: CaretDebugReport['document'],
   source: string,
   caret: vscode.Position,
@@ -1941,6 +2012,7 @@ async function createLiveEditorDebugSnapshot(
       fetcher,
       completionAnalysis.includeArgumentAtPosition,
       completionAnalysis.lookupTarget,
+      completionEnabled ? null : 'completion-disabled',
     );
     const cursorNode = cursor ? getCurrentNode(root, cursor) : undefined;
     const hoverDecision = cursor ? getHoverCursorDecision(root, cursor) : undefined;

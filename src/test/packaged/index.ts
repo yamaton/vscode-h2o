@@ -29,6 +29,12 @@ async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Pro
 export async function run(): Promise<void> {
 	const extension = vscode.extensions.getExtension(extensionId);
 	assert.ok(extension, `${extensionId} must be installed from the VSIX`);
+	const completionConfiguration = vscode.workspace.getConfiguration('shellCompletion');
+	await completionConfiguration.update(
+		'enableCompletion',
+		false,
+		vscode.ConfigurationTarget.Global,
+	);
 
 	const sourceRoot = path.resolve(process.env.VSCODE_H2O_SOURCE_ROOT!);
 	const extensionsDir = path.resolve(process.env.VSCODE_H2O_EXTENSIONS_DIR!);
@@ -50,6 +56,15 @@ export async function run(): Promise<void> {
 		string,
 		Record<string, unknown>
 	>;
+	assert.deepStrictEqual(
+		{
+			type: settings['shellCompletion.enableCompletion']?.type,
+			default: settings['shellCompletion.enableCompletion']?.default,
+			scope: settings['shellCompletion.enableCompletion']?.scope,
+		},
+		{ type: 'boolean', default: true, scope: 'window' },
+		'the installed VSIX must expose the completion provider switch as a window setting',
+	);
 	assert.deepStrictEqual(
 		{
 			type: settings['shellCompletion.scanUnknownCommands']?.type,
@@ -80,7 +95,9 @@ export async function run(): Promise<void> {
 	}
 
 	const originalFetch = packagedCachingFetcher.prototype.fetch;
+	let fetchCalls = 0;
 	packagedCachingFetcher.prototype.fetch = async function fetch(name: string): Promise<Command> {
+		fetchCalls += 1;
 		assert.strictEqual(name, 'git');
 		return {
 			name: 'git',
@@ -100,6 +117,28 @@ export async function run(): Promise<void> {
 		const editor = await vscode.window.showTextDocument(document, { preview: false });
 		const caret = document.positionAt(document.getText().length);
 		editor.selection = new vscode.Selection(caret, caret);
+		const disabledCompletion = await withTimeout(
+			vscode.commands.executeCommand<vscode.CompletionList>(
+				'vscode.executeCompletionItemProvider',
+				document.uri,
+				caret,
+			),
+			10000,
+		);
+		assert.ok(
+			!disabledCompletion.items.some(item =>
+				(typeof item.label === 'string' ? item.label : item.label.label)
+				=== '--vscode-h2o-packaged-smoke'
+			),
+			'the installed VSIX must not provide completion while disabled at activation',
+		);
+		assert.strictEqual(fetchCalls, 0);
+
+		await completionConfiguration.update(
+			'enableCompletion',
+			true,
+			vscode.ConfigurationTarget.Global,
+		);
 		const completion = await withTimeout(
 			vscode.commands.executeCommand<vscode.CompletionList>(
 				'vscode.executeCompletionItemProvider',
@@ -115,6 +154,7 @@ export async function run(): Promise<void> {
 			),
 			'the installed VSIX must parse a shell document and provide an option completion',
 		);
+		assert.strictEqual(fetchCalls, 1);
 
 		const debugReport = await withTimeout(
 			vscode.commands.executeCommand<CaretDebugReport>('h2o.inspectCaretContext'),

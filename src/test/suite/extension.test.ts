@@ -778,6 +778,270 @@ async function verifyUnknownCommandScanConfiguration(): Promise<void> {
 	}
 }
 
+async function verifyCompletionConfiguration(): Promise<void> {
+	assert.ok(activatedFetcher, 'activation must expose the configured command fetcher');
+	assert.ok(registeredCompletionProvider);
+	const configuration = vscode.workspace.getConfiguration('shellCompletion');
+	const originalGlobalValue = configuration.inspect<boolean>('enableCompletion')?.globalValue;
+	const internals = activatedFetcher as unknown as {
+		dependencies: CachingFetcherDependencies;
+	};
+	const originalDependencies = internals.dependencies;
+	const commandName = `vscode-h2o-completion-setting-${process.pid}`;
+	const optionName = '--completion-setting-enabled';
+	let localCalls = 0;
+	let liveDebugEnabled = false;
+	const languages = vscode.languages as unknown as {
+		registerCompletionItemProvider: typeof vscode.languages.registerCompletionItemProvider;
+	};
+	const originalRegisterCompletionItemProvider = languages.registerCompletionItemProvider;
+	let providerRegistrations = 0;
+	let providerDisposals = 0;
+	internals.dependencies = {
+		...originalDependencies,
+		runLocalCommand: async name => {
+			localCalls += 1;
+			return {
+				name,
+				description: 'dynamic completion setting fixture',
+				options: [{
+					names: [optionName],
+					argument: '',
+					description: 'Only returned when completion is enabled',
+				}],
+			};
+		},
+	};
+
+	try {
+		await configuration.update(
+			'enableCompletion',
+			false,
+			vscode.ConfigurationTarget.Global,
+		);
+		assert.strictEqual(
+			vscode.workspace.getConfiguration('shellCompletion').get('enableCompletion'),
+			false,
+		);
+
+		const document = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: `${commandName} --completion-setting-`,
+		});
+		const position = document.positionAt(document.getText().length);
+		const disabledCompletion = await completionLabelsAt(document, position);
+		assert.ok(!disabledCompletion.labels.includes(optionName));
+		assert.strictEqual(localCalls, 0);
+
+		const cancellation = new vscode.CancellationTokenSource();
+		try {
+			const staleCompletion = await Promise.resolve(registeredCompletionProvider.provideCompletionItems(
+				document,
+				position,
+				cancellation.token,
+				{ triggerKind: vscode.CompletionTriggerKind.Invoke, triggerCharacter: undefined },
+			));
+			const staleItems = Array.isArray(staleCompletion)
+				? staleCompletion
+				: staleCompletion?.items ?? [];
+			assert.strictEqual(staleItems.length, 0);
+		} finally {
+			cancellation.dispose();
+		}
+		assert.strictEqual(localCalls, 0);
+
+		const editor = await vscode.window.showTextDocument(document, { preview: false });
+		editor.selection = new vscode.Selection(position, position);
+		const report = await vscode.commands.executeCommand<CaretDebugReport>('h2o.inspectCaretContext');
+		assert.ok(report);
+		for (const tree of [report.cached, report.fresh]) {
+			assert.strictEqual(tree.completion.lookupSkippedReason, 'completion-disabled');
+			assert.strictEqual(tree.completion.lookupError, null);
+			assert.deepStrictEqual(tree.hover.resolution?.path, [commandName]);
+		}
+		assert.strictEqual(localCalls, 1, 'hover diagnostics should remain enabled');
+
+		const live = await vscode.commands.executeCommand<LiveEditorDebugToggleResult>(
+			'h2o.toggleLiveCaretAndCursorContext',
+			true,
+		);
+		liveDebugEnabled = true;
+		assert.strictEqual(live.enabled, true);
+		assert.strictEqual(live.snapshot?.completion.lookupSkippedReason, 'completion-disabled');
+		const liveState = await vscode.commands.executeCommand<LiveEditorDebugState>(
+			'h2o.getLiveCaretAndCursorContextState',
+		);
+		assert.strictEqual(
+			liveState.presentation.completion
+				.find(row => row.id === 'completion.decision')?.description,
+			'Disabled by shellCompletion.enableCompletion',
+		);
+		await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
+		liveDebugEnabled = false;
+
+		languages.registerCompletionItemProvider = ((
+			selector: vscode.DocumentSelector,
+			provider: vscode.CompletionItemProvider,
+			...triggerCharacters: string[]
+		) => {
+			providerRegistrations += 1;
+			const registration = originalRegisterCompletionItemProvider.call(
+				vscode.languages,
+				selector,
+				provider,
+				...triggerCharacters,
+			);
+			return {
+				dispose: () => {
+					providerDisposals += 1;
+					registration.dispose();
+				},
+			};
+		}) as typeof vscode.languages.registerCompletionItemProvider;
+
+		await configuration.update(
+			'enableCompletion',
+			true,
+			vscode.ConfigurationTarget.Global,
+		);
+		await waitForCondition(() => providerRegistrations === 1, 5000);
+		const enabledCompletion = await completionLabelsAt(document, position);
+		assert.strictEqual(
+			enabledCompletion.labels.filter(label => label === optionName).length,
+			1,
+		);
+		assert.strictEqual(localCalls, 1);
+
+		await configuration.update(
+			'enableCompletion',
+			true,
+			vscode.ConfigurationTarget.Global,
+		);
+		assert.strictEqual(providerRegistrations, 1);
+
+		await configuration.update(
+			'enableCompletion',
+			false,
+			vscode.ConfigurationTarget.Global,
+		);
+		await waitForCondition(() => providerDisposals === 1, 5000);
+	} finally {
+		if (liveDebugEnabled) {
+			await vscode.commands.executeCommand('h2o.toggleLiveCaretAndCursorContext', false);
+		}
+		try {
+			await configuration.update(
+				'enableCompletion',
+				false,
+				vscode.ConfigurationTarget.Global,
+			);
+		} finally {
+			languages.registerCompletionItemProvider = originalRegisterCompletionItemProvider;
+		}
+		await activatedFetcher.unset(commandName);
+		internals.dependencies = originalDependencies;
+		await configuration.update(
+			'enableCompletion',
+			originalGlobalValue,
+			vscode.ConfigurationTarget.Global,
+		);
+	}
+}
+
+async function verifyInFlightCompletionCancellationOnDisable(): Promise<void> {
+	assert.ok(activatedFetcher, 'activation must expose the configured command fetcher');
+	assert.ok(registeredCompletionProvider);
+	const configuration = vscode.workspace.getConfiguration('shellCompletion');
+	const originalGlobalValue = configuration.inspect<boolean>('enableCompletion')?.globalValue;
+	const internals = activatedFetcher as unknown as {
+		dependencies: CachingFetcherDependencies;
+	};
+	const originalDependencies = internals.dependencies;
+	const commandName = `vscode-h2o-completion-cancellation-${process.pid}`;
+	const optionName = '--must-not-survive-disable';
+	const command: Command = {
+		name: commandName,
+		description: 'in-flight completion cancellation fixture',
+		options: [{
+			names: [optionName],
+			argument: '',
+			description: 'Must not be returned after completion is disabled',
+		}],
+	};
+	const started = deferred<void>();
+	const aborted = deferred<void>();
+	const release = deferred<Command | undefined>();
+	let localCalls = 0;
+	let completionRequest: Promise<unknown> | undefined;
+	internals.dependencies = {
+		...originalDependencies,
+		runLocalCommand: async (name, signal) => {
+			localCalls += 1;
+			assert.strictEqual(name, commandName);
+			if (signal.aborted) {
+				aborted.resolve(undefined);
+			} else {
+				signal.addEventListener('abort', () => aborted.resolve(undefined), { once: true });
+			}
+			started.resolve(undefined);
+			return release.promise;
+		},
+	};
+
+	try {
+		await activatedFetcher.unset(commandName);
+		await configuration.update(
+			'enableCompletion',
+			true,
+			vscode.ConfigurationTarget.Global,
+		);
+		const document = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: `${commandName} --must-not-survive-`,
+		});
+		const position = document.positionAt(document.getText().length);
+		const requestCancellation = new vscode.CancellationTokenSource();
+		try {
+			const resultPromise = Promise.resolve(registeredCompletionProvider.provideCompletionItems(
+				document,
+				position,
+				requestCancellation.token,
+				{ triggerKind: vscode.CompletionTriggerKind.Invoke, triggerCharacter: undefined },
+			));
+			completionRequest = resultPromise;
+			await withTimeout(started.promise, 5000);
+
+			await configuration.update(
+				'enableCompletion',
+				false,
+				vscode.ConfigurationTarget.Global,
+			);
+			await withTimeout(aborted.promise, 5000);
+			release.resolve(command);
+
+			const completion = await withTimeout(resultPromise, 5000);
+			const items = Array.isArray(completion)
+				? completion
+				: completion?.items ?? [];
+			assert.ok(!items.some(item => item.label === optionName));
+			assert.strictEqual(localCalls, 1);
+			assert.ok(!activatedFetcher.getList().includes(commandName));
+		} finally {
+			requestCancellation.dispose();
+		}
+	} finally {
+		release.resolve(command);
+		await completionRequest?.catch(() => undefined);
+		await activatedFetcher.unset(commandName);
+		internals.dependencies = originalDependencies;
+		await configuration.update(
+			'enableCompletion',
+			originalGlobalValue,
+			vscode.ConfigurationTarget.Global,
+		);
+	}
+}
+
 async function verifyProviderTreeOwnership(parser: Parser): Promise<void> {
 	const sampleTree = parseTree(parser, 'git');
 	const treePrototype = Object.getPrototypeOf(sampleTree) as {
@@ -3164,6 +3428,8 @@ suite('Parser and provider behavior', () => {
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
 	test('propagates provider cancellation into command lookup', verifyProviderCancellationPropagation);
 	test('applies unknown-command scan settings without reloading the extension', verifyUnknownCommandScanConfiguration);
+	test('enables and disables completion without reloading the extension', verifyCompletionConfiguration);
+	test('cancels in-flight completion when completion is disabled', verifyInFlightCompletionCancellationOnDisable);
 	test('resolves normal hover misses without rejecting', verifyHoverNoResultContract);
 	test('separates command names from command-spec resolution', verifyCommandNameCompletionLifecycle);
 	test('keeps live completion debug aligned with command-name completion', verifyCommandNameLiveDebugDoesNotResolvePrefixes);

@@ -408,6 +408,19 @@ export async function run(): Promise<void> {
   try {
     const extension = vscode.extensions.getExtension(extensionId);
     assert.ok(extension, `${extensionId} must be installed in the Extension Host`);
+    const configurationProperties = extension.packageJSON.contributes
+      ?.configuration?.properties as Record<string, unknown> | undefined;
+    const completionSettingRegistered = Object.prototype.hasOwnProperty.call(
+      configurationProperties ?? {},
+      'shellCompletion.enableCompletion',
+    );
+    if (completionSettingRegistered) {
+      await vscode.workspace.getConfiguration('shellCompletion').update(
+        'enableCompletion',
+        true,
+        vscode.ConfigurationTarget.Global,
+      );
+    }
     await vscode.workspace.getConfiguration('shellCompletion').update(
       'scanUnknownCommands',
       true,
@@ -425,6 +438,9 @@ export async function run(): Promise<void> {
     const scanUnknownCommands = vscode.workspace
       .getConfiguration('shellCompletion')
       .get<boolean>('scanUnknownCommands');
+    const completionEnabled = completionSettingRegistered
+      ? vscode.workspace.getConfiguration('shellCompletion').get<boolean>('enableCompletion')
+      : true;
 
     const scenarios: ScenarioReport[] = [activationScenario(activationProfile, activation)];
     if (suite === 'provider') {
@@ -480,6 +496,7 @@ export async function run(): Promise<void> {
         totalMemoryBytes: totalmem(),
       },
       configuration: {
+        completionEnabled,
         maximumDocumentCharacters,
         scanUnknownCommands,
         providerFixture: 'deterministic-local-command-v2',

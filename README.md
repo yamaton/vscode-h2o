@@ -20,6 +20,8 @@ Common command specifications are downloaded automatically and cached by the ext
 
 The bundled help scanner supports Linux/WSL and macOS. See [Supported Platforms](#supported-platforms) for the exact combinations and current exclusions.
 
+Set `shellCompletion.enableCompletion` to `false` to turn off completion suggestions from this extension for the current VS Code window or workspace. Hover information and command-specification management remain available, and the change takes effect without reloading the extension.
+
 ## Command Coverage
 
 The common collection currently contains more than 400 command specifications, including `git`, `npm`, `docker`, and `terraform`. See [general.txt](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt) for the complete list.
@@ -84,6 +86,8 @@ While live inspection is enabled, a single status bar item shows only the high-l
 
 The H2O executable can also be selected with the `shellCompletion.h2oPath` setting. Its default value, `<bundled>`, uses the scanner packaged for the current platform. Like the unknown-command scan policy, this is a machine setting and is configured separately for a remote Extension Host.
 
+Completion suggestions can be enabled or disabled independently with `shellCompletion.enableCompletion`. This window-scoped setting can be configured in user, workspace, or remote settings; disabling it does not disable hover or remove cached specifications.
+
 Parser-backed completion, hover, and debug features are enabled by default for Shell Script and BitBake documents up to 1,048,576 UTF-16 characters. Use `shellCompletion.maxDocumentCharacters` to change this per workspace or workspace folder; set it to `0` to remove the limit.
 
 ## Supported Platforms
@@ -136,9 +140,9 @@ Dynamic extraction can still fail when the command is unavailable on `PATH`, its
 
 ### Suggestions are too aggressive
 
-The completion provider uses the space character as a trigger. You can adjust VS Code's editor settings by disabling **Quick Suggestions** or **Suggest On Trigger Characters**.
+Set `shellCompletion.enableCompletion` to `false` to unregister this extension's completion provider and its space-character trigger while keeping hover available.
 
-These settings affect other language modes as well.
+To adjust suggestions from every provider instead, use VS Code's **Quick Suggestions** or **Suggest On Trigger Characters** editor settings. Those settings can affect other language modes and extensions.
 
 ## Known Limitations
 
