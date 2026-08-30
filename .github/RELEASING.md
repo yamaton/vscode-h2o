@@ -28,8 +28,8 @@ The publish workflow verifies that the manifest and lockfile versions agree and 
 commit. It then re-runs the complete quality workflow, downloads its seven verified platform-specific VSIX artifacts,
 verifies them again, and waits for approval on the `marketplace` environment. After approval it verifies Marketplace
 publishing rights, creates the immutable unprefixed version tag at the merged commit, and publishes all targets
-together. A separate job outside the protected environment polls the public Marketplace for up to ten minutes until
-the new version is visible for every expected target.
+together. A separate job outside the protected environment downloads and re-verifies the same artifacts, then polls
+the public Marketplace for up to ten minutes until every target is visible with the exact expected VSIX SHA-256.
 
 If publication partially succeeds because of a transient failure, re-run only the failed `publish` job. Publishing
 skips packages already present at that version and continues with the missing targets, so this recovery uses the
