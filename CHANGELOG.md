@@ -3,24 +3,34 @@
 ## [Unreleased]
 
 - Distribute platform-specific packages, adding Linux arm64, Alpine x64, and macOS arm64 support while retaining Linux x64 and macOS x64.
-- Update the bundled H2O scanner to the pinned and verified v0.6.0 release.
-- Use a POSIX `sh` wrapper so the bundled scanner works in minimal Linux environments such as Alpine.
+- Update the bundled command-help parser to the pinned and verified v0.6.0 release.
+- Use a POSIX `sh` wrapper so the bundled command-help parser works in minimal Linux environments such as Alpine.
+- Allow commands scanned in the macOS sandbox to write to `/dev/null` and `/dev/full` while continuing to block other filesystem writes and network access.
 - Keep extension activation responsive while common command specifications download in the background.
 - Batch curated command updates and coordinate initial cache availability before local help fallback.
-- Complete partial command names directly from the available command list, including one-character and wrapped command input, without resolving partial names through H2O.
-- Store command specifications as a versioned compressed snapshot in VS Code global storage instead of Memento. The snapshot is replaced through a unique temporary file and a best-effort overwrite rename. Existing command caches are reset once on upgrade and rebuilt from curated data or the local H2O scanner.
-- Add a 10-second timeout to remote specification requests and wait for cache writes and bulk removals to finish.
+- Complete partial command names directly from the available command list, including one-character and wrapped command input, without starting a local `--help` scan.
+- Avoid command-specification lookups before or within the effective command name, including wrapped commands, so unrelated local scans are not started.
+- Store command specifications as a versioned compressed snapshot in VS Code global storage instead of Memento. The snapshot is replaced through a unique temporary file and a best-effort overwrite rename. Existing command caches are reset once on upgrade and rebuilt from curated data or local command-help parsing.
+- Run local `--help` scans asynchronously without blocking the Extension Host, coalesce duplicate requests, serialize distinct scans, clean up failed scanner processes, and terminate scanner process groups on cancellation, timeout, or excessive output, addressing [Issue #11](https://github.com/yamaton/vscode-h2o/issues/11).
+- Add 10-second timeouts to remote specification requests and local scans, cap each local scan output stream at 1 MiB, and wait for cache writes and bulk removals to finish.
 - Add automated unit, integration, native-binary, VSIX-content, dependency, and Marketplace release checks.
 - Reorganize the README as a landing page with detailed coverage, platform, security, management, and troubleshooting documentation below the introduction.
 - Update the Marketplace description, categories, and search keywords to reflect completion, hover, and BitBake support.
 - Raise the minimum supported VS Code version to 1.101, aligning the extension API and Node.js types with its Node.js 22 Extension Host.
+- Update runtime and development dependencies, including the Tree-sitter runtime and Bash grammar.
 - Fix completion and hover lookup for commands preceded by environment variable assignments.
 - Resolve common simple and nested `sudo` or `nohup` wrapper forms without broadly interpreting wrapper options.
+- Resolve subcommands from left to right through their direct hierarchy, including aliases and `--`, so later positional or unresolved words are not promoted to subcommands.
+- Keep completion and hover available for commands inside command and process substitutions embedded in redirects while suppressing ordinary redirect targets, heredocs, and unsafe parser-recovery regions.
+- Return no hover for ordinary lookup misses instead of rejecting the provider request, preventing the `provider FAILED` and `No hover is available` messages described in [Issue #12](https://github.com/yamaton/vscode-h2o/issues/12).
+- Restrict trusted command links in hover content to the cache-reset command.
 - Release superseded syntax trees, retain request-local copies during asynchronous completion and hover work, and ignore unrelated language edits to prevent WebAssembly memory growth and invalid tree access.
-- Coalesce syntax-tree parsing after document edits, parse unused documents lazily, and limit parser-backed features for very large documents by default to keep the Extension Host responsive.
+- Correct incremental parse coordinates for shortening, batched, CRLF, and Unicode edits, and avoid stack exhaustion when walking back across long runs of whitespace.
+- Coalesce syntax-tree parsing after document edits, parse unused documents lazily, and limit parser-backed features for very large documents by default through `shellCompletion.maxDocumentCharacters` to keep the Extension Host responsive.
+- Add opt-in live Completion, Hover, and Tree-sitter diagnostic views, caret and cursor inspection commands, read-only snapshots, and pause and resume controls.
 - Add the machine-scoped `shellCompletion.scanUnknownCommands` setting to disable local `--help` execution while continuing to use downloaded and cached command specifications, with immediate cancellation of queued or running scans.
 - Add the window-scoped `shellCompletion.enableCompletion` setting to unregister this extension's completion suggestions and space trigger without disabling hover, addressing [Issue #13](https://github.com/yamaton/vscode-h2o/issues/13).
-- Treat `shellCompletion.h2oPath` as a machine-scoped Extension Host executable path so workspace settings cannot replace it.
+- Treat `shellCompletion.h2oPath` as a machine-scoped path to the local command-help parser so workspace settings cannot replace the executable used by the Extension Host.
 
 ## [0.2.15] (2023-11-04)
 - Add experimental support of Bitbake per [Issue #10](https://github.com/yamaton/vscode-h2o/issues/10)
