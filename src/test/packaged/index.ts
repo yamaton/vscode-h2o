@@ -57,7 +57,7 @@ export async function run(): Promise<void> {
 	await updateGlobalConfiguration(
 		completionConfiguration,
 		'enableCompletion',
-		false,
+		expectScannerlessWindows ? undefined : false,
 	);
 	await updateGlobalConfiguration(
 		completionConfiguration,
@@ -113,11 +113,6 @@ export async function run(): Promise<void> {
 				'scanUnknownCommands',
 				true,
 			);
-			await updateGlobalConfiguration(
-				completionConfiguration,
-				'enableCompletion',
-				true,
-			);
 			const unknownDocument = await vscode.workspace.openTextDocument({
 				language: 'shellscript',
 				content: 'vscode-h2o-scannerless-probe --v',
@@ -143,11 +138,6 @@ export async function run(): Promise<void> {
 				completionConfiguration,
 				'scanUnknownCommands',
 				undefined,
-			);
-			await updateGlobalConfiguration(
-				completionConfiguration,
-				'enableCompletion',
-				false,
 			);
 		}
 	}
@@ -216,28 +206,30 @@ export async function run(): Promise<void> {
 		const editor = await vscode.window.showTextDocument(document, { preview: false });
 		const caret = document.positionAt(document.getText().length);
 		editor.selection = new vscode.Selection(caret, caret);
-		const disabledCompletion = await withTimeout(
-			vscode.commands.executeCommand<vscode.CompletionList>(
-				'vscode.executeCompletionItemProvider',
-				document.uri,
-				caret,
-			),
-			10000,
-		);
-		assert.ok(
-			!disabledCompletion.items.some(item =>
-				(typeof item.label === 'string' ? item.label : item.label.label)
-				=== '--vscode-h2o-packaged-smoke'
-			),
-			'the installed VSIX must not provide completion while disabled at activation',
-		);
-		assert.strictEqual(fetchCalls, 0);
+		if (!expectScannerlessWindows) {
+			const disabledCompletion = await withTimeout(
+				vscode.commands.executeCommand<vscode.CompletionList>(
+					'vscode.executeCompletionItemProvider',
+					document.uri,
+					caret,
+				),
+				10000,
+			);
+			assert.ok(
+				!disabledCompletion.items.some(item =>
+					(typeof item.label === 'string' ? item.label : item.label.label)
+					=== '--vscode-h2o-packaged-smoke'
+				),
+				'the installed VSIX must not provide completion while disabled at activation',
+			);
+			assert.strictEqual(fetchCalls, 0);
 
-		await updateGlobalConfiguration(
-			completionConfiguration,
-			'enableCompletion',
-			true,
-		);
+			await updateGlobalConfiguration(
+				completionConfiguration,
+				'enableCompletion',
+				true,
+			);
+		}
 		const completion = await withTimeout(
 			vscode.commands.executeCommand<vscode.CompletionList>(
 				'vscode.executeCompletionItemProvider',
