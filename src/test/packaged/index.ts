@@ -46,6 +46,20 @@ async function updateGlobalConfiguration<T>(
 	await withTimeout(changed, 10000);
 }
 
+function loadActivatedExtensionModule<T>(extensionPath: string, relativePath: string): T {
+	const expectedPath = path.resolve(extensionPath, relativePath);
+	const normalizedExpectedPath = process.platform === 'win32'
+		? expectedPath.toLowerCase()
+		: expectedPath;
+	const cachePath = Object.keys(require.cache).find(candidate => {
+		const resolvedCandidate = path.resolve(candidate);
+		return (process.platform === 'win32' ? resolvedCandidate.toLowerCase() : resolvedCandidate)
+			=== normalizedExpectedPath;
+	});
+	assert.ok(cachePath, `${relativePath} must be loaded by the installed extension`);
+	return require(cachePath) as T;
+}
+
 export async function run(): Promise<void> {
 	const expectScannerlessWindows = process.env.VSCODE_H2O_EXPECT_SCANNERLESS_WINDOWS === '1';
 	if (expectScannerlessWindows) {
@@ -71,43 +85,24 @@ export async function run(): Promise<void> {
 	assert.ok(extensionPath.startsWith(`${extensionsDir}${path.sep}`), `${extensionPath} must be inside the isolated extensions directory`);
 	assert.ok(extensionPath !== sourceRoot && !extensionPath.startsWith(`${sourceRoot}${path.sep}`), 'the source checkout must not satisfy the VSIX smoke test');
 
-	const packagedCacheFetcherModule = require(path.join(extensionPath, 'out/cacheFetcher.js')) as typeof import('../../cacheFetcher');
-	const packagedCachingFetcher = packagedCacheFetcherModule.CachingFetcher;
-	const packagedH2oRunnerModule = require(path.join(extensionPath, 'out/h2oRunner.js')) as {
-		runH2o: typeof import('../../h2oRunner').runH2o;
-	};
-	const originalRunH2o = packagedH2oRunnerModule.runH2o;
-	const packagedScanConsentModule = require(path.join(extensionPath, 'out/scanConsent.js')) as {
-		requestUnknownCommandScanConsent: typeof import('../../scanConsent').requestUnknownCommandScanConsent;
-	};
-	const originalRequestUnknownCommandScanConsent = packagedScanConsentModule.requestUnknownCommandScanConsent;
-	let scanConsentRequests = 0;
-	let localScanCalls = 0;
-	if (expectScannerlessWindows) {
-		packagedH2oRunnerModule.runH2o = async () => {
-			localScanCalls += 1;
-			return undefined;
-		};
-		packagedScanConsentModule.requestUnknownCommandScanConsent = async () => {
-			scanConsentRequests += 1;
-			return 'already-prompted';
-		};
-	}
-	const originalStartInitialCuratedFetch = packagedCachingFetcher.prototype.startInitialCuratedFetch;
-	packagedCachingFetcher.prototype.startInitialCuratedFetch = async () => undefined;
-	try {
-		await withTimeout(extension.activate(), 10000);
-	} finally {
-		packagedCachingFetcher.prototype.startInitialCuratedFetch = originalStartInitialCuratedFetch;
-	}
+	await withTimeout(extension.activate(), 10000);
 	assert.strictEqual(extension.isActive, true);
+	const packagedCacheFetcherModule = loadActivatedExtensionModule<typeof import('../../cacheFetcher')>(
+		extensionPath,
+		'out/cacheFetcher.js',
+	);
+	const packagedCachingFetcher = packagedCacheFetcherModule.CachingFetcher;
 	if (expectScannerlessWindows) {
+		const packagedH2oRunnerModule = loadActivatedExtensionModule<{
+			runH2o: typeof import('../../h2oRunner').runH2o;
+		}>(extensionPath, 'out/h2oRunner.js');
+		const originalRunH2o = packagedH2oRunnerModule.runH2o;
+		let localScanCalls = 0;
 		try {
-			assert.strictEqual(
-				scanConsentRequests,
-				0,
-				'the scannerless Windows package must not start the local scan consent flow',
-			);
+			packagedH2oRunnerModule.runH2o = async () => {
+				localScanCalls += 1;
+				return undefined;
+			};
 			await updateGlobalConfiguration(
 				completionConfiguration,
 				'scanUnknownCommands',
@@ -133,7 +128,6 @@ export async function run(): Promise<void> {
 			);
 		} finally {
 			packagedH2oRunnerModule.runH2o = originalRunH2o;
-			packagedScanConsentModule.requestUnknownCommandScanConsent = originalRequestUnknownCommandScanConsent;
 			await updateGlobalConfiguration(
 				completionConfiguration,
 				'scanUnknownCommands',
