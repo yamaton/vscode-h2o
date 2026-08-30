@@ -1,7 +1,7 @@
 {
     "name": "vscode-h2o",
     "displayName": "Shell Script Command Completion",
-    "version": "0.2.15",
+    "version": "0.3.0",
     "description": "Complete shell commands and view inline help in shell scripts and BitBake files",
     "repository": {
         "url": "https://github.com/yamaton/vscode-h2o"
