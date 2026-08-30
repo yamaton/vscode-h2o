@@ -13,12 +13,25 @@ import * as path from 'node:path';
 
 import { runTests } from '@vscode/test-electron';
 
+import {
+  commandCacheSnapshotVersion,
+  encodeCommandCacheSnapshot,
+  type CommandCacheSnapshot,
+} from '../cacheStorage';
+import type { Command } from '../command';
 import type { ProviderPhaseTimings } from '../providerPerformance';
+import {
+  createActivationFixtureSnapshot,
+  type ActivationProfile,
+} from './performance/activationFixture';
 
-type ProcessArm = 'A' | 'B' | 'production';
+type ProcessArm = 'A' | 'B';
 type PerformanceMode = 'instrumented' | 'production';
+type PerformanceSuite = 'activation' | 'provider';
+type ComparedStatistic = 'maximum' | 'p50' | 'p95';
 
-const timingKeys: Array<keyof ProviderPhaseTimings> = [
+const extensionId = 'tetradresearch.vscode-h2o';
+const providerTimingKeys: Array<keyof ProviderPhaseTimings> = [
   'totalMs',
   'treeWaitMs',
   'parseMs',
@@ -28,6 +41,22 @@ const timingKeys: Array<keyof ProviderPhaseTimings> = [
   'pathResolveMs',
   'unclassifiedMs',
 ];
+const comparedStatistics: ComparedStatistic[] = ['p50', 'p95', 'maximum'];
+const activationProfiles: ActivationProfile[] = ['empty', 'general', 'general-bio'];
+const providerScenarioNames = [
+  'completion-cache-hit',
+  'hover-cache-hit',
+  'completion-cache-miss',
+  'completion-after-edit-10240',
+  'completion-after-edit-102400',
+  'completion-after-edit-1048576',
+] as const;
+const expectedScenarioNames = [
+  'cold-activation-empty',
+  ...providerScenarioNames,
+  'cold-activation-general',
+  'cold-activation-general-bio',
+] as const;
 
 interface Distribution {
   minimum: number;
@@ -41,12 +70,25 @@ interface ChildScenarioReport {
   name: string;
   summary: {
     externalTotalMs: Distribution;
+    maxEventLoopDelayMs: Distribution;
     provider: Record<keyof ProviderPhaseTimings, Distribution> | null;
   };
 }
 
 interface ChildPerformanceReport {
   schemaVersion: number;
+  generatedAt: string;
+  process: {
+    sequence: number;
+    arm: ProcessArm;
+    mode: PerformanceMode;
+    suite: PerformanceSuite;
+    activationProfile: ActivationProfile;
+  };
+  source: {
+    sha: string | null;
+    digestSha256: string | null;
+  };
   runtime: {
     vscode: string;
     [key: string]: unknown;
@@ -58,22 +100,43 @@ interface ChildPerformanceReport {
     quantileMethod?: string;
   };
   scenarios: ChildScenarioReport[];
-  [key: string]: unknown;
+}
+
+interface SourceRoot {
+  root: string;
+  sha: string | null;
+  digestSha256: string;
+}
+
+interface PreparedActivationFixture {
+  profile: ActivationProfile;
+  commandCount: number;
+  jsonBytes: number;
+  compressedBytes: number;
+  content: Buffer | null;
 }
 
 interface ProcessRun {
   sequence: number;
   arm: ProcessArm;
   mode: PerformanceMode;
+  suite: PerformanceSuite;
+  activationProfile: ActivationProfile;
+  source: SourceRoot;
   report: ChildPerformanceReport;
 }
 
-interface MetricComparison {
+interface ValueComparison {
   armA: Distribution;
   armB: Distribution;
-  p50DifferenceMs: number;
-  p50RelativePercent: number | null;
+  comparisonStatistic: 'maximum' | 'p50';
+  armAValueMs: number;
+  armBValueMs: number;
+  differenceMs: number;
+  relativePercent: number | null;
 }
+
+type MetricComparison = Record<ComparedStatistic, ValueComparison>;
 
 function positiveIntegerEnvironment(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -117,16 +180,40 @@ function distribution(values: readonly number[]): Distribution {
   };
 }
 
-function compareMetrics(armAValues: readonly number[], armBValues: readonly number[]): MetricComparison {
+function compareValues(
+  armAValues: readonly number[],
+  armBValues: readonly number[],
+  comparisonStatistic: 'maximum' | 'p50',
+): ValueComparison {
   const armA = distribution(armAValues);
   const armB = distribution(armBValues);
-  const difference = armB.p50 - armA.p50;
+  const armAValueMs = armA[comparisonStatistic];
+  const armBValueMs = armB[comparisonStatistic];
+  const differenceMs = armBValueMs - armAValueMs;
   return {
     armA,
     armB,
-    p50DifferenceMs: difference,
-    p50RelativePercent: armA.p50 === 0 ? null : (difference / armA.p50) * 100,
+    comparisonStatistic,
+    armAValueMs,
+    armBValueMs,
+    differenceMs,
+    relativePercent: armAValueMs === 0 ? null : (differenceMs / armAValueMs) * 100,
   };
+}
+
+function compareMetric(
+  armA: readonly ProcessRun[],
+  armB: readonly ProcessRun[],
+  value: (run: ProcessRun) => Distribution,
+): MetricComparison {
+  return Object.fromEntries(comparedStatistics.map(statistic => [
+    statistic,
+    compareValues(
+      armA.map(run => value(run)[statistic]),
+      armB.map(run => value(run)[statistic]),
+      statistic === 'maximum' ? 'maximum' : 'p50',
+    ),
+  ])) as MetricComparison;
 }
 
 function javascriptFiles(directory: string): string[] {
@@ -153,6 +240,9 @@ function sourceDigest(projectRoot: string): string {
     path.join(projectRoot, 'tree-sitter-bash.wasm'),
     ...javascriptFiles(path.join(projectRoot, 'out')),
   ].filter(existsSync).sort();
+  if (files.length === 0) {
+    throw new Error(`No performance source files were found below ${projectRoot}.`);
+  }
   const hash = createHash('sha256');
   for (const file of files) {
     hash.update(path.relative(projectRoot, file));
@@ -163,6 +253,65 @@ function sourceDigest(projectRoot: string): string {
   return hash.digest('hex');
 }
 
+function sourceRoot(rootEnvironment: string, shaEnvironment: string, fallbackRoot: string): SourceRoot {
+  const root = path.resolve(process.env[rootEnvironment] ?? fallbackRoot);
+  const extensionEntry = path.join(root, 'out/extension.js');
+  if (!existsSync(extensionEntry)) {
+    throw new Error(`${rootEnvironment} has no compiled extension at ${extensionEntry}.`);
+  }
+  return {
+    root,
+    sha: process.env[shaEnvironment] ?? null,
+    digestSha256: sourceDigest(root),
+  };
+}
+
+function providerFixtureCommand(): Command {
+  return {
+    name: 'git',
+    description: 'Deterministic provider performance fixture',
+    options: [{
+      names: ['--version'],
+      argument: '',
+      description: 'Display version information',
+    }],
+  };
+}
+
+async function prepareFixture(
+  suite: PerformanceSuite,
+  profile: ActivationProfile,
+): Promise<PreparedActivationFixture> {
+  let snapshot: CommandCacheSnapshot;
+  let jsonBytes: number;
+  if (suite === 'provider') {
+    snapshot = {
+      version: commandCacheSnapshotVersion,
+      commands: [providerFixtureCommand()],
+    };
+    jsonBytes = Buffer.byteLength(JSON.stringify(snapshot));
+  } else if (profile === 'empty') {
+    return {
+      profile,
+      commandCount: 0,
+      jsonBytes: 0,
+      compressedBytes: 0,
+      content: null,
+    };
+  } else {
+    ({ snapshot, jsonBytes } = createActivationFixtureSnapshot(profile));
+  }
+
+  const compressed = await encodeCommandCacheSnapshot(snapshot);
+  return {
+    profile,
+    commandCount: snapshot.commands.length,
+    jsonBytes,
+    compressedBytes: compressed.length,
+    content: compressed,
+  };
+}
+
 function scenario(run: ProcessRun, name: string): ChildScenarioReport {
   const found = run.report.scenarios.find(candidate => candidate.name === name);
   if (!found) {
@@ -171,21 +320,40 @@ function scenario(run: ProcessRun, name: string): ChildScenarioReport {
   return found;
 }
 
-function providerP50(run: ProcessRun, scenarioName: string, key: keyof ProviderPhaseTimings): number {
+function providerDistribution(
+  run: ProcessRun,
+  scenarioName: string,
+  key: keyof ProviderPhaseTimings,
+): Distribution {
   const provider = scenario(run, scenarioName).summary.provider;
   if (!provider) {
     throw new Error(`Process ${run.sequence} did not record provider timings.`);
   }
-  return provider[key].p50;
+  return provider[key];
+}
+
+function scenarioRuns(
+  runs: readonly ProcessRun[],
+  name: string,
+  mode: PerformanceMode,
+): ProcessRun[] {
+  const expectedSuite: PerformanceSuite = name.startsWith('cold-activation-')
+    ? 'activation'
+    : 'provider';
+  return runs.filter(run => run.suite === expectedSuite
+    && run.mode === mode
+    && run.report.scenarios.some(candidate => candidate.name === name));
 }
 
 async function runExtensionHost(
-  projectRoot: string,
-  extensionTestsPath: string,
-  sourceDigestSha256: string,
   sequence: number,
   arm: ProcessArm,
   mode: PerformanceMode,
+  suite: PerformanceSuite,
+  activationProfile: ActivationProfile,
+  source: SourceRoot,
+  extensionTestsPath: string,
+  activationFixture: PreparedActivationFixture,
   warmupSamples: number,
   samplesPerScenario: number,
 ): Promise<ProcessRun> {
@@ -194,15 +362,31 @@ async function runExtensionHost(
   const userDataDir = path.join(profileRoot, 'user-data');
   const extensionsDir = path.join(profileRoot, 'extensions');
   const childReportPath = path.join(profileRoot, 'process-report.json');
+  const globalStorageDirectory = path.join(
+    userDataDir,
+    'User',
+    'globalStorage',
+    extensionId,
+  );
   mkdirSync(userDataDir, { recursive: true });
   mkdirSync(extensionsDir, { recursive: true });
+  if (activationFixture.profile !== activationProfile) {
+    throw new Error(`Prepared fixture profile does not match ${activationProfile}.`);
+  }
+  if (activationFixture.content) {
+    mkdirSync(globalStorageDirectory, { recursive: true });
+    writeFileSync(
+      path.join(globalStorageDirectory, 'commands-v1.json.gz'),
+      activationFixture.content,
+    );
+  }
 
   try {
     await runTests({
       ...(process.env.VSCODE_EXECUTABLE_PATH
         ? { vscodeExecutablePath: process.env.VSCODE_EXECUTABLE_PATH }
         : { version: process.env.VSCODE_VERSION || 'stable' }),
-      extensionDevelopmentPath: projectRoot,
+      extensionDevelopmentPath: source.root,
       extensionTestsPath,
       launchArgs: [
         `--user-data-dir=${userDataDir}`,
@@ -215,11 +399,22 @@ async function runExtensionHost(
       ],
       extensionTestsEnv: {
         ['VSCODE_H2O_PERFORMANCE']: mode === 'instrumented' ? '1' : '0',
+        ['VSCODE_H2O_PERFORMANCE_FIXTURE']: '1',
         ['VSCODE_H2O_PERFORMANCE_MODE']: mode,
+        ['VSCODE_H2O_PERFORMANCE_SUITE']: suite,
+        ['VSCODE_H2O_PERFORMANCE_ACTIVATION_PROFILE']: activationProfile,
+        ['VSCODE_H2O_PERFORMANCE_ACTIVATION_COMMAND_COUNT']: String(
+          activationFixture.commandCount,
+        ),
+        ['VSCODE_H2O_PERFORMANCE_ACTIVATION_JSON_BYTES']: String(activationFixture.jsonBytes),
+        ['VSCODE_H2O_PERFORMANCE_ACTIVATION_COMPRESSED_BYTES']: String(
+          activationFixture.compressedBytes,
+        ),
         ['VSCODE_H2O_PERFORMANCE_REPORT']: childReportPath,
         ['VSCODE_H2O_PERFORMANCE_PROCESS_SEQUENCE']: String(sequence),
         ['VSCODE_H2O_PERFORMANCE_PROCESS_ARM']: arm,
-        ['VSCODE_H2O_PERFORMANCE_SOURCE_DIGEST']: sourceDigestSha256,
+        ['VSCODE_H2O_PERFORMANCE_SOURCE_SHA']: source.sha ?? '',
+        ['VSCODE_H2O_PERFORMANCE_SOURCE_DIGEST']: source.digestSha256,
         ['VSCODE_H2O_PERFORMANCE_WARMUP_SAMPLES']: String(warmupSamples),
         ['VSCODE_H2O_PERFORMANCE_SAMPLES']: String(samplesPerScenario),
       },
@@ -228,124 +423,216 @@ async function runExtensionHost(
       throw new Error(`Performance process report was not created at ${childReportPath}`);
     }
     const report = JSON.parse(readFileSync(childReportPath, 'utf8')) as ChildPerformanceReport;
-    if (report.schemaVersion !== 2 || !Array.isArray(report.scenarios)) {
+    if (report.schemaVersion !== 3 || !Array.isArray(report.scenarios)) {
       throw new Error(`Performance process ${sequence} returned an invalid report.`);
     }
-    return { sequence, arm, mode, report };
+    if (report.source.digestSha256 !== source.digestSha256) {
+      throw new Error(`Performance process ${sequence} reported the wrong source digest.`);
+    }
+    return { sequence, arm, mode, suite, activationProfile, source, report };
   } finally {
     rmSync(profileRoot, { recursive: true, force: true });
   }
 }
 
+function scenarioComparison(
+  name: string,
+  armA: readonly ProcessRun[],
+  armB: readonly ProcessRun[],
+): {
+  name: string;
+  processSamplesPerArm: number;
+  externalTotalMs: MetricComparison;
+  maxEventLoopDelayMs: MetricComparison;
+  provider: Record<keyof ProviderPhaseTimings, MetricComparison> | null;
+} {
+  const externalArmA = scenarioRuns(armA, name, 'production');
+  const externalArmB = scenarioRuns(armB, name, 'production');
+  if (externalArmA.length === 0 || externalArmA.length !== externalArmB.length) {
+    throw new Error(
+      `Scenario ${name} must have the same non-zero production process count in both arms.`,
+    );
+  }
+  const hasProvider = !name.startsWith('cold-activation-');
+  const providerArmA = hasProvider ? scenarioRuns(armA, name, 'instrumented') : [];
+  const providerArmB = hasProvider ? scenarioRuns(armB, name, 'instrumented') : [];
+  if (hasProvider
+    && (providerArmA.length === 0 || providerArmA.length !== providerArmB.length)) {
+    throw new Error(
+      `Scenario ${name} must have the same non-zero instrumented process count in both arms.`,
+    );
+  }
+  if ([...providerArmA, ...providerArmB].some(
+    run => scenario(run, name).summary.provider === null,
+  )) {
+    throw new Error(`Scenario ${name} is missing instrumented provider timings.`);
+  }
+  return {
+    name,
+    processSamplesPerArm: externalArmA.length,
+    externalTotalMs: compareMetric(
+      externalArmA,
+      externalArmB,
+      run => scenario(run, name).summary.externalTotalMs,
+    ),
+    maxEventLoopDelayMs: compareMetric(
+      externalArmA,
+      externalArmB,
+      run => scenario(run, name).summary.maxEventLoopDelayMs,
+    ),
+    provider: hasProvider
+      ? Object.fromEntries(providerTimingKeys.map(key => [
+        key,
+        compareMetric(
+          providerArmA,
+          providerArmB,
+          run => providerDistribution(run, name, key),
+        ),
+      ])) as Record<keyof ProviderPhaseTimings, MetricComparison>
+      : null,
+  };
+}
+
 async function main(): Promise<void> {
-  const projectRoot = path.resolve(__dirname, '../../');
+  const orchestratorRoot = path.resolve(__dirname, '../../');
+  const extensionTestsPath = path.join(orchestratorRoot, 'out/test/performance/index');
+  if (!existsSync(`${extensionTestsPath}.js`)) {
+    throw new Error(`The orchestrator performance harness is missing at ${extensionTestsPath}.js.`);
+  }
   const reportPath = path.resolve(
     process.env.VSCODE_H2O_PERFORMANCE_REPORT
-      ?? path.join(projectRoot, 'artifacts', 'provider-performance-noise.json'),
+      ?? path.join(orchestratorRoot, 'artifacts', 'provider-performance.json'),
   );
-  const extensionTestsPath = path.resolve(__dirname, './performance/index');
+  const armA = sourceRoot(
+    'VSCODE_H2O_PERFORMANCE_ARM_A_ROOT',
+    'VSCODE_H2O_PERFORMANCE_ARM_A_SHA',
+    orchestratorRoot,
+  );
+  const armB = sourceRoot(
+    'VSCODE_H2O_PERFORMANCE_ARM_B_ROOT',
+    'VSCODE_H2O_PERFORMANCE_ARM_B_SHA',
+    orchestratorRoot,
+  );
   const processesPerArm = positiveEvenIntegerEnvironment(
     'VSCODE_H2O_PERFORMANCE_PROCESSES_PER_ARM',
     2,
   );
+  const activationProcessesPerArm = positiveEvenIntegerEnvironment(
+    'VSCODE_H2O_PERFORMANCE_ACTIVATION_PROCESSES_PER_ARM',
+    2,
+  );
   const warmupSamples = positiveIntegerEnvironment('VSCODE_H2O_PERFORMANCE_WARMUP_SAMPLES', 5);
   const samplesPerScenario = positiveIntegerEnvironment('VSCODE_H2O_PERFORMANCE_SAMPLES', 30);
-  const digest = sourceDigest(projectRoot);
+  const providerFixture = await prepareFixture('provider', 'empty');
+  const activationFixtures = new Map<ActivationProfile, PreparedActivationFixture>(
+    await Promise.all(activationProfiles.map(async profile => [
+      profile,
+      await prepareFixture('activation', profile),
+    ] as const)),
+  );
   const processRuns: ProcessRun[] = [];
   let sequence = 0;
 
   for (let block = 0; block < processesPerArm / 2; block += 1) {
-    for (const arm of ['A', 'B'] as const) {
+    for (const [arm, mode, source] of [
+      ['A', 'instrumented', armA],
+      ['B', 'instrumented', armB],
+      ['B', 'production', armB],
+      ['A', 'production', armA],
+      ['A', 'production', armA],
+      ['B', 'production', armB],
+      ['B', 'instrumented', armB],
+      ['A', 'instrumented', armA],
+    ] as const) {
       processRuns.push(await runExtensionHost(
-        projectRoot,
-        extensionTestsPath,
-        digest,
         ++sequence,
         arm,
-        'instrumented',
+        mode,
+        'provider',
+        'empty',
+        source,
+        extensionTestsPath,
+        providerFixture,
         warmupSamples,
         samplesPerScenario,
       ));
     }
-    processRuns.push(await runExtensionHost(
-      projectRoot,
-      extensionTestsPath,
-      digest,
-      ++sequence,
-      'production',
-      'production',
-      warmupSamples,
-      samplesPerScenario,
-    ));
-    for (const arm of ['B', 'A'] as const) {
-      processRuns.push(await runExtensionHost(
-        projectRoot,
-        extensionTestsPath,
-        digest,
-        ++sequence,
-        arm,
-        'instrumented',
-        warmupSamples,
-        samplesPerScenario,
-      ));
-    }
-    processRuns.push(await runExtensionHost(
-      projectRoot,
-      extensionTestsPath,
-      digest,
-      ++sequence,
-      'production',
-      'production',
-      warmupSamples,
-      samplesPerScenario,
-    ));
   }
 
-  const armA = processRuns.filter(run => run.arm === 'A');
-  const armB = processRuns.filter(run => run.arm === 'B');
-  const instrumented = processRuns.filter(run => run.mode === 'instrumented');
-  const production = processRuns.filter(run => run.mode === 'production');
-  const scenarioNames = instrumented[0].report.scenarios.map(entry => entry.name);
-  const processAA = scenarioNames.map(name => ({
+  for (const activationProfile of activationProfiles) {
+    for (let block = 0; block < activationProcessesPerArm / 2; block += 1) {
+      const activationFixture = activationFixtures.get(activationProfile);
+      if (!activationFixture) {
+        throw new Error(`No prepared activation fixture for ${activationProfile}.`);
+      }
+      for (const [arm, source] of [
+        ['A', armA],
+        ['B', armB],
+        ['B', armB],
+        ['A', armA],
+      ] as const) {
+        processRuns.push(await runExtensionHost(
+          ++sequence,
+          arm,
+          'production',
+          'activation',
+          activationProfile,
+          source,
+          extensionTestsPath,
+          activationFixture,
+          warmupSamples,
+          samplesPerScenario,
+        ));
+      }
+    }
+  }
+
+  const armARuns = processRuns.filter(run => run.arm === 'A');
+  const armBRuns = processRuns.filter(run => run.arm === 'B');
+  const providerArmB = armBRuns.filter(run => run.suite === 'provider');
+  const providerArmBInstrumented = providerArmB.filter(run => run.mode === 'instrumented');
+  const providerArmBProduction = providerArmB.filter(run => run.mode === 'production');
+  const comparisons = expectedScenarioNames.map(
+    name => scenarioComparison(name, armARuns, armBRuns),
+  );
+  const measurementOverhead = providerScenarioNames.map(name => ({
     name,
-    externalTotalMs: compareMetrics(
-      armA.map(run => scenario(run, name).summary.externalTotalMs.p50),
-      armB.map(run => scenario(run, name).summary.externalTotalMs.p50),
+    externalTotalMs: compareMetric(
+      providerArmBProduction,
+      providerArmBInstrumented,
+      run => scenario(run, name).summary.externalTotalMs,
     ),
-    provider: Object.fromEntries(timingKeys.map(key => [
-      key,
-      compareMetrics(
-        armA.map(run => providerP50(run, name, key)),
-        armB.map(run => providerP50(run, name, key)),
-      ),
-    ])) as Record<keyof ProviderPhaseTimings, MetricComparison>,
+    maxEventLoopDelayMs: compareMetric(
+      providerArmBProduction,
+      providerArmBInstrumented,
+      run => scenario(run, name).summary.maxEventLoopDelayMs,
+    ),
   }));
-  const measurementOverhead = scenarioNames.map(name => {
-    const productionValues = production.map(run => scenario(run, name).summary.externalTotalMs.p50);
-    const instrumentedValues = instrumented.map(run => scenario(run, name).summary.externalTotalMs.p50);
-    const productionSummary = distribution(productionValues);
-    const instrumentedSummary = distribution(instrumentedValues);
-    const difference = instrumentedSummary.p50 - productionSummary.p50;
-    return {
-      name,
-      production: productionSummary,
-      instrumented: instrumentedSummary,
-      p50DifferenceMs: difference,
-      p50RelativePercent: productionSummary.p50 === 0
-        ? null
-        : (difference / productionSummary.p50) * 100,
-    };
-  });
 
   const firstReport = processRuns[0].report;
+  const expectedVscode = firstReport.runtime.vscode;
+  if (processRuns.some(run => run.report.runtime.vscode !== expectedVscode)) {
+    throw new Error('All performance processes must use the same VS Code version.');
+  }
+  if (!process.env.VSCODE_EXECUTABLE_PATH
+    && process.env.VSCODE_VERSION
+    && expectedVscode !== process.env.VSCODE_VERSION) {
+    throw new Error(
+      `Requested VS Code ${process.env.VSCODE_VERSION}, but the processes reported ${expectedVscode}.`,
+    );
+  }
   const cpu = cpus()[0];
+  const sameSource = armA.digestSha256 === armB.digestSha256;
   const report = {
-    schemaVersion: 3,
-    comparison: 'A/A across fresh Extension Host processes in counterbalanced ABBA order',
+    schemaVersion: 5,
+    comparison: sameSource
+      ? 'A/A across fresh Extension Host processes in counterbalanced order'
+      : 'base/target across fresh Extension Host processes in counterbalanced order',
     generatedAt: new Date().toISOString(),
     source: {
-      commit: process.env.VSCODE_H2O_PERFORMANCE_SHA ?? process.env.GITHUB_SHA ?? null,
-      digestSha256: digest,
+      armA,
+      armB,
+      sameSource,
     },
     host: {
       platform: process.platform,
@@ -359,12 +646,12 @@ async function main(): Promise<void> {
       requested: process.env.VSCODE_EXECUTABLE_PATH
         ? process.env.VSCODE_EXECUTABLE_PATH
         : process.env.VSCODE_VERSION || 'stable',
-      actual: firstReport.runtime.vscode,
+      actual: expectedVscode,
     },
-    configuration: firstReport.configuration,
     sampling: {
-      processesPerArm,
-      productionProcesses: production.length,
+      providerInstrumentedProcessesPerArm: processesPerArm,
+      providerProductionProcessesPerArm: processesPerArm,
+      activationProcessesPerArm,
       warmupSamples,
       samplesPerScenario,
       quantileMethod: 'linear-interpolation-rank-n-minus-1',
@@ -372,18 +659,21 @@ async function main(): Promise<void> {
         sequence: run.sequence,
         arm: run.arm,
         mode: run.mode,
+        suite: run.suite,
+        activationProfile: run.activationProfile,
+        digestSha256: run.source.digestSha256,
       })),
     },
-    processAA,
+    comparisons,
     measurementOverhead,
     processRuns,
   };
   mkdirSync(path.dirname(reportPath), { recursive: true });
   writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  console.log(`Provider performance process-noise report: ${reportPath}`);
+  console.log(`Provider performance comparison report: ${reportPath}`);
 }
 
 void main().catch(error => {
-  console.error('Failed to run provider performance noise measurement', error);
+  console.error('Failed to run provider performance comparison', error);
   process.exit(1);
 });

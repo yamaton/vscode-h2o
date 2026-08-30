@@ -362,10 +362,45 @@ async function registerExtension(
       `commands-v1.${process.pid}.${randomUUID()}.json.gz.tmp`,
     ),
   });
-  const fetcher = new CachingFetcher(context.globalState, { cacheStorage });
+  const performanceFixtureEnabled = process.env.VSCODE_H2O_PERFORMANCE_FIXTURE === '1';
+  const performanceSuite = process.env.VSCODE_H2O_PERFORMANCE_SUITE;
+  const providerFixtureEnabled = performanceFixtureEnabled && performanceSuite === 'provider';
+  const activationFixtureEnabled = performanceFixtureEnabled && performanceSuite === 'activation';
+  const fetcher = new CachingFetcher(
+    context.globalState,
+    providerFixtureEnabled
+      ? {
+        cacheStorage,
+        runLocalCommand: async (name: string): Promise<Command> => ({
+          name,
+          description: 'Deterministic provider performance fixture',
+          options: [{
+            names: ['--version'],
+            argument: '',
+            description: 'Display version information',
+          }],
+        }),
+      }
+      : activationFixtureEnabled
+        ? {
+          cacheStorage,
+          // Exercise initial curated-fetch setup without introducing network
+          // completion or response parsing into cold-activation measurements.
+          fetch: () => new Promise<never>(() => undefined),
+        }
+      : { cacheStorage },
+  );
   activationRegistrations.push(fetcher);
   await fetcher.init();
-  const initialCuratedFetch = fetcher.startInitialCuratedFetch("general");
+  if (providerFixtureEnabled) {
+    activationRegistrations.push(vscode.commands.registerCommand(
+      'h2o.clearPerformanceCommandCache',
+      (name: string): Promise<void> => fetcher.unset(name),
+    ));
+  }
+  const initialCuratedFetch = providerFixtureEnabled
+    ? Promise.resolve()
+    : fetcher.startInitialCuratedFetch("general");
   void initialCuratedFetch.catch(() => {
     console.warn("Failed in fetch.fetchAllCurated().");
   });

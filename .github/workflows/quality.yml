@@ -198,6 +198,99 @@ jobs:
         env:
           VSCODE_VERSION: stable
 
+  performance-shadow:
+    name: Provider performance (shadow)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out target source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: target
+          persist-credentials: false
+
+      - name: Check out pull request base source
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: target/package-lock.json
+
+      - name: Select comparison sources
+        id: comparison
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          target_root="${GITHUB_WORKSPACE}/target"
+          if [[ -f "${GITHUB_WORKSPACE}/base/package.json" ]] \
+            && grep -Fq '"test:performance:ci"' "${GITHUB_WORKSPACE}/base/package.json"; then
+            echo "arm_a_root=${GITHUB_WORKSPACE}/base" >> "${GITHUB_OUTPUT}"
+            echo "arm_a_sha=${BASE_SHA}" >> "${GITHUB_OUTPUT}"
+            echo "has_base_harness=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "arm_a_root=${target_root}" >> "${GITHUB_OUTPUT}"
+            echo "arm_a_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
+            echo "has_base_harness=false" >> "${GITHUB_OUTPUT}"
+            echo "Base performance harness is unavailable; this bootstrap run will use A/A."
+          fi
+          echo "arm_b_root=${target_root}" >> "${GITHUB_OUTPUT}"
+          echo "arm_b_sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install locked target dependencies
+        working-directory: target
+        run: npm ci
+
+      - name: Install and build the base source
+        if: steps.comparison.outputs.has_base_harness == 'true'
+        working-directory: base
+        run: |
+          npm ci
+          npm run build
+
+      - name: Measure and evaluate provider performance
+        working-directory: target
+        run: xvfb-run -a npm run test:performance:ci
+        env:
+          VSCODE_VERSION: 1.135.0
+          VSCODE_TEST_NO_SANDBOX: '1'
+          VSCODE_H2O_PERFORMANCE_ARM_A_ROOT: ${{ steps.comparison.outputs.arm_a_root }}
+          VSCODE_H2O_PERFORMANCE_ARM_A_SHA: ${{ steps.comparison.outputs.arm_a_sha }}
+          VSCODE_H2O_PERFORMANCE_ARM_B_ROOT: ${{ steps.comparison.outputs.arm_b_root }}
+          VSCODE_H2O_PERFORMANCE_ARM_B_SHA: ${{ steps.comparison.outputs.arm_b_sha }}
+          VSCODE_H2O_PERFORMANCE_GATE_MODE: shadow
+
+      - name: Add performance results to the job summary
+        if: always()
+        shell: bash
+        run: |
+          summary="${GITHUB_WORKSPACE}/target/artifacts/provider-performance-summary.md"
+          if [[ -f "${summary}" ]]; then
+            cat "${summary}" >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload performance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: provider-performance-${{ github.sha }}
+          path: |
+            target/artifacts/provider-performance.json
+            target/artifacts/provider-performance-evaluation.json
+            target/artifacts/provider-performance-summary.md
+          if-no-files-found: warn
+          retention-days: 14
+
   quality-gate:
     name: Quality gate
     if: always()
@@ -206,6 +299,7 @@ jobs:
       - package-platforms
       - integration-linux
       - integration-macos-intel
+      - performance-shadow
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -215,6 +309,7 @@ jobs:
           PACKAGE_PLATFORMS: ${{ needs.package-platforms.result }}
           INTEGRATION_LINUX: ${{ needs.integration-linux.result }}
           INTEGRATION_MACOS_INTEL: ${{ needs.integration-macos-intel.result }}
+          PERFORMANCE_SHADOW: ${{ needs.performance-shadow.result }}
         run: |
           for result in "${UNIT_AND_PACKAGE}" "${PACKAGE_PLATFORMS}" "${INTEGRATION_LINUX}" "${INTEGRATION_MACOS_INTEL}"; do
             if [[ "${result}" != success ]]; then
@@ -222,3 +317,7 @@ jobs:
               exit 1
             fi
           done
+          if [[ "${PERFORMANCE_SHADOW}" != success && "${PERFORMANCE_SHADOW}" != skipped ]]; then
+            echo "The performance shadow job concluded with: ${PERFORMANCE_SHADOW}" >&2
+            exit 1
+          fi
