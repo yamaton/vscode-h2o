@@ -35,6 +35,18 @@ export const requiredExtensionFiles = [
   'extension/tree-sitter-bash.wasm',
 ];
 
+const bundledScannerFiles = new Set([
+  'extension/bin/h2o',
+  'extension/bin/profile.sb',
+  'extension/bin/wrap-h2o',
+]);
+
+export function requiredExtensionFilesForVsix(bundledScanner) {
+  return bundledScanner
+    ? requiredExtensionFiles
+    : requiredExtensionFiles.filter(file => !bundledScannerFiles.has(file));
+}
+
 const generatedExtensionFiles = [
   '[Content_Types].xml',
   'extension.vsixmanifest',

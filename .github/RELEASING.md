@@ -25,7 +25,7 @@ publish job to Microsoft Entra ID authentication before that date.
 3. Merge the version bump after the quality gate passes.
 
 The publish workflow verifies that the manifest and lockfile versions agree and increased from the previous `main`
-commit. It then re-runs the complete quality workflow, downloads its five verified platform-specific VSIX artifacts,
+commit. It then re-runs the complete quality workflow, downloads its seven verified platform-specific VSIX artifacts,
 verifies them again, and waits for approval on the `marketplace` environment. After approval it verifies Marketplace
 publishing rights, creates the immutable unprefixed version tag at the merged commit, publishes all targets together,
 and confirms the new Marketplace version.

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.3.1] (2026-08-30)
+
+- Publish Windows x64 and arm64 packages without H2O or local `--help` scanning. Downloaded and cached completion and hover data remain available, and Windows users are not prompted to enable local scans.
+
 ## [0.3.0] (2026-08-30)
 
 - Distribute platform-specific packages, adding Linux arm64, Alpine x64, and macOS arm64 support while retaining Linux x64 and macOS x64.

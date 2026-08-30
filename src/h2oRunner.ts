@@ -241,7 +241,6 @@ export interface H2oRuntime {
   extensionDir: string;
   platform: NodeJS.Platform;
   getConfiguredPath(): string;
-  showErrorMessage(message: string): void;
   execute(
     command: string,
     args: readonly string[],
@@ -249,7 +248,9 @@ export interface H2oRuntime {
   ): Promise<ProcessOutput>;
 }
 
-let neverNotifiedError = true;
+export function supportsLocalCommandScanning(platform: NodeJS.Platform = process.platform): boolean {
+  return platform === 'linux' || platform === 'darwin';
+}
 
 function createDefaultH2oRuntime(): H2oRuntime {
   // `vscode` is only available inside the extension host. Loading it lazily
@@ -259,9 +260,6 @@ function createDefaultH2oRuntime(): H2oRuntime {
     extensionDir: __dirname,
     platform: process.platform,
     getConfiguredPath: () => vscode.workspace.getConfiguration('shellCompletion').get('h2oPath') as string,
-    showErrorMessage: message => {
-      void vscode.window.showErrorMessage(message);
-    },
     execute: (command, args, options) => executeProcess(command, args, options),
   };
 }
@@ -271,16 +269,12 @@ export async function runH2o(
   runtime: H2oRuntime = createDefaultH2oRuntime(),
   signal?: AbortSignal,
 ): Promise<Command | undefined> {
+  if (!supportsLocalCommandScanning(runtime.platform)) {
+    return undefined;
+  }
+
   let h2opath = runtime.getConfiguredPath();
   if (h2opath === '<bundled>') {
-    if (runtime.platform !== 'linux' && runtime.platform !== 'darwin') {
-      if (neverNotifiedError) {
-        const message = 'Bundled help scanner (H2O) supports Linux and MacOS. Please set the H2O path.';
-        runtime.showErrorMessage(message);
-      }
-      neverNotifiedError = false;
-      return undefined;
-    }
     h2opath = path.join(runtime.extensionDir, '../bin/h2o');
   }
 

@@ -8,7 +8,9 @@
     "darwin-arm64": "aarch64-apple-darwin",
     "darwin-x64": "x86_64-apple-darwin",
     "linux-arm64": "aarch64-unknown-linux-gnu",
-    "linux-x64": "x86_64-unknown-linux-musl"
+    "linux-x64": "x86_64-unknown-linux-musl",
+    "win32-arm64": null,
+    "win32-x64": null
   },
   "assets": {
     "aarch64-apple-darwin": {

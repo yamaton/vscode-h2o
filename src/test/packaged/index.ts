@@ -27,6 +27,10 @@ async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Pro
 }
 
 export async function run(): Promise<void> {
+	const expectScannerlessWindows = process.env.VSCODE_H2O_EXPECT_SCANNERLESS_WINDOWS === '1';
+	if (expectScannerlessWindows) {
+		assert.strictEqual(process.platform, 'win32', 'the scannerless Windows smoke must run on Windows');
+	}
 	const extension = vscode.extensions.getExtension(extensionId);
 	assert.ok(extension, `${extensionId} must be installed from the VSIX`);
 	const completionConfiguration = vscode.workspace.getConfiguration('shellCompletion');
@@ -37,7 +41,7 @@ export async function run(): Promise<void> {
 	);
 	await completionConfiguration.update(
 		'scanUnknownCommands',
-		false,
+		expectScannerlessWindows ? undefined : false,
 		vscode.ConfigurationTarget.Global,
 	);
 
@@ -49,6 +53,26 @@ export async function run(): Promise<void> {
 
 	const packagedCacheFetcherModule = require(path.join(extensionPath, 'out/cacheFetcher.js')) as typeof import('../../cacheFetcher');
 	const packagedCachingFetcher = packagedCacheFetcherModule.CachingFetcher;
+	const packagedH2oRunnerModule = require(path.join(extensionPath, 'out/h2oRunner.js')) as {
+		runH2o: typeof import('../../h2oRunner').runH2o;
+	};
+	const originalRunH2o = packagedH2oRunnerModule.runH2o;
+	const packagedScanConsentModule = require(path.join(extensionPath, 'out/scanConsent.js')) as {
+		requestUnknownCommandScanConsent: typeof import('../../scanConsent').requestUnknownCommandScanConsent;
+	};
+	const originalRequestUnknownCommandScanConsent = packagedScanConsentModule.requestUnknownCommandScanConsent;
+	let scanConsentRequests = 0;
+	let localScanCalls = 0;
+	if (expectScannerlessWindows) {
+		packagedH2oRunnerModule.runH2o = async () => {
+			localScanCalls += 1;
+			return undefined;
+		};
+		packagedScanConsentModule.requestUnknownCommandScanConsent = async () => {
+			scanConsentRequests += 1;
+			return 'already-prompted';
+		};
+	}
 	const originalStartInitialCuratedFetch = packagedCachingFetcher.prototype.startInitialCuratedFetch;
 	packagedCachingFetcher.prototype.startInitialCuratedFetch = async () => undefined;
 	try {
@@ -57,6 +81,56 @@ export async function run(): Promise<void> {
 		packagedCachingFetcher.prototype.startInitialCuratedFetch = originalStartInitialCuratedFetch;
 	}
 	assert.strictEqual(extension.isActive, true);
+	if (expectScannerlessWindows) {
+		try {
+			assert.strictEqual(
+				scanConsentRequests,
+				0,
+				'the scannerless Windows package must not start the local scan consent flow',
+			);
+			await completionConfiguration.update(
+				'scanUnknownCommands',
+				true,
+				vscode.ConfigurationTarget.Global,
+			);
+			await completionConfiguration.update(
+				'enableCompletion',
+				true,
+				vscode.ConfigurationTarget.Global,
+			);
+			const unknownDocument = await vscode.workspace.openTextDocument({
+				language: 'shellscript',
+				content: 'vscode-h2o-scannerless-probe --v',
+			});
+			const unknownCaret = unknownDocument.positionAt(unknownDocument.getText().length);
+			await withTimeout(
+				vscode.commands.executeCommand<vscode.CompletionList>(
+					'vscode.executeCompletionItemProvider',
+					unknownDocument.uri,
+					unknownCaret,
+				),
+				10000,
+			);
+			assert.strictEqual(
+				localScanCalls,
+				0,
+				'the Windows Extension Host must ignore an enabled local scan setting',
+			);
+		} finally {
+			packagedH2oRunnerModule.runH2o = originalRunH2o;
+			packagedScanConsentModule.requestUnknownCommandScanConsent = originalRequestUnknownCommandScanConsent;
+			await completionConfiguration.update(
+				'scanUnknownCommands',
+				undefined,
+				vscode.ConfigurationTarget.Global,
+			);
+			await completionConfiguration.update(
+				'enableCompletion',
+				false,
+				vscode.ConfigurationTarget.Global,
+			);
+		}
+	}
 	const settings = extension.packageJSON.contributes.configuration.properties as Record<
 		string,
 		Record<string, unknown>
@@ -160,6 +234,29 @@ export async function run(): Promise<void> {
 			'the installed VSIX must parse a shell document and provide an option completion',
 		);
 		assert.strictEqual(fetchCalls, 1);
+
+		const hoverSource = 'git --vscode-h2o-packaged-smoke';
+		const hoverDocument = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: hoverSource,
+		});
+		const hoverPosition = new vscode.Position(0, hoverSource.indexOf('packaged'));
+		const hovers = await withTimeout(
+			vscode.commands.executeCommand<vscode.Hover[]>(
+				'vscode.executeHoverProvider',
+				hoverDocument.uri,
+				hoverPosition,
+			),
+			10000,
+		);
+		const hoverText = hovers
+			.flatMap(hover => hover.contents)
+			.map(content => typeof content === 'string' ? content : content.value)
+			.join('\n');
+		assert.ok(
+			hoverText.includes('packaged parser smoke option'),
+			'the installed VSIX must provide hover from cached command data',
+		);
 
 		const debugReport = await withTimeout(
 			vscode.commands.executeCommand<CaretDebugReport>('h2o.inspectCaretContext'),

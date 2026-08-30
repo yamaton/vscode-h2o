@@ -1211,7 +1211,6 @@ suite('runH2o', () => {
       extensionDir: '/extension/out',
       platform: 'linux',
       getConfiguredPath: () => '<bundled>',
-      showErrorMessage: () => undefined,
       execute,
     };
   }

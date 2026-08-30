@@ -1,7 +1,7 @@
 {
     "name": "vscode-h2o",
     "displayName": "Shell Script Command Completion",
-    "version": "0.3.0",
+    "version": "0.3.1",
     "description": "Complete shell commands and view inline help in shell scripts and BitBake files",
     "repository": {
         "url": "https://github.com/yamaton/vscode-h2o"
@@ -195,7 +195,7 @@
                     "type": "string",
                     "default": "<bundled>",
                     "scope": "machine",
-                    "markdownDescription": "Path on the Extension Host to the executable that parses local command `--help` output into command specifications. Use `<bundled>` for the parser packaged with the extension."
+                    "markdownDescription": "Path on a Linux, WSL, or macOS Extension Host to the executable that parses local command `--help` output into command specifications. Use `<bundled>` for the parser packaged with the extension. Local command scanning is unavailable on Windows."
                 },
                 "shellCompletion.maxDocumentCharacters": {
                     "type": "integer",
@@ -214,7 +214,7 @@
                     "type": "boolean",
                     "default": false,
                     "scope": "machine",
-                    "markdownDescription": "Whether commands missing from the command-specification cache may be executed with `--help` to generate specifications. Local scans are disabled by default; the extension offers this choice on activation when no explicit setting or prior response exists. Downloaded and cached specifications remain available when disabled."
+                    "markdownDescription": "Whether commands missing from the command-specification cache may be executed with `--help` to generate specifications on Linux, WSL, or macOS. Local scans are unavailable on Windows. They are disabled by default on supported hosts; the extension offers this choice on activation when no explicit setting or prior response exists. Downloaded and cached specifications remain available when disabled."
                 }
             }
         },

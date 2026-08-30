@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   compareExtensionFileContract,
   packagedExtensionFiles,
+  requiredExtensionFilesForVsix,
   sourceFileToExtensionPath,
 } from './lib/vsix-file-contract.mjs';
 
@@ -20,6 +21,9 @@ assert.deepStrictEqual(
     'extension/readme.md',
   ],
 );
+
+assert.ok(requiredExtensionFilesForVsix(true).includes('extension/bin/h2o'));
+assert.ok(!requiredExtensionFilesForVsix(false).some(file => file.startsWith('extension/bin/')));
 
 const contractFiles = [
   'extension/out/extension.js',

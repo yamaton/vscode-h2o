@@ -5,8 +5,11 @@ import { PassThrough } from 'stream';
 
 import {
   executeProcess,
-  ProcessExecutionDependencies,
+  type H2oRuntime,
+  type ProcessExecutionDependencies,
   ProcessExecutionError,
+  runH2o,
+  supportsLocalCommandScanning,
 } from '../../h2oRunner';
 
 class FakeChildProcess extends EventEmitter {
@@ -181,5 +184,29 @@ suite('asynchronous process execution', () => {
       fake.dependencies,
     ), hasFailureKind('aborted'));
     assert.strictEqual(fake.spawnOptions(), undefined);
+  });
+});
+
+suite('local command scanning support', () => {
+  test('supports only Unix hosts with bundled scanner packages', () => {
+    assert.strictEqual(supportsLocalCommandScanning('linux'), true);
+    assert.strictEqual(supportsLocalCommandScanning('darwin'), true);
+    assert.strictEqual(supportsLocalCommandScanning('win32'), false);
+  });
+
+  test('does not run a configured H2O executable on Windows', async () => {
+    let executions = 0;
+    const runtime: H2oRuntime = {
+      extensionDir: '/extension/out',
+      platform: 'win32',
+      getConfiguredPath: () => 'C:\\tools\\h2o.exe',
+      execute: async () => {
+        executions += 1;
+        return { stdout: '', stderr: '' };
+      },
+    };
+
+    assert.strictEqual(await runH2o('dir', runtime), undefined);
+    assert.strictEqual(executions, 0);
   });
 });

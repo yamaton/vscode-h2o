@@ -28,7 +28,7 @@ The common collection currently contains more than 400 command specifications, i
 
 When an installed command is not in the cache, the extension can create a specification from its `--help` output and save it for later use. The bundled command-help parser does not consult man pages.
 
-Local help scans are disabled by default. When the extension activates on an Extension Host with neither an explicit setting nor a recorded response, it asks whether it may run commands referenced by Shell Script or BitBake files with `--help` there. Choosing **Allow Local Scans** sets `shellCompletion.scanUnknownCommands` to `true`; choosing **Keep Disabled** or dismissing the notification leaves downloaded and previously cached specifications available without executing uncached commands.
+Local help scans are disabled by default. On Linux, WSL, and macOS, when the extension activates on an Extension Host with neither an explicit setting nor a recorded response, it asks whether it may run commands referenced by Shell Script or BitBake files with `--help` there. Choosing **Allow Local Scans** sets `shellCompletion.scanUnknownCommands` to `true`; choosing **Keep Disabled** or dismissing the notification leaves downloaded and previously cached specifications available without executing uncached commands. Windows packages do not include the scanner and do not offer this choice.
 
 You can change `shellCompletion.scanUnknownCommands` later in user settings, or in remote settings when using a remote Extension Host. The machine-scoped setting is not synchronized, and a workspace cannot override it.
 
@@ -86,7 +86,7 @@ For a compact view that follows caret movement, document edits, and hover reques
 
 While live inspection is enabled, a single status bar item shows only the high-level state, for example `H2O C✓ H— TS:word`. `C` is completion, `H` is hover, and `TS` is the tree-sitter node at the caret. Click it to reveal the debug views. The view toolbar can pause and resume updates. Each view also has an **Open Debug Snapshot** action that opens its full current data as a read-only virtual JSON document for searching and copying; live JSON is no longer streamed through an Output channel. Run **Shell Completion: Toggle Live Caret and Cursor Context** to disable or re-enable the interface.
 
-The executable that parses local command `--help` output can also be selected with the `shellCompletion.h2oPath` setting. Its default value, `<bundled>`, uses the parser packaged for the current platform. Like the unknown-command scan policy, this is a machine setting and is configured separately for a remote Extension Host.
+The executable that parses local command `--help` output can also be selected with the `shellCompletion.h2oPath` setting. On supported Extension Hosts, its default value, `<bundled>`, uses the parser packaged for the current platform. Windows packages do not include this parser. Like the unknown-command scan policy, this is a machine setting and is configured separately for a remote Extension Host.
 
 Completion suggestions can be enabled or disabled independently with `shellCompletion.enableCompletion`. This window-scoped setting can be configured in user, workspace, or remote settings; disabling it does not disable hover or remove cached specifications.
 
@@ -102,7 +102,7 @@ Completion and hover based on downloaded or previously cached command specificat
 | Linux on glibc-based distributions | arm64 | Supported |
 | macOS | x64, arm64 | Supported |
 | Alpine | arm64 | Not currently supported |
-| Windows | x64, arm64 | Not supported; use downloaded or cached specifications |
+| Windows | x64, arm64 | Not supported; the Windows packages omit the scanner and use downloaded or cached specifications |
 
 Remote environments such as WSL use the platform of their VS Code Extension Host to determine unknown-command scanning support. VS Code 1.101 or later is required.
 
@@ -149,5 +149,5 @@ To adjust suggestions from every provider instead, use VS Code's **Quick Suggest
 ## Known Limitations
 
 * BitBake support is experimental and requires another extension that provides the `bitbake` language mode.
-* Windows and Alpine arm64 Extension Hosts are not currently supported by the bundled scanner.
+* Windows packages do not include the scanner, and Alpine arm64 Extension Hosts are not currently supported by it.
 * Completion and hover information depend on either a cached curated specification or, when unknown-command scanning is enabled, successful extraction from the local command's `--help` output.
