@@ -48,6 +48,8 @@ const requiredFiles = [
   'extension/out/h2oRunner.js',
   'extension/out/parserLanguage.js',
   'extension/out/providerContext.js',
+  'extension/out/providerPerformance.js',
+  'extension/out/treeCache.js',
   'extension/out/utils.js',
   'extension/package.json',
   'extension/readme.md',
