@@ -45,6 +45,13 @@ export class CommandFetchCancelledError extends Error {
   }
 }
 
+export class UnknownCommandScanDisabledError extends Error {
+  constructor(message = 'Unknown command scanning is disabled by shellCompletion.scanUnknownCommands.') {
+    super(message);
+    this.name = 'UnknownCommandScanDisabledError';
+  }
+}
+
 type LocalFetchState = 'queued' | 'running' | 'persisting' | 'settled';
 
 interface LocalFetchEntry {
@@ -53,6 +60,7 @@ interface LocalFetchEntry {
   readonly promise: Promise<Command>;
   readonly resolve: (command: Command) => void;
   readonly reject: (error: unknown) => void;
+  abortError?: UnknownCommandScanDisabledError;
   state: LocalFetchState;
   subscribers: number;
 }
@@ -83,6 +91,7 @@ export class CachingFetcher {
   private readonly localFetches = new Map<string, LocalFetchEntry>();
   private readonly localFetchQueue: LocalFetchEntry[] = [];
   private activeLocalFetch: LocalFetchEntry | undefined;
+  private scanUnknownCommandsEnabled = true;
   private disposed = false;
 
   constructor(
@@ -203,6 +212,36 @@ export class CachingFetcher {
     await this.commitCacheUpdate(name, command, logging).persistence;
   }
 
+  public setScanUnknownCommands(enabled: boolean): void {
+    if (this.scanUnknownCommandsEnabled === enabled) {
+      return;
+    }
+    this.scanUnknownCommandsEnabled = enabled;
+    if (enabled) {
+      this.startNextLocalFetch();
+      return;
+    }
+
+    if (this.activeLocalFetch?.state === 'running'
+      && !this.activeLocalFetch.controller.signal.aborted) {
+      this.activeLocalFetch.abortError = new UnknownCommandScanDisabledError();
+      this.activeLocalFetch.controller.abort();
+    }
+    const error = new UnknownCommandScanDisabledError();
+    for (const entry of this.localFetchQueue) {
+      if (entry.state !== 'queued') {
+        continue;
+      }
+      entry.state = 'settled';
+      entry.controller.abort();
+      entry.reject(error);
+      if (this.localFetches.get(entry.name) === entry) {
+        this.localFetches.delete(entry.name);
+      }
+    }
+    this.localFetchQueue.length = 0;
+  }
+
 
   // Get command data from cache first, then run H2O if it is unavailable.
   public async fetch(name: string, cancellationToken?: CancellationTokenLike): Promise<Command> {
@@ -240,6 +279,9 @@ export class CachingFetcher {
 
     if (this.disposed || cancellationToken?.isCancellationRequested) {
       throw new CommandFetchCancelledError();
+    }
+    if (!this.scanUnknownCommandsEnabled) {
+      throw new UnknownCommandScanDisabledError();
     }
 
     let entry = this.localFetches.get(name);
@@ -292,7 +334,7 @@ export class CachingFetcher {
   }
 
   private startNextLocalFetch(): void {
-    if (this.activeLocalFetch || this.disposed) {
+    if (this.activeLocalFetch || this.disposed || !this.scanUnknownCommandsEnabled) {
       return;
     }
     let entry: LocalFetchEntry | undefined;
@@ -330,6 +372,9 @@ export class CachingFetcher {
     if (cached) {
       return cached;
     }
+    if (!this.scanUnknownCommandsEnabled) {
+      throw new UnknownCommandScanDisabledError();
+    }
 
     console.log('[CacheFetcher.fetch] Fetching from H2O:', entry.name);
     let command: Command | undefined;
@@ -338,14 +383,14 @@ export class CachingFetcher {
     } catch (error) {
       if (entry.controller.signal.aborted
         || (error instanceof ProcessExecutionError && error.kind === 'aborted')) {
-        throw new CommandFetchCancelledError();
+        throw entry.abortError ?? new CommandFetchCancelledError();
       }
       console.log('[CacheFetcher.fetch] Error:', error);
       throw new Error(`[CacheFetcher.fetch] Failed in CacheFetcher.update() with name = ${entry.name}`);
     }
 
     if (entry.controller.signal.aborted) {
-      throw new CommandFetchCancelledError();
+      throw entry.abortError ?? new CommandFetchCancelledError();
     }
     if (!command) {
       console.warn(`[CacheFetcher.fetch] Failed to fetch command ${entry.name} from H2O`);
@@ -371,7 +416,7 @@ export class CachingFetcher {
       return newlyCached;
     }
     if (entry.controller.signal.aborted) {
-      throw new CommandFetchCancelledError();
+      throw entry.abortError ?? new CommandFetchCancelledError();
     }
 
     entry.state = 'persisting';
@@ -391,7 +436,7 @@ export class CachingFetcher {
   ): Promise<Command> {
     while (true) {
       if (entry.controller.signal.aborted) {
-        throw new CommandFetchCancelledError();
+        throw entry.abortError ?? new CommandFetchCancelledError();
       }
       const observedRevision = this.cacheRevision;
       if (observedRevision === localRevision) {
@@ -412,7 +457,7 @@ export class CachingFetcher {
         continue;
       }
       if (entry.controller.signal.aborted) {
-        throw new CommandFetchCancelledError();
+        throw entry.abortError ?? new CommandFetchCancelledError();
       }
       const current = this.commands.get(entry.name);
       if (!current) {

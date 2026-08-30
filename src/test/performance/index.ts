@@ -408,6 +408,11 @@ export async function run(): Promise<void> {
   try {
     const extension = vscode.extensions.getExtension(extensionId);
     assert.ok(extension, `${extensionId} must be installed in the Extension Host`);
+    await vscode.workspace.getConfiguration('shellCompletion').update(
+      'scanUnknownCommands',
+      true,
+      vscode.ConfigurationTarget.Global,
+    );
     const activation = await measureWithEventLoopDelay(() => extension.activate());
     await vscode.workspace.getConfiguration('shellCompletion').update(
       'maxDocumentCharacters',
@@ -417,6 +422,9 @@ export async function run(): Promise<void> {
     const maximumDocumentCharacters = vscode.workspace
       .getConfiguration('shellCompletion')
       .get<number>('maxDocumentCharacters');
+    const scanUnknownCommands = vscode.workspace
+      .getConfiguration('shellCompletion')
+      .get<boolean>('scanUnknownCommands');
 
     const scenarios: ScenarioReport[] = [activationScenario(activationProfile, activation)];
     if (suite === 'provider') {
@@ -473,6 +481,7 @@ export async function run(): Promise<void> {
       },
       configuration: {
         maximumDocumentCharacters,
+        scanUnknownCommands,
         providerFixture: 'deterministic-local-command-v2',
         activationFixture: preparedActivationFixture,
         eventLoopProbeIntervalMs,

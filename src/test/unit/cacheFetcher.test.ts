@@ -6,6 +6,7 @@ import {
   CachingFetcher,
   CachingFetcherDependencies,
   CommandFetchCancelledError,
+  UnknownCommandScanDisabledError,
 } from '../../cacheFetcher';
 import {
   CommandCacheSnapshot,
@@ -163,6 +164,105 @@ suite('CachingFetcher', () => {
 
     assert.deepStrictEqual(await fetcher.fetch('git'), cached);
     assert.strictEqual(localCalls, 0);
+  });
+
+  test('uses cached commands without scanning when unknown-command scans are disabled', async () => {
+    const cached = command('git', 'cached');
+    const storage = new FakeCacheStorage({
+      version: commandCacheSnapshotVersion,
+      commands: [cached],
+    });
+    let localCalls = 0;
+    const fetcher = new CachingFetcher(new FakeMemento(), dependencies({
+      cacheStorage: storage,
+      runLocalCommand: async name => {
+        localCalls += 1;
+        return command(name, 'local');
+      },
+    }));
+    await fetcher.init();
+    fetcher.setScanUnknownCommands(false);
+
+    assert.deepStrictEqual(await fetcher.fetch('git'), cached);
+    await assert.rejects(
+      fetcher.fetch('npm'),
+      error => error instanceof UnknownCommandScanDisabledError,
+    );
+    assert.strictEqual(localCalls, 0);
+    assert.strictEqual(storage.saves.length, 0);
+  });
+
+  test('uses newly available curated commands without scanning when scans are disabled', async () => {
+    let localCalls = 0;
+    const fetcher = new CachingFetcher(new FakeMemento(), dependencies({
+      fetch: async () => responseWithGzip([command('git', 'curated')]),
+      runLocalCommand: async name => {
+        localCalls += 1;
+        return command(name, 'local');
+      },
+    }));
+    await fetcher.init();
+    fetcher.setScanUnknownCommands(false);
+
+    const initialFetch = fetcher.startInitialCuratedFetch();
+    assert.deepStrictEqual(await fetcher.fetch('git'), command('git', 'curated'));
+    await initialFetch;
+    assert.strictEqual(localCalls, 0);
+  });
+
+  test('scans a later cache miss after unknown-command scans are re-enabled', async () => {
+    let localCalls = 0;
+    const fetcher = new CachingFetcher(new FakeMemento(), dependencies({
+      runLocalCommand: async name => {
+        localCalls += 1;
+        return command(name, 'local');
+      },
+    }));
+    await fetcher.init();
+    fetcher.setScanUnknownCommands(false);
+
+    await assert.rejects(
+      fetcher.fetch('git'),
+      error => error instanceof UnknownCommandScanDisabledError,
+    );
+    fetcher.setScanUnknownCommands(true);
+    assert.deepStrictEqual(await fetcher.fetch('git'), command('git', 'local'));
+    assert.strictEqual(localCalls, 1);
+  });
+
+  test('aborts a running scan and rejects queued scans when scans are disabled', async () => {
+    const scans = new Map<string, ReturnType<typeof deferred<Command | undefined>>>();
+    const signals = new Map<string, AbortSignal>();
+    const invocations: string[] = [];
+    const fetcher = new CachingFetcher(new FakeMemento(), dependencies({
+      runLocalCommand: (name, signal) => {
+        invocations.push(name);
+        signals.set(name, signal);
+        const scan = deferred<Command | undefined>();
+        scans.set(name, scan);
+        signal.addEventListener('abort', () => scan.resolve(undefined), { once: true });
+        return scan.promise;
+      },
+    }));
+    await fetcher.init();
+
+    const running = fetcher.fetch('git');
+    const queued = fetcher.fetch('npm');
+    const runningRejection = assert.rejects(
+      running,
+      error => error instanceof UnknownCommandScanDisabledError,
+    );
+    const queuedRejection = assert.rejects(
+      queued,
+      error => error instanceof UnknownCommandScanDisabledError,
+    );
+    assert.deepStrictEqual(invocations, ['git']);
+
+    fetcher.setScanUnknownCommands(false);
+    assert.strictEqual(signals.get('git')?.aborted, true);
+    await Promise.all([runningRejection, queuedRejection]);
+    assert.deepStrictEqual(invocations, ['git']);
+    assert.deepStrictEqual(fetcher.getList(), []);
   });
 
   test('deletes legacy Memento state concurrently without reading payloads', async () => {

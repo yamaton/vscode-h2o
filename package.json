@@ -194,7 +194,8 @@
                 "shellCompletion.h2oPath": {
                     "type": "string",
                     "default": "<bundled>",
-                    "description": "Path to the H2O executable. Enter <bundled> if using the bundled."
+                    "scope": "machine",
+                    "markdownDescription": "Path to the H2O executable on the Extension Host. Use `<bundled>` for the scanner packaged with the extension."
                 },
                 "shellCompletion.maxDocumentCharacters": {
                     "type": "integer",
@@ -202,6 +203,12 @@
                     "default": 1048576,
                     "scope": "resource",
                     "description": "Maximum Shell or BitBake document size, in UTF-16 characters, for parser-backed completion, hover, and debug features. Set to 0 for no limit."
+                },
+                "shellCompletion.scanUnknownCommands": {
+                    "type": "boolean",
+                    "default": true,
+                    "scope": "machine",
+                    "markdownDescription": "Whether commands missing from the command-specification cache may be executed with `--help` to generate specifications. Disable to use only downloaded or cached specifications."
                 }
             }
         },

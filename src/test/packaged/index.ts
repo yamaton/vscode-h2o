@@ -46,6 +46,24 @@ export async function run(): Promise<void> {
 		packagedCachingFetcher.prototype.startInitialCuratedFetch = originalStartInitialCuratedFetch;
 	}
 	assert.strictEqual(extension.isActive, true);
+	const settings = extension.packageJSON.contributes.configuration.properties as Record<
+		string,
+		Record<string, unknown>
+	>;
+	assert.deepStrictEqual(
+		{
+			type: settings['shellCompletion.scanUnknownCommands']?.type,
+			default: settings['shellCompletion.scanUnknownCommands']?.default,
+			scope: settings['shellCompletion.scanUnknownCommands']?.scope,
+		},
+		{ type: 'boolean', default: true, scope: 'machine' },
+		'the installed VSIX must expose the unknown-command scan policy as a machine setting',
+	);
+	assert.strictEqual(
+		settings['shellCompletion.h2oPath']?.scope,
+		'machine',
+		'the installed VSIX must keep the scanner executable path outside workspace settings',
+	);
 	const commands = new Set(await vscode.commands.getCommands(true));
 	for (const command of [
 		'h2o.clearCache',

@@ -79,6 +79,13 @@ function decisionState(decision: LiveDebugProviderDecision): {
   description: string;
   icon: string;
 } {
+  if (decision.lookupSkippedReason === 'unknown-command-scanning-disabled') {
+    return {
+      label: 'Lookup',
+      description: 'Skipped: unknown-command scanning disabled',
+      icon: 'circle-slash',
+    };
+  }
   if (decision.lookupError) {
     return { label: 'Analysis', description: 'Lookup error', icon: 'warning' };
   }

@@ -1,7 +1,11 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import { Language, Node, Parser, Point, Tree } from 'web-tree-sitter';
-import { CachingFetcher, CommandFetchCancelledError } from './cacheFetcher';
+import {
+  CachingFetcher,
+  CommandFetchCancelledError,
+  UnknownCommandScanDisabledError,
+} from './cacheFetcher';
 import { GzipCommandCacheStorage } from './cacheStorage';
 import { Option, Command } from './command';
 import {
@@ -200,6 +204,7 @@ export interface DebugProviderDecision {
   commandNode: DebugNode | null;
   invocation: DebugInvocation | null;
   resolution: DebugResolution | null;
+  lookupSkippedReason: 'unknown-command-scanning-disabled' | null;
   lookupError: string | null;
 }
 
@@ -243,6 +248,7 @@ export interface LiveDebugProviderDecision {
   resolvedNode: LiveDebugNode;
   invocation: DebugInvocation | null;
   resolution: DebugResolution | null;
+  lookupSkippedReason: DebugProviderDecision['lookupSkippedReason'];
   lookupError: string | null;
 }
 
@@ -390,7 +396,19 @@ async function registerExtension(
         }
       : { cacheStorage },
   );
+  const updateUnknownCommandScanPolicy = (): void => {
+    const enabled = vscode.workspace
+      .getConfiguration('shellCompletion')
+      .get<boolean>('scanUnknownCommands', true);
+    fetcher.setScanUnknownCommands(enabled);
+  };
+  updateUnknownCommandScanPolicy();
   activationRegistrations.push(fetcher);
+  activationRegistrations.push(vscode.workspace.onDidChangeConfiguration(event => {
+    if (event.affectsConfiguration('shellCompletion.scanUnknownCommands')) {
+      updateUnknownCommandScanPolicy();
+    }
+  }));
   await fetcher.init();
   if (providerFixtureEnabled) {
     activationRegistrations.push(vscode.commands.registerCommand(
@@ -549,6 +567,10 @@ async function registerExtension(
                 trackLiveCompletionResult(liveTraceRequest, 'cancelled', { itemCount: 0 });
                 return [];
               }
+              if (e instanceof UnknownCommandScanDisabledError) {
+                trackLiveCompletionResult(liveTraceRequest, 'items', { itemCount: 0 });
+                return [];
+              }
               console.warn("[Completion] No completion item is available (1)", e);
               trackLiveCompletionResult(liveTraceRequest, 'error', {
                 itemCount: 0,
@@ -622,6 +644,10 @@ async function registerExtension(
           } catch (e) {
             if (e instanceof CommandFetchCancelledError) {
               trackLiveHoverResult(liveTraceRequest, 'cancelled');
+              return undefined;
+            }
+            if (e instanceof UnknownCommandScanDisabledError) {
+              trackLiveHoverResult(liveTraceRequest, 'none');
               return undefined;
             }
             trackLiveHoverResult(liveTraceRequest, 'error', debugError(e));
@@ -1685,6 +1711,7 @@ async function inspectProviderDecision(
     commandNode: commandNode ? debugNode(commandNode) : null,
     invocation: null,
     resolution: null,
+    lookupSkippedReason: null,
     lookupError: null,
   };
 
@@ -1720,7 +1747,11 @@ async function inspectProviderDecision(
       includeArgumentAtPosition,
     );
     report.invocation = invocation ? debugInvocation(invocation) : null;
-    report.lookupError = debugError(error);
+    if (error instanceof UnknownCommandScanDisabledError) {
+      report.lookupSkippedReason = 'unknown-command-scanning-disabled';
+    } else {
+      report.lookupError = debugError(error);
+    }
   }
   return report;
 }
@@ -1800,6 +1831,7 @@ function providerComparisonProjection(decision: DebugProviderDecision): unknown 
     },
     invocation: decision.invocation,
     resolution: decision.resolution,
+    lookupSkippedReason: decision.lookupSkippedReason,
     lookupError: decision.lookupError,
   };
 }
@@ -1878,6 +1910,7 @@ function liveProviderDecision(
     resolvedNode: liveDebugNode(decision.resolvedNode),
     invocation: decision.invocation,
     resolution: decision.resolution,
+    lookupSkippedReason: decision.lookupSkippedReason,
     lookupError: decision.lookupError,
   };
 }

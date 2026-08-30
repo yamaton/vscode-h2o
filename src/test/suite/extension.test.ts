@@ -44,6 +44,7 @@ interface InitialCuratedProbe {
 let initialCuratedProbe: InitialCuratedProbe | undefined;
 let registeredCompletionProvider: vscode.CompletionItemProvider | undefined;
 let registeredHoverProvider: vscode.HoverProvider | undefined;
+let activatedFetcher: CachingFetcher | undefined;
 
 async function withTimeout<T>(operation: PromiseLike<T>, timeoutMs: number): Promise<T> {
 	let timeout: NodeJS.Timeout | undefined;
@@ -85,6 +86,7 @@ async function activateExtension(): Promise<vscode.Extension<unknown>> {
 	const body = gzipSync(JSON.stringify(commands));
 
 	CachingFetcher.prototype.startInitialCuratedFetch = function startInitialCuratedFetch(kind = 'general'): Promise<void> {
+		activatedFetcher = this;
 		const internals = this as unknown as {
 			dependencies: CachingFetcherDependencies;
 		};
@@ -675,6 +677,104 @@ async function verifyProviderCancellationPropagation(): Promise<void> {
 		hoverCancellation.dispose();
 	} finally {
 		CachingFetcher.prototype.fetch = originalFetch;
+	}
+}
+
+async function verifyUnknownCommandScanConfiguration(): Promise<void> {
+	assert.ok(activatedFetcher, 'activation must expose the configured command fetcher');
+	assert.ok(registeredCompletionProvider);
+	assert.ok(registeredHoverProvider);
+	const configuration = vscode.workspace.getConfiguration('shellCompletion');
+	const originalGlobalValue = configuration.inspect<boolean>('scanUnknownCommands')?.globalValue;
+	const internals = activatedFetcher as unknown as {
+		dependencies: CachingFetcherDependencies;
+	};
+	const originalDependencies = internals.dependencies;
+	const commandName = `vscode-h2o-scan-setting-${process.pid}`;
+	let localCalls = 0;
+	internals.dependencies = {
+		...originalDependencies,
+		runLocalCommand: async name => {
+			localCalls += 1;
+			return {
+				name,
+				description: 'dynamic unknown-command scan setting fixture',
+				options: [{
+					names: ['--scan-setting-enabled'],
+					argument: '',
+					description: 'Only returned after unknown-command scanning is enabled',
+				}],
+			};
+		},
+	};
+
+	try {
+		await configuration.update(
+			'scanUnknownCommands',
+			false,
+			vscode.ConfigurationTarget.Global,
+		);
+		assert.strictEqual(
+			vscode.workspace.getConfiguration('shellCompletion').get('scanUnknownCommands'),
+			false,
+		);
+
+		const document = await vscode.workspace.openTextDocument({
+			language: 'shellscript',
+			content: `${commandName} --scan-`,
+		});
+		const position = document.positionAt(document.getText().length);
+		const cancellation = new vscode.CancellationTokenSource();
+		try {
+			const completion = await Promise.resolve(registeredCompletionProvider.provideCompletionItems(
+				document,
+				position,
+				cancellation.token,
+				{ triggerKind: vscode.CompletionTriggerKind.Invoke, triggerCharacter: undefined },
+			));
+			const items = Array.isArray(completion) ? completion : completion?.items ?? [];
+			assert.strictEqual(items.length, 0);
+
+			const hover = await Promise.resolve(registeredHoverProvider.provideHover(
+				document,
+				new vscode.Position(0, 1),
+				cancellation.token,
+			));
+			assert.strictEqual(hover, undefined);
+		} finally {
+			cancellation.dispose();
+		}
+		assert.strictEqual(localCalls, 0);
+
+		const editor = await vscode.window.showTextDocument(document, { preview: false });
+		editor.selection = new vscode.Selection(position, position);
+		const report = await vscode.commands.executeCommand<CaretDebugReport>('h2o.inspectCaretContext');
+		assert.ok(report);
+		for (const tree of [report.cached, report.fresh]) {
+			assert.strictEqual(
+				tree.completion.lookupSkippedReason,
+				'unknown-command-scanning-disabled',
+			);
+			assert.strictEqual(tree.completion.lookupError, null);
+		}
+		assert.strictEqual(localCalls, 0);
+
+		await configuration.update(
+			'scanUnknownCommands',
+			true,
+			vscode.ConfigurationTarget.Global,
+		);
+		const enabledCompletion = await completionLabelsAt(document, position);
+		assert.ok(enabledCompletion.labels.includes('--scan-setting-enabled'));
+		assert.strictEqual(localCalls, 1);
+	} finally {
+		await activatedFetcher.unset(commandName);
+		internals.dependencies = originalDependencies;
+		await configuration.update(
+			'scanUnknownCommands',
+			originalGlobalValue,
+			vscode.ConfigurationTarget.Global,
+		);
 	}
 }
 
@@ -3063,6 +3163,7 @@ suite('Parser and provider behavior', () => {
 	});
 	test('owns provider tree copies across document races', async () => verifyProviderTreeOwnership(parser));
 	test('propagates provider cancellation into command lookup', verifyProviderCancellationPropagation);
+	test('applies unknown-command scan settings without reloading the extension', verifyUnknownCommandScanConfiguration);
 	test('resolves normal hover misses without rejecting', verifyHoverNoResultContract);
 	test('separates command names from command-spec resolution', verifyCommandNameCompletionLifecycle);
 	test('keeps live completion debug aligned with command-name completion', verifyCommandNameLiveDebugDoesNotResolvePrefixes);

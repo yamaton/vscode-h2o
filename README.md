@@ -26,6 +26,8 @@ The common collection currently contains more than 400 command specifications, i
 
 When an installed command is not in the cache, the extension can create a specification from its `--help` output and save it for later use. The bundled scanner does not consult man pages.
 
+Set `shellCompletion.scanUnknownCommands` to `false` to prevent these local help scans. Downloaded and previously cached specifications remain available. The setting applies to the machine running the VS Code Extension Host, including an individual remote environment, and a workspace cannot override it.
+
 To request another curated command specification, [open a request in h2o-curated-data](https://github.com/yamaton/h2o-curated-data/issues/1).
 
 ### Bioinformatics Commands
@@ -70,7 +72,7 @@ For completion debugging, or to inspect how hover would resolve at the insertion
 * the command invocation, resolved subcommand path, aliases, and resolver stop reason used by completion and hover; and
 * the same observations from the incrementally cached tree and a fresh parse, with equivalence results for quick comparison.
 
-The inspection follows the normal provider lookup path, so inspecting a command may populate its regenerable command-specification cache.
+The inspection follows the normal provider lookup path, so inspecting a command may populate its regenerable command-specification cache when unknown-command scanning is enabled.
 
 For a compact view that follows caret movement, document edits, and hover requests, run **Shell Completion: Show Live Debug Views**. The **H2O Debug** panel separates the live information into three views:
 
@@ -80,7 +82,7 @@ For a compact view that follows caret movement, document edits, and hover reques
 
 While live inspection is enabled, a single status bar item shows only the high-level state, for example `H2O C✓ H— TS:word`. `C` is completion, `H` is hover, and `TS` is the tree-sitter node at the caret. Click it to reveal the debug views. The view toolbar can pause and resume updates. Each view also has an **Open Debug Snapshot** action that opens its full current data as a read-only virtual JSON document for searching and copying; live JSON is no longer streamed through an Output channel. Run **Shell Completion: Toggle Live Caret and Cursor Context** to disable or re-enable the interface.
 
-The H2O executable can also be selected with the `shellCompletion.h2oPath` setting. Its default value, `<bundled>`, uses the scanner packaged for the current platform.
+The H2O executable can also be selected with the `shellCompletion.h2oPath` setting. Its default value, `<bundled>`, uses the scanner packaged for the current platform. Like the unknown-command scan policy, this is a machine setting and is configured separately for a remote Extension Host.
 
 Parser-backed completion, hover, and debug features are enabled by default for Shell Script and BitBake documents up to 1,048,576 UTF-16 characters. Use `shellCompletion.maxDocumentCharacters` to change this per workspace or workspace folder; set it to `0` to remove the limit.
 
@@ -103,7 +105,7 @@ Remote environments such as WSL use the platform of their VS Code Extension Host
 * [tree-sitter](https://tree-sitter.github.io/tree-sitter/) identifies the command, subcommand, and option at the provider's requested position.
 * The extension first looks for a command specification in its in-memory cache, restored from a compressed snapshot in VS Code global storage. This on-disk cache is regenerable and is not synchronized through Settings Sync.
 * The common curated collection is downloaded in the background when the extension activates. Existing cached entries are preserved unless you explicitly reload the collection.
-* For an unknown command available in the local environment, the bundled [H2O](https://github.com/yamaton/h2o) scanner runs `<command> --help`, parses the output, and caches the result.
+* When `shellCompletion.scanUnknownCommands` is enabled, an unknown command available in the local environment is passed to the bundled [H2O](https://github.com/yamaton/h2o) scanner, which runs `<command> --help`, parses the output, and caches the result.
 * Network requests and local help scans have a 10-second timeout.
 
 When upgrading from a version that stored command specifications in VS Code global state, the extension discards those legacy cache entries instead of migrating them. It then rebuilds the cache from curated data or locally scanned help output.
@@ -111,6 +113,8 @@ When upgrading from a version that stored command specifications in VS Code glob
 ## Security
 
 Creating a specification for an unknown command executes that command with `--help`. A program found in an untrusted local environment could therefore present a risk.
+
+To prevent the extension from executing commands that are absent from its specification cache, set `shellCompletion.scanUnknownCommands` to `false` in user settings, or in remote settings when using a remote Extension Host. Changing the setting stops queued help scans and terminates a running scan; it does not delete downloaded or previously cached specifications.
 
 The extension uses an operating-system sandbox when one is available:
 
@@ -126,7 +130,7 @@ If the sandbox tool for the current platform is unavailable, the help scan runs 
 1. Confirm that the active editor language mode is **Shell Script** or **BitBake**.
 2. If the command is in [general.txt](https://github.com/yamaton/h2o-curated-data/blob/main/general.txt), run **Shell Completion: Load All Common CLI Specs**.
 3. If it is in [bio.txt](https://github.com/yamaton/h2o-curated-data/blob/main/bio.txt), run **Shell Completion: Load All Bioinformatics CLI Specs**.
-4. To discard a stale cached specification, run **Shell Completion: Remove Command Spec** and enter the command name. The next completion or hover request will try to recreate it from the local command.
+4. To discard a stale cached specification, run **Shell Completion: Remove Command Spec** and enter the command name. If `shellCompletion.scanUnknownCommands` is enabled, the next completion or hover request will try to recreate it from the local command.
 
 Dynamic extraction can still fail when the command is unavailable on `PATH`, its help invocation exits unsuccessfully, or its output cannot be parsed.
 
@@ -140,4 +144,4 @@ These settings affect other language modes as well.
 
 * BitBake support is experimental and requires another extension that provides the `bitbake` language mode.
 * Windows and Alpine arm64 Extension Hosts are not currently supported by the bundled scanner.
-* Completion and hover information depend on either a cached curated specification or successful extraction from the local command's `--help` output.
+* Completion and hover information depend on either a cached curated specification or, when unknown-command scanning is enabled, successful extraction from the local command's `--help` output.
